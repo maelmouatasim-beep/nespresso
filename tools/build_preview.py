@@ -27,6 +27,11 @@ from app.ingestion.fixtures_loader import build_forecast_inputs, load_fixture_di
 FIXTURE = ROOT / "tests" / "fixtures" / "b80_2026-10-05"
 TEMPLATE = Path(__file__).with_name("preview_template.html")
 OUTPUT = ROOT / "preview" / "apercu_B80.html"
+ARTIFACT_OUTPUT = ROOT / "preview" / "artifact_B80.html"  # sans squelette, pour claude.ai
+SKELETON = (
+    '<!doctype html>\n<html lang="fr">\n<head>\n<meta charset="utf-8">\n'
+    '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
+)
 COVERS = [x / 2 for x in range(2, 43)]  # 1 à 21 jours, pas de 0,5
 
 
@@ -117,7 +122,12 @@ def build() -> Path:
         "/*__DATA__*/null", json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
     )
     OUTPUT.parent.mkdir(exist_ok=True)
-    OUTPUT.write_text(html, encoding="utf-8")
+    head, _, body = html.partition("</style>\n")
+    OUTPUT.write_text(
+        SKELETON + head + "</style>\n</head>\n<body>\n" + body + "</body>\n</html>\n",
+        encoding="utf-8",
+    )
+    ARTIFACT_OUTPUT.write_text(html, encoding="utf-8")
     return OUTPUT
 
 

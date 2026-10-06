@@ -1,8 +1,3 @@
-<!doctype html>
-<html lang="fr">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Aperçu commande B80</title>
 <style>
 :root {
@@ -17,6 +12,7 @@
     --border: #3a352f; --accent: #e0a874; --accent-soft: #3a2b1f;
     --ok: #8fd19e; --ok-bg: #1f3324; --review: #f2c46b; --review-bg: #3a2f17;
     --blocked: #f19a9a; --blocked-bg: #3d1f1f; --diff: #3a3417;
+    color-scheme: dark;
   }
 }
 :root[data-theme="dark"] {
@@ -24,11 +20,12 @@
   --border: #3a352f; --accent: #e0a874; --accent-soft: #3a2b1f;
   --ok: #8fd19e; --ok-bg: #1f3324; --review: #f2c46b; --review-bg: #3a2f17;
   --blocked: #f19a9a; --blocked-bg: #3d1f1f; --diff: #3a3417;
+  color-scheme: dark;
 }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--text);
   font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
-.wrap { max-width: 1280px; margin: 0 auto; padding: 20px 16px 80px; }
+.wrap { max-width: 1280px; margin: 0 auto; padding: 20px 16px 80px; min-width: 0; }
 h1 { font-size: 20px; margin: 0 0 4px; }
 .sub { color: var(--muted); margin: 0 0 16px; }
 .banner { background: var(--accent-soft); border: 1px solid var(--border); border-radius: 10px;
@@ -74,7 +71,7 @@ td.diff { background: var(--diff); }
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; }
 .muted { color: var(--muted); }
 .unrel { color: var(--review); font-weight: 700; }
-#panel { position: fixed; right: 16px; top: 16px; bottom: 16px; width: min(420px, calc(100vw - 32px));
+#panel { position: fixed; right: 16px; top: calc(16px + env(safe-area-inset-top, 0px)); bottom: calc(16px + env(safe-area-inset-bottom, 0px)); width: min(420px, calc(100vw - 32px));
   background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 16px;
   overflow-y: auto; box-shadow: 0 10px 40px rgba(0,0,0,.25); display: none; z-index: 5; }
 #panel.open { display: block; }
@@ -92,11 +89,9 @@ footer { color: var(--muted); font-size: 12px; margin-top: 16px; }
   body.panel-open .wrap { margin-right: 452px; max-width: none; }
 }
 @media (max-width: 640px) {
-  #panel { left: 8px; right: 8px; top: auto; bottom: 8px; width: auto; max-height: 75vh; }
+  #panel { left: 8px; right: 8px; top: auto; bottom: calc(8px + env(safe-area-inset-bottom, 0px)); width: auto; max-height: 75vh; }
 }
 </style>
-</head>
-<body>
 <div class="wrap">
   <h1 id="title">Aperçu de commande</h1>
   <p class="sub" id="subtitle"></p>
@@ -135,7 +130,8 @@ footer { color: var(--muted); font-size: 12px; margin-top: 16px; }
     <label class="chk"><input type="checkbox" id="onlyQty"> Qty &gt; 0 seulement</label>
     <label class="chk"><input type="checkbox" id="onlyDiff"> Écarts vs Excel</label>
     <span class="grow"></span>
-    <button class="btn" id="dl">Télécharger le fichier LT</button>
+    <span id="copied" class="muted" style="font-size:12px" aria-live="polite"></span>
+    <button class="btn" id="dl">Copier le contenu LT</button>
   </div>
 
   <div class="tablewrap">
@@ -152,7 +148,7 @@ footer { color: var(--muted); font-size: 12px; margin-top: 16px; }
   <p class="muted" id="count" style="font-size:12px"></p>
 
   <details>
-    <summary>Contenu du fichier LT (format Nessoft <span class="mono">SKU;QTY</span>)</summary>
+    <summary id="ltsum">Contenu du fichier LT (format Nessoft <span class="mono">SKU;QTY</span>)</summary>
     <pre class="lt mono" id="lt"></pre>
   </details>
 
@@ -317,13 +313,19 @@ function renderPanel() {
 }
 
 document.getElementById("dl").onclick = () => {
-  const d = new Date(), mon = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][d.getMonth()];
-  const pad = n => String(n).padStart(2, "0");
-  const name = M.boutique + " " + pad(d.getDate()) + "-" + mon + "-" + d.getFullYear() + "-" + pad(d.getHours()) + "_" + pad(d.getMinutes()) + ".csv";
+  const text = ltLines().join("\r\n");
+  const msg = document.getElementById("copied"), det = document.querySelector("details");
+  const fallback = () => {
+    det.open = true;
+    const r = document.createRange(); r.selectNodeContents(document.getElementById("lt"));
+    const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r);
+    msg.textContent = "Texte sélectionné : fais Ctrl+C pour le copier.";
+  };
   try {
-    const blob = new Blob([ltLines().join("\r\n") + "\r\n"], { type: "text/csv" });
-    const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name; a.click();
-  } catch (e) { document.querySelector("details").open = true; }
+    navigator.clipboard.writeText(text).then(
+      () => { msg.textContent = ltLines().length + " lignes copiées (format SKU;QTY)."; },
+      fallback);
+  } catch (e) { fallback(); }
 };
 
 document.getElementById("title").textContent = "Aperçu de commande — " + M.boutique + " (DC " + M.dc + ")";
@@ -331,5 +333,3 @@ document.getElementById("subtitle").textContent = "Run du " + M.run_date + " · 
 document.getElementById("foot").textContent = "Moteur " + M.rule_version + " · aucune quantité n'est calculée par le navigateur ni par une IA.";
 render();
 </script>
-</body>
-</html>
