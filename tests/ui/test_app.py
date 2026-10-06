@@ -70,3 +70,26 @@ def test_search_then_override_through_engine(app: AppTest) -> None:
     )
     final = with_overrides(base, [ov], {})
     assert next(x for x in final.lines if x.sku == "7005.70").qty == 3600
+
+
+def test_day_tab_requires_cover_per_boutique(app: AppTest) -> None:
+    app.button(key="load_demo").click().run()
+    assert not app.exception
+    # 2026-10-05 est un lundi : B80 ne commande pas selon le Schedule ; on l'ajoute à la main.
+    day_select = next(m for m in app.multiselect if m.key.startswith("day_btq_"))
+    day_select.set_value(["B80"]).run()
+    app.button(key="day_compute").click().run()
+    assert not app.exception
+    assert any("jours de couverture manquants" in e.value for e in app.error)
+
+
+def test_summary_offers_excel_and_rule_free_run(app: AppTest) -> None:
+    app.button(key="load_demo").click().run()
+    app.text_input(key="author").input("Planner Test").run()
+    app.date_input(key="delivery_date").set_value(date(2026, 10, 8)).run()
+    app.number_input(key="cover").set_value(9.0).run()
+    app.button(key="compute").click().run()
+    assert not app.exception
+    res = app.session_state["base"]
+    assert res.rule_warnings == []
+    assert res.history_days == 7

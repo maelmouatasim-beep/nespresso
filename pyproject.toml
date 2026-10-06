@@ -18,6 +18,8 @@ dependencies = [
 dev = [
     "pytest>=8",
     "ruff>=0.6",
+    "mypy>=1.10",
+    "pandas-stubs",
 ]
 
 [tool.setuptools.packages.find]
@@ -38,3 +40,12 @@ select = ["E", "F", "I", "B", "UP", "SIM"]
 [tool.ruff.lint.per-file-ignores]
 # Mise en page de l'interface : lignes longues tolérées.
 "app/ui/main.py" = ["E501"]
+
+[tool.mypy]
+python_version = "3.12"
+files = ["app/domain", "app/engines"]
+plugins = ["pydantic.mypy"]
+disallow_untyped_defs = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+no_implicit_optional = true

@@ -24,4 +24,7 @@ correspondant est signalé (REVIEW / BLOCKED) ou documenté, jamais appliqué en
 | Q-017 | Noms exacts des colonnes de l'export Power BI **Stock Movements** brut (aucun export fourni) | Plusieurs noms acceptés (`app/ingestion/powerbi.py`) ; à vérifier sur un vrai fichier | Planner |
 | Q-018 | Noms exacts des onglets et en-têtes du calculateur `.xlsm` | Plusieurs noms acceptés ; `--inspect` pour les voir | Planner |
 | Q-019 | Mode par défaut dans l'interface : Safe (choix actuel) ou Parité Excel ? | Safe | Équipe planners |
+| Q-020 | Règles boutique : quels autres types faut-il (ex. « keep expected ~140K », « max 5 sacs S et M », « ajouter 4 caisses chaque lundi ») ? | 4 types : max_pallets, max_units, max_qty_sku, min_qty_sku ; signalement seulement | Planner |
+| Q-021 | Catégories d'override : la liste (promo, lancement, rupture, surstock, stock DC, donnée erronée, autre) convient-elle ? | Liste actuelle | Équipe planners |
+| Q-022 | Une boutique peut avoir deux créneaux le même jour de commande : lequel retenir pour la date de livraison ? | Le premier du Schedule | Planner |
 

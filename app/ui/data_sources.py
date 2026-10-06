@@ -16,7 +16,12 @@ from pathlib import Path
 from typing import Protocol
 
 from app.domain.models import StockMovement, StockSnapshotLine
-from app.ingestion.business_inputs import read_allocations, read_launches, read_targets
+from app.ingestion.business_inputs import (
+    read_allocations,
+    read_launches,
+    read_rules,
+    read_targets,
+)
 from app.ingestion.masters import Masters, load_masters_dir
 from app.ingestion.powerbi import read_movements, read_stock_situation
 from app.ingestion.tables import ValidationReport
@@ -89,13 +94,14 @@ def load_uploads(
     allocations_file: Upload | None = None,
     launches_file: Upload | None = None,
     targets_file: Upload | None = None,
+    rules_file: Upload | None = None,
 ) -> LoadedData:
     stock, r1 = read_stock_situation(io.BytesIO(stock_file.getvalue()), stock_file.name)
     moves, r2 = read_movements(io.BytesIO(movements_file.getvalue()), movements_file.name)
     masters = load_masters_dir(masters_dir)
     reports = [r1, r2, _masters_report(masters)]
     hashes = {f.name: file_hash(f.getvalue()) for f in (stock_file, movements_file)}
-    allocs, launches, targets = (), (), ()
+    allocs, launches, targets, rules = (), (), (), ()
     if allocations_file is not None:
         items, rep = read_allocations(
             io.BytesIO(allocations_file.getvalue()), allocations_file.name
@@ -110,6 +116,10 @@ def load_uploads(
         items, rep = read_targets(io.BytesIO(targets_file.getvalue()), targets_file.name)
         targets, hashes[targets_file.name] = tuple(items), file_hash(targets_file.getvalue())
         reports.append(rep)
+    if rules_file is not None:
+        items, rep = read_rules(io.BytesIO(rules_file.getvalue()), rules_file.name)
+        rules, hashes[rules_file.name] = tuple(items), file_hash(rules_file.getvalue())
+        reports.append(rep)
     for name in masters.sources.values():
         path = masters_dir / name
         hashes[name] = file_hash(path.read_bytes())
@@ -118,7 +128,9 @@ def load_uploads(
         stock=stock,
         movements=moves,
         masters=masters,
-        business=BusinessInputs(allocations=allocs, launches=launches, targets=targets),
+        business=BusinessInputs(
+            allocations=allocs, launches=launches, targets=targets, rules=rules
+        ),
         reports=reports,
         source_hashes=hashes,
     )
@@ -133,6 +145,15 @@ def _masters_report(masters: Masters) -> ValidationReport:
             f"{len(masters.product_list_anomalies)} SKU en double ou mal formés dans la "
             f"Multiple list (première ligne utilisée), ex. {masters.product_list_anomalies[:5]}",
         )
+    if masters.schedule_issues:
+        rep.add(
+            "warning",
+            "SCHEDULE",
+            f"{len(masters.schedule_issues)} ligne(s) du Schedule illisible(s), "
+            f"ex. {masters.schedule_issues[:3]}",
+        )
+    if not masters.schedule:
+        rep.add("info", "NO_SCHEDULE", "Pas de master_schedule.csv : pas de boutiques du jour")
     zero = [p.sku for p in masters.products.values() if p.order_multiple == 0]
     if zero:
         rep.add("warning", "ZERO_MULTIPLE", f"{len(zero)} SKU avec multiple 0, ex. {zero[:5]}")

@@ -20,10 +20,10 @@ def apply_overrides(
     lines: Sequence[RecommendationLine], overrides: Iterable[Override]
 ) -> list[RecommendationLine]:
     by_sku: dict[str, Override] = {}
-    for ov in overrides:
-        if ov.sku in by_sku:
-            raise OverrideError(f"Deux overrides pour le SKU {ov.sku}")
-        by_sku[ov.sku] = ov
+    for item in overrides:
+        if item.sku in by_sku:
+            raise OverrideError(f"Deux overrides pour le SKU {item.sku}")
+        by_sku[item.sku] = item
     known = {line.sku for line in lines}
     unknown = sorted(set(by_sku) - known)
     if unknown:

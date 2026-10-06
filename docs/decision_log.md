@@ -92,3 +92,23 @@ Format : contexte → décision → conséquence.
 - Dates : ISO accepté ; sinon un seul format doit marcher pour toute la colonne. Si « 03/04/2026 » peut être lu de deux façons, le fichier est refusé.
 - Un SKU stocké comme nombre dans Excel est signalé (les zéros ou décimales peuvent être perdus).
 - `tools/extract_masters.py` n'extrait pas la colonne de notes du Schedule (risque de données personnelles).
+
+## D-015 — Journée multi-boutiques et Schedule (2026-10-06)
+
+- L'onglet Journée propose les boutiques dont un **jour de commande** du Schedule tombe le jour du run, et la **date de livraison** correspondante (prochain jour de livraison strictement après le run).
+- Les **cover days du Schedule ne sont jamais utilisés** : le planner saisit le cover de chaque boutique. Le calcul refuse de partir s'il en manque un.
+- Une erreur sur une boutique (données absentes) n'arrête pas les autres : elle est affichée sur sa ligne.
+
+## D-016 — Règles boutique structurées (2026-10-06)
+
+- Les règles en texte libre de la Bible (« max 4 pallets », « never exceed… ») deviennent une table `boutique_rules` remplie et validée par un humain : `max_pallets`, `max_units` (commande), `max_qty_sku`, `min_qty_sku` (SKU).
+- Une règle **ne modifie jamais** une quantité : règle SKU → ligne en REVIEW ; règle de commande → alerte sur la commande. Les règles sont recontrôlées après chaque override.
+
+## D-017 — Catégorie obligatoire pour un override (2026-10-06)
+
+- En plus de la raison, de l'auteur et de l'heure (règle 6), chaque override a une catégorie : promo / événement, lancement, rupture, surstock, stock DC, donnée erronée, autre. Elle sert à analyser les décisions des planners (onglet Historique & overrides).
+- Les bases créées avant cette version sont mises à jour automatiquement (colonne ajoutée, valeur « other » pour les anciens overrides).
+
+## D-018 — Confidentialité de l'outil local (2026-10-06)
+
+- `.streamlit/config.toml` coupe la télémétrie de Streamlit (`gatherUsageStats = false`) et n'écoute que sur le poste (`localhost`), conformément à « aucune donnée envoyée à un service externe ».

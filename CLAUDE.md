@@ -34,7 +34,8 @@ pip install -e ".[dev]"     # installer
 pytest                       # tous les tests
 pytest tests/parity -v       # tests de parité Excel
 ruff check . && ruff format .
-streamlit run app/ui/main.py # lancer l'interface (quand elle existe)
+mypy                         # types (app/engines, app/domain)
+streamlit run app/ui/main.py # lancer l'interface
 ```
 
 ## Logique Excel VÉRIFIÉE (Stock Cover Final, B80, 05-oct-2026)

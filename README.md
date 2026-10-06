@@ -3,7 +3,15 @@
 Outil interne de planification des commandes boutiques (Nespresso Canada).
 Règles du projet : voir [CLAUDE.md](CLAUDE.md).
 
-## Installation (une fois)
+## Démarrage le plus simple
+
+- **Windows** : double-clique sur `lancer_outil.bat`.
+- **Mac** : double-clique sur `lancer_outil.command` (la première fois : clic droit → Ouvrir).
+
+La première fois, l'installation prend quelques minutes. Ensuite l'outil s'ouvre dans le navigateur.
+Il faut Python 3.12 (https://www.python.org/downloads/, cocher « Add python.exe to PATH » sur Windows).
+
+## Installation manuelle (une fois)
 
 ```bash
 python3.12 -m venv .venv
@@ -27,7 +35,14 @@ Le navigateur s'ouvre sur l'outil. Ensuite :
    avec une raison, puis « Appliquer ». En bas : « Pourquoi cette quantité ? ».
 4. **Onglet 3. Résumé & export** : unités, palettes, signalements ; télécharge le fichier LT (Nessoft)
    et le récapitulatif boutique. Le run est enregistré dans `data/copilot.db`.
-5. **Onglet 4. Historique** : runs passés et comparaison avec la commande actuelle.
+5. **Onglet Journée** : les boutiques qui commandent ce jour-là (d'après le Schedule) ; saisis le cover
+   de chacune, calcule tout, télécharge le zip des fichiers LT, ou ouvre une boutique pour la valider.
+6. **Onglet Historique & overrides** : runs passés, comparaison avec la commande en cours, et analyse
+   des modifications des planners (par catégorie, par SKU).
+
+Chaque modification de quantité exige une **catégorie** (promo, lancement, rupture…), une **raison**
+et ton **nom**. Dans l'onglet 3, « Télécharger le détail (Excel) » donne toute la commande avec ses
+explications, les paramètres et les modifications.
 
 ### Préparer les vrais fichiers (en local, jamais dans le dépôt)
 
@@ -37,12 +52,20 @@ python tools/extract_masters.py "data/B80 105.xlsm" --boutique B80     # écrit 
 python tools/make_templates.py                                          # modèles vierges dans templates/
 ```
 
+Modèles à remplir (dossier `templates/`) : `allocations.xlsx`, `launches.xlsx`, `target_stock.xlsx`,
+`boutique_rules.xlsx` (règles tirées des notes de la Bible, validées par un humain : palettes max,
+quantité max / min par SKU…). Une règle ne change jamais une quantité : elle signale.
+
+```bash
+```
+
 ## Vérifier
 
 ```bash
 pytest                       # tous les tests
 pytest tests/parity -v -s    # parité avec Excel (affiche le score)
 ruff check . && ruff format --check .
+mypy                         # types des moteurs et du domaine
 ```
 
 ## Structure

@@ -78,6 +78,7 @@ tbody tr.pick { cursor: pointer; }
 tbody tr.pick:hover td { background: var(--surface-2); }
 tr.sel td { box-shadow: inset 0 2px 0 var(--accent), inset 0 -2px 0 var(--accent); }
 td input[type=number] { width: 90px; text-align: right; padding: 4px 6px; }
+td select { width: 170px; padding: 4px 6px; font-size: 13px; }
 td input[type=text] { width: 190px; padding: 4px 6px; font-size: 13px; }
 .st { font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: 999px; }
 .st.O { color: var(--ok); background: var(--ok-bg); }
@@ -187,7 +188,7 @@ footer { color: var(--muted); font-size: 12px; margin-top: 18px; }
       <table class="wide">
         <thead><tr>
           <th>SKU</th><th>Description</th><th>Statut</th><th>Origine</th>
-          <th class="n">Qty proposée</th><th class="n">Qty finale</th><th>Raison de la modification</th>
+          <th class="n">Qty proposée</th><th class="n">Qty finale</th><th>Catégorie</th><th>Raison de la modification</th>
           <th>Type</th><th class="n">Ventes</th><th class="n">Expected</th><th class="n">Couv. act.</th><th class="n">Multiple</th>
           <th class="n">Couv. après</th><th class="n">Excel</th><th>Signalements</th>
         </tr></thead>
@@ -264,6 +265,8 @@ footer { color: var(--muted); font-size: 12px; margin-top: 18px; }
 const DATA = /*__DATA__*/null;
 const M = DATA.meta, L = DATA.lines, RS = DATA.reasons;
 const STATUS = { O: "OK", R: "REVIEW", B: "BLOCKED" };
+const CATS = [["promo", "Promo / événement"], ["launch", "Lancement"], ["stockout", "Rupture / ventes sous-estimées"], ["overstock", "Surstock / place en boutique"], ["dc_stock", "Stock DC insuffisant"], ["data_error", "Donnée erronée"], ["other", "Autre"]];
+const CAT_LABEL = Object.fromEntries(CATS);
 const SRC = { forecast: "Prévision", allocation: "Allocation", launch: "Lancement", target_stock: "Stock cible", override: "Override" };
 const MSRC = { multiple_list: "Multiple list", inferred_family: "inféré depuis la famille (VER/ORI)", excel_default_1: "absent → 1 (comme Excel)", missing_default_1: "absent → 1 (non fiable)", excel_zero_multiple: "0 dans la Multiple list" };
 const FAMILIES = ["Cafés Vertuo (VL)", "Cafés Original (OL)", "Machines", "Autres"];
@@ -323,7 +326,7 @@ function base(i) {
 function line(i) {
   const b = base(i), o = st.overrides[L[i].sku];
   if (!o) return b;
-  const reasons = [...b.reasons, "Override de " + o.author + " : " + b.qty + " → " + o.after + " (" + o.reason + ")"];
+  const reasons = [...b.reasons, "Override de " + o.author + " : " + b.qty + " → " + o.after + " (" + CAT_LABEL[o.cat] + " : " + o.reason + ")"];
   let s = b.s;
   if (b.s === "B" && o.after > 0) { s = "R"; reasons.push("Override sur une ligne bloquée : à vérifier"); }
   return { ...b, qty: o.after, s, reasons, source: "override", fq: b.fq ?? b.qty, override: o };
@@ -395,11 +398,17 @@ function renderValid() {
     td(fmt(b.qty), "n");
     const qtd = el("td", "n"); const qi = el("input"); qi.type = "number"; qi.min = 0; qi.step = 1;
     qi.value = ed ? ed.qty : r.qty; qi.setAttribute("aria-label", "Qty finale " + l.sku);
-    qi.oninput = () => { const cur = st.edits[l.sku] || { qty: r.qty, reason: st.overrides[l.sku]?.reason || "" }; cur.qty = qi.value; st.edits[l.sku] = cur; tr.classList.add("edited"); };
+    const draft = () => st.edits[l.sku] || (st.edits[l.sku] = { qty: qi.value, reason: st.overrides[l.sku]?.reason || "", cat: st.overrides[l.sku]?.cat || "" });
+    qi.oninput = () => { draft().qty = qi.value; tr.classList.add("edited"); };
     qtd.append(qi); tr.append(qtd);
+    const ctd = el("td"); const ci = el("select"); ci.setAttribute("aria-label", "Catégorie " + l.sku);
+    ci.append(new Option("—", "")); CATS.forEach(([v, t]) => ci.append(new Option(t, v)));
+    ci.value = ed ? (ed.cat || "") : (st.overrides[l.sku]?.cat || "");
+    ci.onchange = () => { draft().cat = ci.value; tr.classList.add("edited"); };
+    ctd.append(ci); tr.append(ctd);
     const rtd = el("td"); const ri = el("input"); ri.type = "text"; ri.placeholder = "Obligatoire si modifiée";
     ri.value = ed ? ed.reason : (st.overrides[l.sku]?.reason || ""); ri.setAttribute("aria-label", "Raison " + l.sku);
-    ri.oninput = () => { const cur = st.edits[l.sku] || { qty: qi.value, reason: "" }; cur.reason = ri.value; st.edits[l.sku] = cur; tr.classList.add("edited"); };
+    ri.oninput = () => { draft().reason = ri.value; tr.classList.add("edited"); };
     rtd.append(ri); tr.append(rtd);
     td(l.type || "—"); td(fmt(l.sales), "n"); td(fmt(l.exp), "n"); td(fmt(l.cur, nf1), "n");
     td(fmt(r.multiple) + (r.msrc === "multiple_list" ? "" : " *"), "n");
@@ -423,8 +432,9 @@ $("apply").onclick = () => {
     const i = L.findIndex(l => l.sku === sku), b = base(i), q = Number(e.qty), reason = (e.reason || "").trim();
     if (!Number.isInteger(q) || q < 0) { errs.push(sku + " : quantité entière ≥ 0 attendue"); continue; }
     if (q === b.qty) { delete next[sku]; continue; }
+    if (!e.cat) { errs.push(sku + " : catégorie obligatoire"); continue; }
     if (reason.length < 3) { errs.push(sku + " : raison obligatoire"); continue; }
-    next[sku] = { after: q, reason, author, ts: new Date().toISOString(), before: b.qty };
+    next[sku] = { after: q, cat: e.cat, reason, author, ts: new Date().toISOString(), before: b.qty };
   }
   if (errs.length) return showMsg("vmsg", "err", "Modifications non appliquées : " + errs.join(" ; "));
   st.overrides = next; st.edits = {}; st.savedId = null;
@@ -604,7 +614,7 @@ function renderCompare() {
   if (r.overrides.length) {
     out.append(el("h2", "sec", "Overrides de ce run"));
     const w2 = el("div", "tablewrap"), t2 = el("table"), b2 = el("tbody");
-    r.overrides.forEach(o => b2.append(trow([o.sku, fmt(o.before) + " → " + fmt(o.after), o.reason, o.author, o.ts.slice(0, 16).replace("T", " ")], ["mono", "n", "", "", ""])));
+    r.overrides.forEach(o => b2.append(trow([o.sku, fmt(o.before) + " → " + fmt(o.after), (CAT_LABEL[o.cat] || "") + " : " + o.reason, o.author, o.ts.slice(0, 16).replace("T", " ")], ["mono", "n", "", "", ""])));
     t2.append(b2); w2.append(t2); out.append(w2);
   }
 }
