@@ -1,0 +1,335 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aperçu commande B80</title>
+<style>
+:root {
+  --bg: #f6f5f2; --surface: #ffffff; --surface-2: #f0eee9; --text: #1d1b18; --muted: #6b665d;
+  --border: #e2ded6; --accent: #7a4b2a; --accent-soft: #f3e8df;
+  --ok: #2f6b3c; --ok-bg: #e5f1e7; --review: #8a5a00; --review-bg: #fbefd3;
+  --blocked: #a12c2c; --blocked-bg: #f8e1e1; --diff: #fff6d6;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #161412; --surface: #201d1a; --surface-2: #2a2622; --text: #f1ede7; --muted: #a59f95;
+    --border: #3a352f; --accent: #e0a874; --accent-soft: #3a2b1f;
+    --ok: #8fd19e; --ok-bg: #1f3324; --review: #f2c46b; --review-bg: #3a2f17;
+    --blocked: #f19a9a; --blocked-bg: #3d1f1f; --diff: #3a3417;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #161412; --surface: #201d1a; --surface-2: #2a2622; --text: #f1ede7; --muted: #a59f95;
+  --border: #3a352f; --accent: #e0a874; --accent-soft: #3a2b1f;
+  --ok: #8fd19e; --ok-bg: #1f3324; --review: #f2c46b; --review-bg: #3a2f17;
+  --blocked: #f19a9a; --blocked-bg: #3d1f1f; --diff: #3a3417;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text);
+  font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+.wrap { max-width: 1280px; margin: 0 auto; padding: 20px 16px 80px; }
+h1 { font-size: 20px; margin: 0 0 4px; }
+.sub { color: var(--muted); margin: 0 0 16px; }
+.banner { background: var(--accent-soft); border: 1px solid var(--border); border-radius: 10px;
+  padding: 10px 12px; margin-bottom: 16px; font-size: 13px; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px; }
+.controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin-bottom: 14px; }
+label.f { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); font-weight: 600; }
+select, input[type=search] { font: inherit; color: var(--text); background: var(--surface-2);
+  border: 1px solid var(--border); border-radius: 8px; padding: 7px 9px; width: 100%; }
+.seg { display: flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.seg button { flex: 1; font: inherit; font-size: 13px; padding: 7px 6px; border: 0; background: var(--surface-2);
+  color: var(--text); cursor: pointer; }
+.seg button + button { border-left: 1px solid var(--border); }
+.seg button.on { background: var(--accent); color: var(--surface); font-weight: 600; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin-bottom: 14px; }
+.tile { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; }
+.tile .k { font-size: 12px; color: var(--muted); }
+.tile .v { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.tile .h { font-size: 11px; color: var(--muted); }
+.bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
+.chip { font: inherit; font-size: 12px; border: 1px solid var(--border); background: var(--surface);
+  color: var(--text); border-radius: 999px; padding: 4px 10px; cursor: pointer; }
+.chip.on { background: var(--text); color: var(--bg); border-color: var(--text); }
+.chk { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; }
+.bar .grow { flex: 1 1 200px; }
+.btn { font: inherit; font-size: 13px; font-weight: 600; border: 1px solid var(--accent); color: var(--accent);
+  background: transparent; border-radius: 8px; padding: 6px 12px; cursor: pointer; }
+.tablewrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; min-width: 900px; }
+th, td { padding: 7px 10px; border-bottom: 1px solid var(--border); text-align: left; white-space: nowrap; }
+th { position: sticky; top: 0; background: var(--surface-2); font-size: 12px; color: var(--muted); z-index: 1; }
+td.n, th.n { text-align: right; font-variant-numeric: tabular-nums; }
+td.desc { white-space: normal; min-width: 200px; }
+tbody tr { cursor: pointer; }
+tbody tr:hover { background: var(--surface-2); }
+tbody tr.sel { outline: 2px solid var(--accent); outline-offset: -2px; }
+td.diff { background: var(--diff); }
+.qty { font-weight: 700; }
+.st { font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: 999px; }
+.st.O { color: var(--ok); background: var(--ok-bg); }
+.st.R { color: var(--review); background: var(--review-bg); }
+.st.B { color: var(--blocked); background: var(--blocked-bg); }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; }
+.muted { color: var(--muted); }
+.unrel { color: var(--review); font-weight: 700; }
+#panel { position: fixed; right: 16px; top: 16px; bottom: 16px; width: min(420px, calc(100vw - 32px));
+  background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 16px;
+  overflow-y: auto; box-shadow: 0 10px 40px rgba(0,0,0,.25); display: none; z-index: 5; }
+#panel.open { display: block; }
+#panel h2 { font-size: 16px; margin: 0 0 2px; padding-right: 30px; }
+#panel h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 16px 0 6px; }
+#panel .x { position: absolute; right: 10px; top: 8px; font-size: 22px; background: none; border: 0; color: var(--muted); cursor: pointer; }
+.calc { background: var(--surface-2); border-radius: 8px; padding: 10px; }
+.calc div { display: flex; justify-content: space-between; gap: 10px; padding: 2px 0; }
+.calc .tot { border-top: 1px solid var(--border); margin-top: 4px; padding-top: 6px; font-weight: 700; }
+ul.reasons { margin: 0; padding-left: 18px; }
+pre.lt { max-height: 220px; overflow: auto; background: var(--surface-2); padding: 10px; border-radius: 8px; margin: 8px 0 0; }
+details { margin-top: 14px; }
+footer { color: var(--muted); font-size: 12px; margin-top: 16px; }
+@media (min-width: 900px) {
+  body.panel-open .wrap { margin-right: 452px; max-width: none; }
+}
+@media (max-width: 640px) {
+  #panel { left: 8px; right: 8px; top: auto; bottom: 8px; width: auto; max-height: 75vh; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1 id="title">Aperçu de commande</h1>
+  <p class="sub" id="subtitle"></p>
+  <div class="banner">
+    <strong>Aperçu de test.</strong> Données de la fixture B80 du 05-oct-2026. Toutes les quantités
+    ont été calculées à l'avance par le moteur Python (le même que celui des tests). Cette page ne
+    fait que les afficher. Clique sur une ligne pour voir <em>pourquoi</em> cette quantité.
+  </div>
+
+  <div class="card controls">
+    <label class="f">Jours de couverture
+      <select id="cover"></select>
+    </label>
+    <label class="f">Cover café (type C)
+      <select id="coffee"></select>
+    </label>
+    <div class="f" style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted);font-weight:600">Mode
+      <div class="seg" id="mode">
+        <button data-v="excel_parity" class="on">Parité Excel</button>
+        <button data-v="safe">Safe</button>
+      </div>
+    </div>
+    <label class="f">Rechercher (SKU ou description)
+      <input type="search" id="q" placeholder="ex. 7005.70, Melozio">
+    </label>
+  </div>
+
+  <div class="tiles" id="tiles"></div>
+
+  <div class="bar">
+    <span class="muted" style="font-size:12px">Statut :</span>
+    <button class="chip on" data-s="">Tous</button>
+    <button class="chip" data-s="O">OK</button>
+    <button class="chip" data-s="R">REVIEW</button>
+    <button class="chip" data-s="B">BLOCKED</button>
+    <label class="chk"><input type="checkbox" id="onlyQty"> Qty &gt; 0 seulement</label>
+    <label class="chk"><input type="checkbox" id="onlyDiff"> Écarts vs Excel</label>
+    <span class="grow"></span>
+    <button class="btn" id="dl">Télécharger le fichier LT</button>
+  </div>
+
+  <div class="tablewrap">
+    <table>
+      <thead><tr>
+        <th>SKU</th><th>Description</th><th>Type</th>
+        <th class="n">Ventes 7 j</th><th class="n">Expected</th><th class="n">Couv. actuelle (j)</th>
+        <th class="n">Multiple</th><th class="n">Qty</th><th class="n">Couv. après (j)</th>
+        <th class="n">Excel</th><th>Statut</th>
+      </tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </div>
+  <p class="muted" id="count" style="font-size:12px"></p>
+
+  <details>
+    <summary>Contenu du fichier LT (format Nessoft <span class="mono">SKU;QTY</span>)</summary>
+    <pre class="lt mono" id="lt"></pre>
+  </details>
+
+  <footer id="foot"></footer>
+</div>
+
+<aside id="panel" aria-live="polite"></aside>
+
+<script>
+const DATA = /*__DATA__*/null;
+const M = DATA.meta, L = DATA.lines, RS = DATA.reasons;
+const STATUS = { O: "OK", R: "REVIEW", B: "BLOCKED" };
+const MSRC = {
+  multiple_list: "Multiple list",
+  inferred_family: "inféré depuis la famille (VER/ORI)",
+  excel_default_1: "absent → 1 (comportement Excel)",
+  missing_default_1: "absent → 1 (non fiable)",
+  excel_zero_multiple: "0 dans la Multiple list",
+};
+const nf0 = new Intl.NumberFormat("fr-CA", { maximumFractionDigits: 0 });
+const nf2 = new Intl.NumberFormat("fr-CA", { maximumFractionDigits: 2 });
+const fmt = (x, d) => x === null || x === undefined ? "—" : (d ? nf2 : nf0).format(x);
+const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
+
+const st = { cover: M.covers.indexOf(M.excel_cover), coffee: -1, mode: "excel_parity", s: "", q: "", onlyQty: false, onlyDiff: false, sel: null };
+
+// --- Contrôles ---
+const coverSel = document.getElementById("cover"), coffeeSel = document.getElementById("coffee");
+M.covers.forEach((c, i) => {
+  coverSel.append(new Option(nf2.format(c) + " j" + (c === M.excel_cover ? " (valeur Excel)" : ""), i));
+  coffeeSel.append(new Option(nf2.format(c) + " j", i));
+});
+coffeeSel.prepend(new Option("Aucun (même cover)", -1));
+coverSel.value = st.cover; coffeeSel.value = -1;
+coverSel.onchange = () => { st.cover = +coverSel.value; render(); };
+coffeeSel.onchange = () => { st.coffee = +coffeeSel.value; render(); };
+document.querySelectorAll("#mode button").forEach(b => b.onclick = () => {
+  st.mode = b.dataset.v; document.querySelectorAll("#mode button").forEach(x => x.classList.toggle("on", x === b)); render();
+});
+document.querySelectorAll(".chip").forEach(b => b.onclick = () => {
+  st.s = b.dataset.s; document.querySelectorAll(".chip").forEach(x => x.classList.toggle("on", x === b)); render();
+});
+document.getElementById("q").oninput = e => { st.q = e.target.value.trim().toLowerCase(); render(); };
+document.getElementById("onlyQty").onchange = e => { st.onlyQty = e.target.checked; render(); };
+document.getElementById("onlyDiff").onchange = e => { st.onlyDiff = e.target.checked; render(); };
+
+function coverIdx(line) { return line.coffee && st.coffee >= 0 ? st.coffee : st.cover; }
+function result(i) {
+  const [qty, raw, s, reasons, reliable, post, multiple, msrc] = DATA.res[st.mode][i][coverIdx(L[i])];
+  return { qty, raw, s, reasons, reliable, post, multiple, msrc };
+}
+function isExcelSetup() { return st.mode === "excel_parity" && st.cover === M.covers.indexOf(M.excel_cover) && st.coffee < 0; }
+
+function ltLines() {
+  const out = [];
+  L.forEach((l, i) => { const r = result(i); if (r.qty > 0) out.push(l.sku + ";" + r.qty); });
+  return out;
+}
+
+function tile(k, v, h) {
+  const t = el("div", "tile"); t.append(el("div", "k", k), el("div", "v", v)); if (h) t.append(el("div", "h", h)); return t;
+}
+
+function render() {
+  const tiles = document.getElementById("tiles"), rows = document.getElementById("rows");
+  let units = 0, lines = 0, nR = 0, nB = 0, unrel = 0, formula = 0, match = 0;
+  const shown = [];
+  L.forEach((l, i) => {
+    const r = result(i);
+    if (r.qty > 0) { units += r.qty; lines++; }
+    if (r.s === "R") nR++; if (r.s === "B") nB++;
+    if (!r.reliable && r.qty > 0) unrel++;
+    if (l.xl_formula) { formula++; if (r.qty === l.xl_qty) match++; }
+    const diff = r.qty !== l.xl_qty;
+    if (st.s && r.s !== st.s) return;
+    if (st.onlyQty && r.qty <= 0) return;
+    if (st.onlyDiff && !diff) return;
+    if (st.q && !(l.sku.toLowerCase().includes(st.q) || l.desc.toLowerCase().includes(st.q))) return;
+    shown.push([l, r, i, diff]);
+  });
+
+  tiles.replaceChildren(
+    tile("Lignes à commander", fmt(lines)),
+    tile("Unités totales", fmt(units)),
+    tile("REVIEW", fmt(nR), "à vérifier par le planner"),
+    tile("BLOCKED", fmt(nB), "ne pas commander"),
+    tile("Parité Excel (lignes formule)", match + " / " + formula,
+      isExcelSetup() ? "mêmes paramètres qu'Excel" : "Excel calculé à " + nf2.format(M.excel_cover) + " j, mode parité"),
+  );
+  if (unrel) tiles.append(tile("Qty non fiables", fmt(unrel), "multiple absent"));
+
+  const frag = document.createDocumentFragment();
+  shown.forEach(([l, r, i, diff]) => {
+    const tr = el("tr"); if (st.sel === i) tr.className = "sel";
+    tr.onclick = () => { st.sel = i; render(); };
+    const td = (txt, cls) => { const c = el("td", cls, txt); tr.append(c); return c; };
+    td(l.sku, "mono"); td(l.desc || "—", "desc"); td(l.type || "—");
+    td(fmt(l.sales), "n"); td(fmt(l.exp), "n"); td(fmt(l.cur, 1), "n");
+    td(fmt(r.multiple) + (r.msrc === "multiple_list" ? "" : " *"), "n");
+    const q = td(fmt(r.qty), "n qty"); if (!r.reliable) { q.append(el("span", "unrel", " !")); q.title = "Quantité non fiable"; }
+    td(fmt(r.post, 1), "n");
+    const x = td(fmt(l.xl_qty) + (l.xl_formula ? "" : " ✎"), "n" + (diff ? " diff" : ""));
+    x.title = l.xl_formula ? "Valeur calculée par la formule Excel" : "Override manuel du planner dans Excel";
+    const s = el("td"); s.append(el("span", "st " + r.s, STATUS[r.s])); tr.append(s);
+    frag.append(tr);
+  });
+  rows.replaceChildren(frag);
+  document.getElementById("count").textContent =
+    shown.length + " ligne(s) affichée(s) sur " + L.length + ".  * multiple non issu de la Multiple list   ✎ override manuel dans Excel   ! quantité non fiable";
+  document.getElementById("lt").textContent = ltLines().join("\n") || "(aucune ligne à commander)";
+  renderPanel();
+}
+
+function renderPanel() {
+  const p = document.getElementById("panel");
+  document.body.classList.toggle("panel-open", st.sel !== null);
+  if (st.sel === null) { p.classList.remove("open"); return; }
+  const i = st.sel, l = L[i], r = result(i), cover = M.covers[coverIdx(l)];
+  const coffeeApplied = l.coffee && st.coffee >= 0;
+  p.replaceChildren();
+  const close = el("button", "x", "×"); close.setAttribute("aria-label", "Fermer");
+  close.onclick = () => { st.sel = null; render(); };
+  p.append(close, el("h2", "", l.sku + " — " + (l.desc || "sans description")));
+  const badge = el("span", "st " + r.s, STATUS[r.s]);
+  const line = el("div"); line.append(badge, el("span", "muted", "  type " + (l.type || "inconnu") + " · mode " + (st.mode === "safe" ? "safe" : "parité Excel")));
+  p.append(line);
+
+  p.append(el("h3", "", "Pourquoi cette quantité ?"));
+  const c = el("div", "calc mono");
+  const row = (a, b, cls) => { const d = el("div", cls); d.append(el("span", "", a), el("span", "", b)); c.append(d); };
+  row("Cover appliqué", nf2.format(cover) + " j" + (coffeeApplied ? " (cover café)" : ""));
+  row("Ventes (" + M.history_days + " j)", fmt(l.sales));
+  row("Expected", fmt(l.exp));
+  if (r.raw === null) {
+    row("Calcul", "non effectué (règle de blocage)");
+  } else {
+    row("Besoin = cover × ventes / " + M.history_days + " − Expected", fmt(r.raw, 2));
+    row("Multiple (" + (MSRC[r.msrc] || r.msrc) + ")", fmt(r.multiple));
+    row(r.raw > 0 ? "Arrondi au multiple supérieur" : "Besoin ≤ 0", "→ " + fmt(r.qty));
+  }
+  row("Quantité suggérée", fmt(r.qty), "tot");
+  p.append(c);
+
+  const covers = el("p", "muted", "Couverture actuelle : " + fmt(l.cur, 1) + " j → après commande : " + fmt(r.post, 1) + " j");
+  p.append(covers);
+
+  if (Object.keys(l.sales_old).length) {
+    p.append(el("h3", "", "Conversion"));
+    Object.keys(l.sales_old).forEach(o => p.append(el("p", "", "Ancien SKU " + o + " ajouté : ventes " + fmt(l.sales_old[o]) + ", Expected " + fmt(l.exp_old[o]) + ". Propre au nouveau SKU : ventes " + fmt(l.sales_own) + ", Expected " + fmt(l.exp_own) + ".")));
+  }
+
+  p.append(el("h3", "", "Signalements"));
+  if (r.reasons.length) { const ul = el("ul", "reasons"); r.reasons.forEach(k => ul.append(el("li", "", RS[k]))); p.append(ul); }
+  else p.append(el("p", "muted", "Aucun."));
+
+  p.append(el("h3", "", "Stock DC " + M.dc));
+  p.append(el("p", "", l.dc === null ? "SKU absent du stock DC" : fmt(l.dc) + " disponibles" + (r.qty > 0 && l.dc < r.qty ? " — insuffisant (non plafonné)" : "")));
+
+  p.append(el("h3", "", "Excel (cover " + nf2.format(M.excel_cover) + " j)"));
+  p.append(el("p", "", fmt(l.xl_qty) + (l.xl_formula ? " — calculé par la formule" : " — override manuel du planner")));
+  p.classList.add("open");
+}
+
+document.getElementById("dl").onclick = () => {
+  const d = new Date(), mon = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][d.getMonth()];
+  const pad = n => String(n).padStart(2, "0");
+  const name = M.boutique + " " + pad(d.getDate()) + "-" + mon + "-" + d.getFullYear() + "-" + pad(d.getHours()) + "_" + pad(d.getMinutes()) + ".csv";
+  try {
+    const blob = new Blob([ltLines().join("\r\n") + "\r\n"], { type: "text/csv" });
+    const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name; a.click();
+  } catch (e) { document.querySelector("details").open = true; }
+};
+
+document.getElementById("title").textContent = "Aperçu de commande — " + M.boutique + " (DC " + M.dc + ")";
+document.getElementById("subtitle").textContent = "Run du " + M.run_date + " · historique de ventes : " + M.history_days + " jours · " + L.length + " SKU";
+document.getElementById("foot").textContent = "Moteur " + M.rule_version + " · aucune quantité n'est calculée par le navigateur ni par une IA.";
+render();
+</script>
+</body>
+</html>

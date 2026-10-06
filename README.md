@@ -26,3 +26,12 @@ ruff check . && ruff format --check .
 - `app/ingestion/` : lecture des fichiers
 - `tests/unit/`, `tests/parity/` : tests ; rapport des overrides dans `tests/parity/reports/`
 - `docs/` : analyse, journal des décisions, questions ouvertes, dictionnaire de données
+
+## Aperçu de test (HTML)
+
+```bash
+python tools/build_preview.py   # écrit preview/apercu_B80.html, à ouvrir dans un navigateur
+```
+
+Les quantités de l'aperçu sont pré-calculées par le moteur Python ; la page ne fait que les afficher.
+Le dossier `preview/` n'est pas versionné.
