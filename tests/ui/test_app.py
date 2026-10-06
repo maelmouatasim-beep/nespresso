@@ -59,7 +59,14 @@ def test_search_then_override_through_engine(app: AppTest) -> None:
     from app.services.planning import with_overrides
 
     base = app.session_state["base"]
-    ov = Override(sku="7005.70", qty_before=3120, qty_after=3600, reason="Promo AOS",
-                  author="Planner Test", timestamp=datetime.now())  # fmt: skip
+    ov = Override(
+        sku="7005.70",
+        qty_before=3120,
+        qty_after=3600,
+        category="promo",
+        reason="Promo AOS",
+        author="Planner Test",
+        timestamp=datetime.now(),
+    )
     final = with_overrides(base, [ov], {})
     assert next(x for x in final.lines if x.sku == "7005.70").qty == 3600

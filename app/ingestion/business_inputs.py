@@ -11,7 +11,7 @@ from typing import BinaryIO
 
 from pydantic import ValidationError
 
-from app.domain.models import Allocation, Launch, TargetStock
+from app.domain.models import Allocation, BoutiqueRule, Launch, TargetStock
 from app.ingestion.tables import (
     TableSpec,
     ValidationReport,
@@ -55,6 +55,18 @@ TARGETS_SPEC = TableSpec(
         "max_qty": ("max_qty", "Max"),
     },
     required=frozenset({"boutique", "sku", "min_qty", "target_qty", "max_qty"}),
+)
+RULES_SPEC = TableSpec(
+    name="Règles boutique",
+    columns={
+        "boutique": ("boutique", "BTQ"),
+        "rule": ("rule", "Règle", "Regle"),
+        "sku": ("sku", "SKU"),
+        "value": ("value", "Valeur"),
+        "comment": ("comment", "Commentaire"),
+    },
+    required=frozenset({"boutique", "rule", "value"}),
+    sku_fields=frozenset(),
 )
 
 
@@ -138,6 +150,33 @@ def read_targets(
             if any(v is None for v in nums.values()):
                 raise ValueError("min, cible et max doivent être des nombres")
             out.append(TargetStock(boutique=rec["boutique"], sku=rec["sku"], **nums))
+        except (ValueError, ValidationError) as exc:
+            _err(parsed.report, rec["_row"], exc)
+    parsed.report.rows_kept = len(out)
+    return out, parsed.report
+
+
+def read_rules(
+    source: Path | BinaryIO, filename: str
+) -> tuple[list[BoutiqueRule], ValidationReport]:
+    parsed = parse_table(read_raw(source, filename), RULES_SPEC, filename)
+    out: list[BoutiqueRule] = []
+    for rec in parsed.records:
+        if not rec.get("boutique"):
+            continue
+        try:
+            value = parse_number(rec["value"])
+            if value is None:
+                raise ValueError("valeur numérique attendue")
+            out.append(
+                BoutiqueRule(
+                    boutique=rec["boutique"],
+                    rule=rec["rule"].strip().lower(),
+                    sku=rec.get("sku") or None,
+                    value=value,
+                    comment=rec.get("comment") or None,
+                )
+            )
         except (ValueError, ValidationError) as exc:
             _err(parsed.report, rec["_row"], exc)
     parsed.report.rows_kept = len(out)

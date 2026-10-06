@@ -1,16 +1,17 @@
 """Orchestration d'un run de planification. Aucune I/O : tout arrive déjà chargé.
 
 Étapes : sélection des lignes → prévision → arbitrage métier → overrides →
-palettes et résumé.
+palettes → règles boutique → résumé.
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field, replace
 
 from app.domain.models import (
     Allocation,
+    BoutiqueRule,
     ForecastMode,
     Launch,
     Override,
@@ -24,6 +25,7 @@ from app.engines.anomalies import RunSummary, summarize
 from app.engines.forecast import ForecastInputs, compute_recommendations
 from app.engines.overrides import apply_overrides
 from app.engines.pallets import PalletEstimate, estimate_pallets
+from app.engines.rules import check_boutique_rules
 
 RULE_VERSIONS = {
     "forecast": forecast.RULE_VERSION,
@@ -37,6 +39,7 @@ class BusinessInputs:
     allocations: tuple[Allocation, ...] = ()
     launches: tuple[Launch, ...] = ()
     targets: tuple[TargetStock, ...] = ()
+    rules: tuple[BoutiqueRule, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -44,11 +47,26 @@ class PlanningResult:
     params: PlanningParameters
     mode: ForecastMode
     dc: str
-    lines: list[RecommendationLine]
+    lines: list[RecommendationLine]  # lignes finales (overrides et règles appliqués)
     excluded: dict[str, str]
     pallets: PalletEstimate
     summary: RunSummary
+    base_lines: list[RecommendationLine] = field(default_factory=list)  # avant overrides
+    rules: tuple[BoutiqueRule, ...] = ()
+    rule_warnings: list[str] = field(default_factory=list)
+    history_days: int = 0
     rule_versions: dict[str, str] = field(default_factory=lambda: dict(RULE_VERSIONS))
+
+
+def _finalize(
+    base: PlanningResult, overrides: Iterable[Override], products: Mapping[str, Product]
+) -> PlanningResult:
+    lines = apply_overrides(base.base_lines, overrides)
+    pallets = estimate_pallets(lines, products, base.dc)
+    lines, warnings = check_boutique_rules(lines, base.rules, base.params.boutique, pallets)
+    return replace(
+        base, lines=lines, pallets=pallets, summary=summarize(lines), rule_warnings=warnings
+    )
 
 
 def run_planning(
@@ -90,8 +108,7 @@ def run_planning(
         launches=business_inputs.launches,
         targets=business_inputs.targets,
     )
-    lines = apply_overrides(lines, overrides)
-    return PlanningResult(
+    base = PlanningResult(
         params=params,
         mode=mode,
         dc=dc,
@@ -99,17 +116,58 @@ def run_planning(
         excluded=excluded,
         pallets=estimate_pallets(lines, inputs.products, dc),
         summary=summarize(lines),
+        base_lines=lines,
+        rules=tuple(r for r in business_inputs.rules if r.boutique == b),
+        history_days=inputs.sales.history_days,
     )
+    return _finalize(base, overrides, inputs.products)
 
 
 def with_overrides(
     result: PlanningResult, overrides: Iterable[Override], products: Mapping[str, Product]
 ) -> PlanningResult:
-    """Applique des overrides à un résultat SANS override et recalcule palettes et résumé."""
-    lines = apply_overrides(result.lines, overrides)
-    return replace(
-        result,
-        lines=lines,
-        pallets=estimate_pallets(lines, products, result.dc),
-        summary=summarize(lines),
-    )
+    """Réapplique des overrides (et les règles boutique) à partir des lignes avant overrides."""
+    return _finalize(result, overrides, products)
+
+
+# --- Journée : plusieurs boutiques ---------------------------------------------------
+
+
+@dataclass(frozen=True)
+class DayRequest:
+    """Ce que le planner saisit pour une boutique de la journée."""
+
+    params: PlanningParameters
+
+
+@dataclass(frozen=True)
+class DayOutcome:
+    boutique: str
+    result: PlanningResult | None
+    inputs: ForecastInputs | None
+    error: str | None
+
+
+def run_day(
+    requests: Iterable[PlanningParameters],
+    mode: ForecastMode,
+    *,
+    build_inputs: Callable[[str], tuple[ForecastInputs, str]],
+    portfolio_by_boutique: Mapping[str, Mapping[str, str]],
+    business_inputs: BusinessInputs | None = None,
+) -> list[DayOutcome]:
+    """Calcule la commande de chaque boutique. Une erreur sur une boutique n'arrête pas
+    les autres : elle est retournée avec son message."""
+    out: list[DayOutcome] = []
+    for params in requests:
+        try:
+            inputs, dc = build_inputs(params.boutique)
+            result = run_planning(
+                inputs, params, mode, dc=dc,
+                portfolio=portfolio_by_boutique.get(params.boutique, {}),
+                business_inputs=business_inputs,
+            )  # fmt: skip
+            out.append(DayOutcome(params.boutique, result, inputs, None))
+        except ValueError as exc:
+            out.append(DayOutcome(params.boutique, None, None, str(exc)))
+    return out

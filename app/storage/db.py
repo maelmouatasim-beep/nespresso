@@ -57,6 +57,7 @@ CREATE TABLE IF NOT EXISTS overrides (
     sku TEXT NOT NULL,
     qty_before INTEGER NOT NULL,
     qty_after INTEGER NOT NULL,
+    category TEXT NOT NULL DEFAULT 'other',
     reason TEXT NOT NULL CHECK (length(trim(reason)) >= 3),
     author TEXT NOT NULL CHECK (length(trim(author)) >= 1),
     timestamp TEXT NOT NULL
@@ -78,7 +79,16 @@ def connect(path: Path | None = None) -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     conn.executescript(SCHEMA)
+    _migrate(conn)
     return conn
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """Met à jour une base créée par une version précédente (ajout de colonnes)."""
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(overrides)")}
+    if "category" not in cols:
+        with conn:
+            conn.execute("ALTER TABLE overrides ADD COLUMN category TEXT NOT NULL DEFAULT 'other'")
 
 
 def _now() -> str:
@@ -123,6 +133,7 @@ def save_run(
                         "by_status": s.by_status,
                         "by_source": s.by_source,
                         "pallets": round(result.pallets.total_pallets, 2),
+                        "rule_warnings": result.rule_warnings,
                     }
                 ),
             ),  # fmt: skip
@@ -149,14 +160,15 @@ def save_run(
             ],
         )
         conn.executemany(
-            """INSERT INTO overrides (run_id, sku, qty_before, qty_after, reason, author, timestamp)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            """INSERT INTO overrides (run_id, sku, qty_before, qty_after, category, reason,
+                author, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
             [
                 (
                     run_id,
                     o.sku,
                     o.qty_before,
                     o.qty_after,
+                    o.category.value,
                     o.reason.strip(),
                     o.author.strip(),
                     o.timestamp.isoformat(),
@@ -204,3 +216,14 @@ def previous_run_id(
     row = conn.execute(sql + " ORDER BY id DESC LIMIT 1",
                        (boutique, before_id) if before_id else (boutique,)).fetchone()  # fmt: skip
     return int(row["id"]) if row else None
+
+
+def override_stats(conn: sqlite3.Connection, boutique: str | None = None) -> list[dict[str, Any]]:
+    """Overrides de tous les runs (le plus récent d'abord), pour analyser les décisions."""
+    sql = """SELECT o.*, r.boutique, r.delivery_date, r.cover_days FROM overrides o
+             JOIN runs r ON r.id = o.run_id"""
+    rows = conn.execute(
+        sql + (" WHERE r.boutique = ?" if boutique else "") + " ORDER BY o.id DESC",
+        (boutique,) if boutique else (),
+    )
+    return [dict(r) for r in rows]

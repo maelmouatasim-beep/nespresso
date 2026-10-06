@@ -44,6 +44,19 @@ TEMPLATES = {
             "Ne s'applique pas aux allocations ni aux lancements.",
         ],
     ),
+    "boutique_rules.xlsx": (
+        ["boutique", "rule", "sku", "value", "comment"],
+        [
+            "Règles boutique tirées des notes en texte libre, validées par un humain.",
+            "rule = max_pallets (palettes max pour la commande, sans SKU)",
+            "       max_units (unités max pour la commande, sans SKU)",
+            "       max_qty_sku (quantité max pour un SKU, SKU obligatoire)",
+            "       min_qty_sku (quantité min pour un SKU, SKU obligatoire)",
+            "Une règle ne change jamais une quantité : elle passe la ligne en REVIEW",
+            "ou affiche une alerte sur la commande.",
+            "Exemple : B80 | max_pallets | | 4 | « max 4 pallets » (note de la Bible).",
+        ],
+    ),
 }
 
 
@@ -57,7 +70,8 @@ def main() -> None:
         for cell in ws[1]:
             cell.font = Font(bold=True)
             cell.fill = PatternFill("solid", fgColor="EFE6DC")
-        for col in ("A", "B"):
+        sku_cols = [chr(65 + i) for i, h in enumerate(headers) if h in ("boutique", "sku")]
+        for col in sku_cols:
             for row in range(2, 501):
                 ws[f"{col}{row}"].number_format = "@"  # texte : protège les SKU
         for i, _ in enumerate(headers):

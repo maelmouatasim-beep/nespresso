@@ -238,8 +238,15 @@ def test_run_planning_with_golden_skus_matches_parity(b80_run) -> None:
 
 def test_storage_roundtrip(b80_run) -> None:
     inputs, dc, params, portfolio = b80_run
-    override = Override(sku="7005.70", qty_before=3120, qty_after=3600, reason="Promo AOS",
-                        author="Planner A", timestamp=datetime(2026, 10, 5, 11, 51))  # fmt: skip
+    override = Override(
+        sku="7005.70",
+        qty_before=3120,
+        qty_after=3600,
+        category="promo",
+        reason="Promo AOS",
+        author="Planner A",
+        timestamp=datetime(2026, 10, 5, 11, 51),
+    )
     res = run_planning(inputs, params, ForecastMode.EXCEL_PARITY, dc=dc, portfolio=portfolio,
                        business_inputs=BusinessInputs(), overrides=[override])  # fmt: skip
     conn = db.connect(Path(":memory:"))

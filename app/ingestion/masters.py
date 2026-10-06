@@ -7,10 +7,19 @@ from collections.abc import Collection, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from app.domain.models import Product, SkuConversion, StockMovement, StockSnapshotLine
+import pandas as pd
+
+from app.domain.models import (
+    Product,
+    ScheduleSlot,
+    SkuConversion,
+    StockMovement,
+    StockSnapshotLine,
+)
 from app.engines.conversion import build_conversion_index
 from app.engines.forecast import ForecastInputs
 from app.engines.sales import aggregate_sales
+from app.engines.schedule import parse_weekday
 from app.ingestion.fixtures_loader import (
     DC_MAPPING_COLUMNS,
     SchemaError,
@@ -30,6 +39,34 @@ class Masters:
     dc_mapping: dict[str, str]
     portfolio: dict[str, dict[str, str]]  # boutique -> sku -> Yes/No
     sources: dict[str, str] = field(default_factory=dict)
+    schedule: list[ScheduleSlot] = field(default_factory=list)
+    schedule_issues: list[str] = field(default_factory=list)
+
+
+def load_schedule(path: Path) -> tuple[list[ScheduleSlot], list[str]]:
+    """Créneaux commande -> livraison. Les cover days du fichier sont ignorés.
+
+    Lignes sans jour de commande ignorées ; jours illisibles signalés.
+    """
+    df = pd.read_csv(path, dtype=str, keep_default_na=False)
+    missing = {"boutique", "order_day", "delivery_day"} - set(df.columns)
+    if missing:
+        raise SchemaError(f"{path.name} : colonnes manquantes {sorted(missing)}")
+    slots: list[ScheduleSlot] = []
+    issues: list[str] = []
+    for i, r in enumerate(df.to_dict("records"), start=2):
+        b, o, d = r["boutique"].strip(), r["order_day"].strip(), r["delivery_day"].strip()
+        if not (b and o):
+            continue
+        ow, dw = parse_weekday(o), parse_weekday(d)
+        if ow is None or dw is None:
+            issues.append(f"ligne {i} ({b}) : jour illisible « {o} » / « {d} »")
+            continue
+        carrier = (r.get("carrier") or "").strip() or None
+        slots.append(
+            ScheduleSlot(boutique=b, order_weekday=ow, delivery_weekday=dw, carrier=carrier)
+        )
+    return slots, issues
 
 
 def load_masters_dir(directory: Path) -> Masters:
@@ -50,7 +87,13 @@ def load_masters_dir(directory: Path) -> Masters:
         df = read_csv_as_text(path, PORTFOLIO_COLUMNS)
         for b, sku, flag in zip(df["boutique"], df["sku"], df["filter_out"], strict=True):
             portfolio.setdefault(b, {})[sku] = flag
+    schedule: list[ScheduleSlot] = []
+    schedule_issues: list[str] = []
+    if (directory / "master_schedule.csv").exists():
+        schedule, schedule_issues = load_schedule(directory / "master_schedule.csv")
     return Masters(
+        schedule=schedule,
+        schedule_issues=schedule_issues,
         products=products,
         product_list_anomalies=anomalies,
         conversions=load_conversions(files["conversions"]),

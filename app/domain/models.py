@@ -191,12 +191,36 @@ class TargetStock(_Frozen):
         return self
 
 
+class OverrideCategory(StrEnum):
+    """Catégorie de la raison d'un override, pour analyser les décisions des planners."""
+
+    PROMO = "promo"
+    LAUNCH = "launch"
+    STOCKOUT = "stockout"
+    OVERSTOCK = "overstock"
+    DC_STOCK = "dc_stock"
+    DATA_ERROR = "data_error"
+    OTHER = "other"
+
+
+OVERRIDE_CATEGORY_LABELS = {
+    OverrideCategory.PROMO: "Promo / événement",
+    OverrideCategory.LAUNCH: "Lancement",
+    OverrideCategory.STOCKOUT: "Rupture / ventes sous-estimées",
+    OverrideCategory.OVERSTOCK: "Surstock / place en boutique",
+    OverrideCategory.DC_STOCK: "Stock DC insuffisant",
+    OverrideCategory.DATA_ERROR: "Donnée erronée",
+    OverrideCategory.OTHER: "Autre",
+}
+
+
 class Override(_Frozen):
     """Modification manuelle d'une quantité par un planner (règle 6)."""
 
     sku: Sku
     qty_before: int = Field(ge=0)
     qty_after: int = Field(ge=0)
+    category: OverrideCategory
     reason: str = Field(min_length=3)
     author: str = Field(min_length=1)
     timestamp: datetime
@@ -207,4 +231,52 @@ class Override(_Frozen):
             raise ValueError("Une raison est obligatoire pour modifier une quantité")
         if not self.author.strip():
             raise ValueError("L'auteur est obligatoire")
+        return self
+
+
+# --- Planning des boutiques et règles validées par un humain ----------------------
+
+WEEKDAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
+
+
+class ScheduleSlot(_Frozen):
+    """Un créneau de l'onglet Schedule : jour de commande -> jour de livraison.
+
+    Les cover days du Schedule ne sont JAMAIS lus (ils ne sont pas à jour).
+    """
+
+    boutique: str = Field(min_length=1)
+    order_weekday: int = Field(ge=0, le=6)
+    delivery_weekday: int = Field(ge=0, le=6)
+    carrier: str | None = None
+
+
+class BoutiqueRuleKind(StrEnum):
+    MAX_PALLETS = "max_pallets"  # palettes estimées max pour la commande
+    MAX_UNITS = "max_units"  # unités totales max pour la commande
+    MAX_QTY_SKU = "max_qty_sku"  # quantité max pour un SKU
+    MIN_QTY_SKU = "min_qty_sku"  # quantité min pour un SKU
+
+
+SKU_RULES = frozenset({BoutiqueRuleKind.MAX_QTY_SKU, BoutiqueRuleKind.MIN_QTY_SKU})
+
+
+class BoutiqueRule(_Frozen):
+    """Règle boutique structurée (issue des notes en texte libre, validée par un humain).
+
+    Une règle ne modifie JAMAIS une quantité : elle signale (REVIEW ou alerte de run).
+    """
+
+    boutique: str = Field(min_length=1)
+    rule: BoutiqueRuleKind
+    sku: Sku | None = None
+    value: float = Field(ge=0)
+    comment: str | None = None
+
+    @model_validator(mode="after")
+    def _sku_matches_rule(self) -> BoutiqueRule:
+        if self.rule in SKU_RULES and self.sku is None:
+            raise ValueError(f"La règle {self.rule.value} demande un SKU")
+        if self.rule not in SKU_RULES and self.sku is not None:
+            raise ValueError(f"La règle {self.rule.value} s'applique à toute la commande, sans SKU")
         return self

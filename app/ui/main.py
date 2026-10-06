@@ -360,7 +360,7 @@ with tab_valid:
             df,
             key=f"editor_{len(ss.overrides)}_{'-'.join(statuses)}_{only_qty}_{only_conv}_{search}",
             hide_index=True,
-            use_container_width=True,
+            width="stretch",
             disabled=[
                 c for c in df.columns if c not in ("Qty finale", "Raison de la modification")
             ],
@@ -457,7 +457,7 @@ with tab_summary:
                     ]  # fmt: skip
                 ),
                 hide_index=True,
-                use_container_width=True,
+                width="stretch",
             )
             if res.pallets.skus_without_pallet_size:
                 st.warning("Sans taille de palette (non comptés) : "
@@ -465,17 +465,17 @@ with tab_summary:
             st.markdown("**Origine des quantités commandées**")
             st.dataframe(pd.DataFrame([{"Origine": SOURCE_LABEL[k], "Lignes": v}
                                        for k, v in s.by_source.items() if v]),  # fmt: skip
-                         hide_index=True, use_container_width=True)  # fmt: skip
+                         hide_index=True, width="stretch")  # fmt: skip
         with c2:
             st.markdown("**Signalements les plus fréquents**")
             st.dataframe(pd.DataFrame(s.reason_counts[:15], columns=["Signalement", "Lignes"]),
-                         hide_index=True, use_container_width=True)  # fmt: skip
+                         hide_index=True, width="stretch")  # fmt: skip
             if s.unreliable_ordered:
                 st.warning("Quantités commandées non fiables (multiple absent) : "
                            + ", ".join(s.unreliable_ordered))  # fmt: skip
         with st.expander(f"Lignes exclues par la règle « Filter out » ({len(res.excluded)})"):
             st.dataframe(pd.DataFrame(sorted(res.excluded.items()), columns=["SKU", "Raison"]),
-                         hide_index=True, use_container_width=True)  # fmt: skip
+                         hide_index=True, width="stretch")  # fmt: skip
 
         st.divider()
         st.subheader("Export")
@@ -533,7 +533,7 @@ with tab_history:
                     ]  # fmt: skip
                 ),
                 hide_index=True,
-                use_container_width=True,
+                width="stretch",
             )
             pick = st.selectbox("Comparer la commande actuelle avec le run", [r["id"] for r in runs],
                                 key="hist_pick")  # fmt: skip
@@ -541,13 +541,13 @@ with tab_history:
                 diff = compare_orders(db.run_quantities(conn, pick),
                                       {x.sku: x.qty for x in res.lines})  # fmt: skip
                 st.markdown(f"**{len(diff)} SKU dont la quantité change**")
-                st.dataframe(pd.DataFrame(diff), hide_index=True, use_container_width=True)
+                st.dataframe(pd.DataFrame(diff), hide_index=True, width="stretch")
             if pick:
                 ovs = db.run_overrides(conn, pick)
                 if ovs:
                     st.markdown("**Overrides de ce run**")
                     st.dataframe(pd.DataFrame(ovs).drop(columns=["id", "run_id"]),
-                                 hide_index=True, use_container_width=True)  # fmt: skip
+                                 hide_index=True, width="stretch")  # fmt: skip
     finally:
         conn.close()
 
@@ -556,7 +556,7 @@ with tab_history:
 with tab_quality:
     rows = [row for r in data.reports for row in r.as_rows()]
     if rows:
-        st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+        st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
     else:
         st.success("Aucun problème détecté dans les fichiers.")
     st.caption(

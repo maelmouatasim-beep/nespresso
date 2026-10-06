@@ -154,7 +154,8 @@ def test_target_stock_order_validated() -> None:
 
 
 def ov(**kw) -> Override:
-    base = dict(sku="7005.70", qty_before=3120, qty_after=3600, reason="Promo AOS 14-21 oct",
+    base = dict(sku="7005.70", qty_before=3120, qty_after=3600, category="promo",
+                reason="Promo AOS 14-21 oct",
                 author="Planner A", timestamp=datetime(2026, 10, 5, 11, 51))  # fmt: skip
     return Override(**{**base, **kw})
 
