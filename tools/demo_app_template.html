@@ -226,11 +226,13 @@ footer { color: var(--muted); font-size: 12px; margin-top: 18px; }
     <div id="exportinfo"></div>
     <div class="row" style="margin-top:8px">
       <button class="btn" id="save">Enregistrer le run</button>
-      <button class="btn primary" id="copylt">Copier le fichier LT (Nessoft)</button>
-      <button class="btn" id="copyrecap">Copier le récapitulatif boutique</button>
+      <button class="btn primary" id="dllt">Télécharger le fichier LT (Nessoft)</button>
+      <button class="btn" id="dlrecap">Télécharger le récapitulatif boutique</button>
+      <button class="btn" id="copylt" hidden>Copier le fichier LT</button>
+      <button class="btn" id="copyrecap" hidden>Copier le récapitulatif</button>
     </div>
     <div id="smsg"></div>
-    <p class="muted" style="font-size:12.5px">Nom du fichier LT : <span class="mono" id="ltname"></span>. Colle le contenu dans un fichier texte portant ce nom, puis importe-le dans Nessoft à la main : l'outil n'y écrit jamais.</p>
+    <p class="muted" style="font-size:12.5px">Nom du fichier LT : <span class="mono" id="ltname"></span>. Importe-le dans Nessoft à la main : l'outil n'y écrit jamais.</p>
     <details><summary>Contenu du fichier LT (<span class="mono">SKU;QTY</span>)</summary><pre class="box mono" id="lt"></pre></details>
     <details><summary>Contenu du récapitulatif</summary><pre class="box mono" id="recap"></pre></details>
   </section>
@@ -542,6 +544,39 @@ $("copylt").onclick = () => {
   saveRun(name);
 };
 $("copyrecap").onclick = () => copy($("recap").textContent, "smsg", "Récapitulatif copié.");
+
+// Téléchargement de vrais fichiers (capacité « downloads » du viewer). Si elle n'est pas
+// disponible, on cache ces boutons et on propose la copie à la place.
+let downloads = null;
+function showCopyFallback() {
+  $("dllt").hidden = true; $("dlrecap").hidden = true; $("copylt").hidden = false; $("copyrecap").hidden = false;
+}
+(async () => {
+  for (let t = 0; t < 30 && !window.claude?.use; t++) await new Promise(r => setTimeout(r, 100));
+  try { downloads = window.claude?.use ? await window.claude.use("downloads") : null; } catch (e) { downloads = null; }
+  if (!downloads) showCopyFallback();
+})();
+async function offerFile(filename, text, okText) {
+  if (!downloads) { showCopyFallback(); return showMsg("smsg", "info", "Le téléchargement n'est pas disponible ici : utilise les boutons Copier."); }
+  try {
+    await downloads.save({ filename, data: text });
+    showMsg("smsg", "ok", okText);
+    return true;
+  } catch (e) {
+    const code = e && e.code;
+    if (code === "declined") showMsg("smsg", "info", "Téléchargement annulé.");
+    else if (code === "rate_limited") showMsg("smsg", "info", "Une demande de téléchargement est déjà ouverte : valide-la ou réessaie dans un instant.");
+    else { showCopyFallback(); showMsg("smsg", "err", "Téléchargement impossible ici : utilise les boutons Copier."); }
+    return false;
+  }
+}
+$("dllt").onclick = async () => {
+  const name = ltName(), text = ltText(allLines());
+  if (!text) return showMsg("smsg", "info", "Aucune ligne à commander : pas de fichier LT.");
+  const n = text.split("\r\n").length;
+  if (await offerFile(name, text + "\r\n", "Fichier « " + name + " » téléchargé (" + n + " lignes).")) saveRun(name);
+};
+$("dlrecap").onclick = () => offerFile("Recap " + ltName(), $("recap").textContent + "\r\n", "Récapitulatif téléchargé.");
 
 // ---------- 4. Historique ----------
 function renderHistory() {
