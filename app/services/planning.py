@@ -7,7 +7,7 @@ palettes et résumé.
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from app.domain.models import (
     Allocation,
@@ -15,6 +15,7 @@ from app.domain.models import (
     Launch,
     Override,
     PlanningParameters,
+    Product,
     RecommendationLine,
     TargetStock,
 )
@@ -97,5 +98,18 @@ def run_planning(
         lines=lines,
         excluded=excluded,
         pallets=estimate_pallets(lines, inputs.products, dc),
+        summary=summarize(lines),
+    )
+
+
+def with_overrides(
+    result: PlanningResult, overrides: Iterable[Override], products: Mapping[str, Product]
+) -> PlanningResult:
+    """Applique des overrides à un résultat SANS override et recalcule palettes et résumé."""
+    lines = apply_overrides(result.lines, overrides)
+    return replace(
+        result,
+        lines=lines,
+        pallets=estimate_pallets(lines, products, result.dc),
         summary=summarize(lines),
     )

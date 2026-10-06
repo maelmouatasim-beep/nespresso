@@ -17,3 +17,11 @@ correspondant est signalé (REVIEW / BLOCKED) ou documenté, jamais appliqué en
 | Q-010 | Faut-il masquer les lignes « Aucune activité » (ventes 0, Expected 0) dans l'interface ? 201 lignes sur 461 pour B80. | Affichées, statut OK, raison « Aucune activité » | Planner (étape interface) |
 | Q-011 | Un old SKU pas encore bloqué (conversion à venir) doit-il encore être commandé ? | Calcul normal + REVIEW (D-009) | Planner |
 | Q-012 | Codes de mouvement : faut-il un jour exclure les non-ventes (9044 Recycling, 8751 Tastings, 8749 Decoration…) ? Pas une décision à prendre maintenant. | Tous les codes inclus (défaut voulu) | Équipe planners |
+| Q-013 | Hiérarchie d'arbitrage du brief : allocation > lancement > stock cible > prévision, est-ce correct ? (le brief n'est pas dans le dépôt) | Appliquée telle quelle (D-012) | Planner |
+| Q-014 | Allocation : arrondir au multiple ? Comment répartir les vagues (ex. 75/25) dans le temps ? | Pas d'arrondi, REVIEW si non multiple ; vague choisie à la main | Planner |
+| Q-015 | Lancement : la quantité initiale doit-elle déduire l'Expected ? Jusqu'à quelle date l'envoyer ? | Quantité − Expected, jusqu'à la date de lancement incluse | Planner |
+| Q-016 | Stock cible : par SKU (choix actuel) ou par famille / boutique (ex. « keep expected ~140K ») ? | Par SKU | Planner |
+| Q-017 | Noms exacts des colonnes de l'export Power BI **Stock Movements** brut (aucun export fourni) | Plusieurs noms acceptés (`app/ingestion/powerbi.py`) ; à vérifier sur un vrai fichier | Planner |
+| Q-018 | Noms exacts des onglets et en-têtes du calculateur `.xlsm` | Plusieurs noms acceptés ; `--inspect` pour les voir | Planner |
+| Q-019 | Mode par défaut dans l'interface : Safe (choix actuel) ou Parité Excel ? | Safe | Équipe planners |
+

@@ -34,3 +34,7 @@ extend-exclude = [".venv"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "SIM"]
+
+[tool.ruff.lint.per-file-ignores]
+# Mise en page de l'interface : lignes longues tolérées.
+"app/ui/main.py" = ["E501"]

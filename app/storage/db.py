@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import sqlite3
 from collections.abc import Iterable
 from datetime import UTC, datetime
@@ -68,7 +69,9 @@ def file_hash(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def connect(path: Path = DEFAULT_DB) -> sqlite3.Connection:
+def connect(path: Path | None = None) -> sqlite3.Connection:
+    """Ouvre la base (variable d'environnement COPILOT_DB, sinon data/copilot.db)."""
+    path = path or Path(os.environ.get("COPILOT_DB", DEFAULT_DB))
     if str(path) != ":memory:":
         path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(path)

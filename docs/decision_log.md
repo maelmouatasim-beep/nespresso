@@ -61,3 +61,34 @@ Format : contexte → décision → conséquence.
 ## D-009 — Old SKU encore commandable : REVIEW (2026-10-06)
 
 - Avant `effective_date + 1 jour`, l'old SKU est calculé normalement (comme Excel) mais passe en REVIEW avec la raison « Conversion prévue le … vers … ». Le planner décide.
+
+## D-010 — Date de livraison : obligatoire, affichage seulement (2026-10-06)
+
+- La date de livraison est saisie à chaque run (aucune valeur par défaut) et doit être ≥ date du run.
+- Elle n'entre **pas** dans la quantité (comme Excel). Elle sert à afficher le stock projeté le jour de la livraison (`projected_stock_at_delivery` = Expected − ventes/jour × jours jusqu'à la livraison), l'équivalent du « Closing stk » d'Excel, calculé ici avec la vraie date au lieu de S4 − 3.
+
+## D-011 — Sélection des lignes par la règle « Filter out » (2026-10-06)
+
+- Hors test de parité, les lignes sont choisies par la règle de CLAUDE.md (portfolio `Yes` → exclu ; hors portfolio sans stock ni ventes → exclu). Chaque exclusion a sa raison, visible dans l'onglet Résumé.
+- Un new SKU est gardé si son old SKU a de l'activité. Les SKU d'allocations et de lancements sont toujours gardés.
+- Sur B80 : 398 lignes retenues (Excel : 461). Écart attendu tant que Q-002 n'est pas résolue.
+
+## D-012 — Arbitrage prévision / allocation / lancement / stock cible (2026-10-06)
+
+- Une ligne n'a qu'**une** source de quantité (pas de double comptage) : allocation > lancement > stock cible > prévision. La quantité prévision reste visible (`forecast_qty`).
+- Allocation : remplace la prévision ; due = total × % cumulé des vagues jusqu'à la vague en cours − déjà envoyé, arrondi à l'unité la plus proche, jamais négatif ; non arrondie au multiple mais signalée REVIEW si elle n'en est pas un.
+- Lancement : jusqu'à la date de lancement incluse, commande = quantité initiale − Expected, arrondie au multiple ; ensuite, la prévision reprend.
+- Stock cible : si Expected + commande < min → on remonte à la cible ; si > max → on plafonne au multiple inférieur.
+- Ces règles sont des **hypothèses** (le brief n'est pas dans le dépôt) : voir Q-013 à Q-016.
+
+## D-013 — Hors périmètre pour l'instant : Bible et couche IA (2026-10-06)
+
+- Prompt 6 (parser la Bible) : CLAUDE.md dit de ne pas la parser pour l'instant. Non fait.
+- Prompt 7 (API Claude) : soumis à l'accord IT et à la règle « aucune donnée réelle envoyée à un LLM ». Non fait. Le résumé des anomalies d'un run est produit de façon déterministe (`app/engines/anomalies.py`).
+
+## D-014 — Ingestion : en-têtes cherchés, dates jamais devinées (2026-10-06)
+
+- Les en-têtes sont cherchés dans les 25 premières lignes, avec plusieurs noms possibles par colonne. Si une colonne obligatoire manque, le fichier est refusé avec la liste des colonnes attendues.
+- Dates : ISO accepté ; sinon un seul format doit marcher pour toute la colonne. Si « 03/04/2026 » peut être lu de deux façons, le fichier est refusé.
+- Un SKU stocké comme nombre dans Excel est signalé (les zéros ou décimales peuvent être perdus).
+- `tools/extract_masters.py` n'extrait pas la colonne de notes du Schedule (risque de données personnelles).
