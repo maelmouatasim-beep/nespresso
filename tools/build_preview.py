@@ -63,6 +63,7 @@ def build() -> Path:
             params = PlanningParameters(
                 boutique=p["boutique"],
                 run_date=date.fromisoformat(p["run_date"]),
+                delivery_date=date.fromisoformat(p["run_date"]),
                 cover_days=cover,
                 coffee_cover_days=None,
             )

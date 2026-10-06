@@ -195,6 +195,8 @@ def compute_line(
     else:
         cover, cover_source = params.cover_days, "cover_days"
 
+    days_until_delivery = (params.delivery_date - params.run_date).days
+
     # --- Quantité ---
     raw: Fraction | None = None
     if sku in inputs.hardcoded_zero_skus:
@@ -251,6 +253,7 @@ def compute_line(
         "parameters": {
             "boutique": params.boutique,
             "run_date": params.run_date.isoformat(),
+            "delivery_date": params.delivery_date.isoformat(),
             "cover_days": params.cover_days,
             "coffee_cover_days": params.coffee_cover_days,
             "sales_history_days": history_days,
@@ -277,6 +280,12 @@ def compute_line(
         "qty": qty,
         "current_cover_days": _cover_days(expected_total, sales_total, history_days),
         "post_cover_days": _cover_days(expected_total + qty, sales_total, history_days),
+        # Affichage seulement (équivalent du « Closing stk » d'Excel) : stock projeté
+        # le jour de la livraison, avant réception de la commande. N'entre pas dans qty.
+        "days_until_delivery": days_until_delivery,
+        "projected_stock_at_delivery": float(
+            expected_total - sales_total / history_days * days_until_delivery
+        ),
         "rules_triggered": flags.rules,
     }
     return RecommendationLine(

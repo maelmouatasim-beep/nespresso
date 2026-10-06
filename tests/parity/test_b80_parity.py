@@ -61,6 +61,7 @@ def run() -> ParityRun:
     params = PlanningParameters(
         boutique=p["boutique"],
         run_date=date.fromisoformat(p["run_date"]),
+        delivery_date=date.fromisoformat(p["run_date"]),
         cover_days=p["cover_days"],
         coffee_cover_days=p["coffee_cover_days"],
     )

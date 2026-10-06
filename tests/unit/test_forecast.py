@@ -40,7 +40,11 @@ SAFE = ForecastMode.SAFE
 
 def params(cover: float = 7, coffee: float | None = None) -> PlanningParameters:
     return PlanningParameters(
-        boutique="B80", run_date=RUN, cover_days=cover, coffee_cover_days=coffee
+        boutique="B80",
+        run_date=RUN,
+        delivery_date=RUN,
+        cover_days=cover,
+        coffee_cover_days=coffee,
     )
 
 
@@ -401,9 +405,9 @@ def test_missing_from_stock_situation_is_review() -> None:
 
 def test_parameters_have_no_defaults() -> None:
     with pytest.raises(ValidationError):
-        PlanningParameters(boutique="B80", run_date=RUN, cover_days=9)  # type: ignore[call-arg]
+        PlanningParameters(boutique="B80", run_date=RUN, delivery_date=RUN, cover_days=9)  # type: ignore[call-arg]
     with pytest.raises(ValidationError):
-        PlanningParameters(boutique="B80", run_date=RUN, coffee_cover_days=None)  # type: ignore[call-arg]
+        PlanningParameters(boutique="B80", run_date=RUN, delivery_date=RUN, coffee_cover_days=None)  # type: ignore[call-arg]
 
 
 def test_explanation_carries_trace() -> None:
