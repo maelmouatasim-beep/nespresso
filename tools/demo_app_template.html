@@ -1,0 +1,591 @@
+<title>Supply Planning Copilot</title>
+<style>
+/* Outil de travail : barre d'onglets en haut, contenu en colonne, panneau « Pourquoi » latéral. */
+:root {
+  --bg: #f5f4f0; --surface: #ffffff; --surface-2: #efede7; --text: #1e1c19; --muted: #6a645a;
+  --border: #e0dcd3; --accent: #6f4524; --accent-fg: #ffffff; --accent-soft: #f2e7dd;
+  --ok: #2e6a3b; --ok-bg: #e3f0e5; --review: #875800; --review-bg: #fbeed0;
+  --blocked: #a02b2b; --blocked-bg: #f8e0e0; --diff: #fff4cf; --edit: #eef4ff;
+  --font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #161412; --surface: #201d1a; --surface-2: #2a2622; --text: #f1ede7; --muted: #a59f95;
+    --border: #3a352f; --accent: #e3ab78; --accent-fg: #1e1a16; --accent-soft: #3a2b1f;
+    --ok: #8fd19e; --ok-bg: #1f3324; --review: #f2c46b; --review-bg: #3a2f17;
+    --blocked: #f19a9a; --blocked-bg: #3d1f1f; --diff: #3a3417; --edit: #1f2a3a;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #161412; --surface: #201d1a; --surface-2: #2a2622; --text: #f1ede7; --muted: #a59f95;
+  --border: #3a352f; --accent: #e3ab78; --accent-fg: #1e1a16; --accent-soft: #3a2b1f;
+  --ok: #8fd19e; --ok-bg: #1f3324; --review: #f2c46b; --review-bg: #3a2f17;
+  --blocked: #f19a9a; --blocked-bg: #3d1f1f; --diff: #3a3417; --edit: #1f2a3a;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 var(--font); }
+.wrap { max-width: 1320px; margin: 0 auto; padding-inline: 16px; padding-block: 18px 80px; min-width: 0; }
+header.top { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: baseline; margin-bottom: 4px; }
+h1 { font-size: 20px; margin: 0; text-wrap: balance; }
+.sub { color: var(--muted); font-size: 13px; }
+.banner { background: var(--accent-soft); border: 1px solid var(--border); border-radius: 10px; padding: 9px 12px; margin: 10px 0 14px; font-size: 13px; }
+nav.tabs { display: flex; gap: 4px; overflow-x: auto; border-bottom: 1px solid var(--border); margin-bottom: 16px; }
+nav.tabs button { font: inherit; font-size: 13.5px; background: none; border: 0; color: var(--muted); padding: 9px 12px; border-bottom: 2px solid transparent; cursor: pointer; white-space: nowrap; }
+nav.tabs button.on { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
+nav.tabs button:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 14px; }
+label.f, .f { display: flex; flex-direction: column; gap: 5px; font-size: 12px; color: var(--muted); font-weight: 600; min-width: 0; }
+.f .hint { font-weight: 400; }
+select, input[type=search], input[type=text], input[type=date], input[type=number] {
+  font: inherit; font-size: 14px; color: var(--text); background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: 8px; padding: 7px 9px; width: 100%; min-width: 0; }
+input:disabled, select:disabled { opacity: .55; }
+.seg { display: flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.seg button { flex: 1; font: inherit; font-size: 13px; padding: 7px 6px; border: 0; background: var(--surface-2); color: var(--text); cursor: pointer; }
+.seg button + button { border-left: 1px solid var(--border); }
+.seg button.on { background: var(--accent); color: var(--accent-fg); font-weight: 600; }
+.chk { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; color: var(--text); font-weight: 400; }
+.btn { font: inherit; font-size: 13.5px; font-weight: 600; border-radius: 8px; padding: 8px 14px; cursor: pointer; border: 1px solid var(--accent); background: transparent; color: var(--accent); }
+.btn.primary { background: var(--accent); color: var(--accent-fg); }
+.row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.row .grow { flex: 1 1 160px; }
+.msg { border-radius: 8px; padding: 8px 12px; font-size: 13px; margin-top: 10px; }
+.msg.err { background: var(--blocked-bg); color: var(--blocked); }
+.msg.ok { background: var(--ok-bg); color: var(--ok); }
+.msg.info { background: var(--surface-2); color: var(--text); }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 14px; }
+.tile { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; }
+.tile .k { font-size: 12px; color: var(--muted); }
+.tile .v { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.tile .h { font-size: 11px; color: var(--muted); }
+.chip { font: inherit; font-size: 12px; border: 1px solid var(--border); background: var(--surface); color: var(--text); border-radius: 999px; padding: 4px 10px; cursor: pointer; }
+.chip.on { background: var(--text); color: var(--bg); border-color: var(--text); }
+.tablewrap { overflow: auto; max-height: 64vh; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; }
+table.wide { min-width: 1180px; }
+th, td { padding: 6px 9px; border-bottom: 1px solid var(--border); text-align: left; white-space: nowrap; vertical-align: middle; }
+th { position: sticky; top: 0; background: var(--surface-2); font-size: 12px; color: var(--muted); z-index: 1; }
+td.n, th.n { text-align: right; font-variant-numeric: tabular-nums; }
+td.desc { white-space: normal; min-width: 180px; }
+td.sig { white-space: normal; min-width: 220px; font-size: 12px; color: var(--muted); }
+td.diff { background: var(--diff); }
+tr.edited td { background: var(--edit); }
+tbody tr.pick { cursor: pointer; }
+tbody tr.pick:hover td { background: var(--surface-2); }
+tr.sel td { box-shadow: inset 0 2px 0 var(--accent), inset 0 -2px 0 var(--accent); }
+td input[type=number] { width: 90px; text-align: right; padding: 4px 6px; }
+td input[type=text] { width: 190px; padding: 4px 6px; font-size: 13px; }
+.st { font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: 999px; }
+.st.O { color: var(--ok); background: var(--ok-bg); }
+.st.R { color: var(--review); background: var(--review-bg); }
+.st.B { color: var(--blocked); background: var(--blocked-bg); }
+.mono { font-family: var(--mono); font-size: 12.5px; }
+.muted { color: var(--muted); }
+.why-link { font: inherit; font-size: 12px; background: none; border: 0; color: var(--accent); cursor: pointer; text-decoration: underline; padding: 0; }
+#panel { position: fixed; right: 16px; top: calc(16px + env(safe-area-inset-top, 0px)); bottom: calc(16px + env(safe-area-inset-bottom, 0px)); width: min(440px, calc(100vw - 32px)); background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 16px; overflow-y: auto; box-shadow: 0 10px 40px rgba(0,0,0,.25); z-index: 5; }
+#panel h2 { font-size: 16px; margin: 0 0 4px; padding-right: 30px; }
+#panel h3 { font-size: 11.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 16px 0 6px; }
+#panel .x { position: absolute; right: 10px; top: 8px; font-size: 22px; background: none; border: 0; color: var(--muted); cursor: pointer; }
+.calc { background: var(--surface-2); border-radius: 8px; padding: 10px; }
+.calc div { display: flex; justify-content: space-between; gap: 10px; padding: 2px 0; }
+.calc .tot { border-top: 1px solid var(--border); margin-top: 4px; padding-top: 6px; font-weight: 700; }
+ul.reasons { margin: 0; padding-left: 18px; }
+pre.box { max-height: 240px; overflow: auto; background: var(--surface-2); padding: 10px; border-radius: 8px; margin: 8px 0 0; white-space: pre; }
+.two { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; }
+h2.sec { font-size: 15px; margin: 18px 0 8px; }
+details summary { cursor: pointer; }
+footer { color: var(--muted); font-size: 12px; margin-top: 18px; }
+@media (min-width: 980px) { body.panel-open .wrap { margin-right: 470px; max-width: none; } }
+@media (max-width: 640px) { #panel { left: 8px; right: 8px; top: auto; width: auto; max-height: 78vh; bottom: calc(8px + env(safe-area-inset-bottom, 0px)); } }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div class="wrap">
+  <header class="top">
+    <h1>Supply Planning Copilot</h1>
+    <span class="sub" id="subtitle"></span>
+  </header>
+  <div class="banner"><strong>Version de démonstration</strong> sur les données de test B80 du 05-oct-2026.
+    Les quantités sont celles du moteur Python, calculées à l'avance pour chaque réglage proposé.
+    La page ne fait qu'afficher, appliquer tes modifications et additionner.</div>
+
+  <nav class="tabs" role="tablist" id="tabs">
+    <button data-t="params" class="on">1. Paramètres</button>
+    <button data-t="valid">2. Validation</button>
+    <button data-t="summary">3. Résumé &amp; export</button>
+    <button data-t="history">4. Historique</button>
+    <button data-t="quality">Qualité des données</button>
+  </nav>
+
+  <!-- 1. Paramètres -->
+  <section id="t-params">
+    <div class="card grid">
+      <label class="f">Ton nom (planner)
+        <input type="text" id="author" placeholder="ex. Marie" autocomplete="name">
+        <span class="hint">Obligatoire pour modifier une quantité et enregistrer.</span>
+      </label>
+      <label class="f">Boutique
+        <select id="boutique"><option>B80</option></select>
+        <span class="hint" id="dcinfo"></span>
+      </label>
+      <label class="f">Date du run
+        <input type="date" id="rundate" disabled>
+        <span class="hint">Fixée par les données de démo.</span>
+      </label>
+      <label class="f">Date de livraison
+        <input type="date" id="delivery">
+        <span class="hint">Obligatoire. N'entre pas dans la quantité (affichage du stock projeté).</span>
+      </label>
+      <label class="f">Jours de couverture
+        <select id="cover"></select>
+        <span class="hint">Obligatoire, pas de valeur par défaut.</span>
+      </label>
+      <div class="f">Cover café (type C)
+        <label class="chk"><input type="checkbox" id="coffeeOn"> Cover différent pour les cafés</label>
+        <select id="coffee" disabled></select>
+      </div>
+      <div class="f">Mode
+        <div class="seg" id="mode">
+          <button data-v="safe" class="on">Safe (recommandé)</button>
+          <button data-v="excel_parity">Parité Excel</button>
+        </div>
+        <span class="hint">Safe : café sans multiple → 240 (VER) / 800 (ORI) au lieu de 1.</span>
+      </div>
+      <div class="f">Entrées métier
+        <label class="chk"><input type="checkbox" id="examples"> Ajouter les exemples d'allocation, lancement et stock cible</label>
+        <ul class="hint" id="exlist" style="margin:2px 0 0;padding-left:16px"></ul>
+      </div>
+    </div>
+    <details style="margin-top:10px"><summary class="muted">Avancé : codes de mouvement inclus dans les ventes</summary>
+      <p class="muted" id="codes" style="font-size:12.5px"></p>
+    </details>
+    <div class="row" style="margin-top:14px">
+      <button class="btn primary" id="compute">Calculer la commande</button>
+      <span class="muted" id="lastrun" style="font-size:12.5px"></span>
+    </div>
+    <div id="pmsg"></div>
+  </section>
+
+  <!-- 2. Validation -->
+  <section id="t-valid" hidden>
+    <div class="row" style="margin-bottom:10px">
+      <span class="muted" style="font-size:12px">Statut :</span>
+      <button class="chip on" data-s="">Tous</button>
+      <button class="chip" data-s="O">OK</button>
+      <button class="chip" data-s="R">REVIEW</button>
+      <button class="chip" data-s="B">BLOCKED</button>
+      <label class="chk"><input type="checkbox" id="onlyQty"> Qty &gt; 0</label>
+      <label class="chk"><input type="checkbox" id="onlyConv"> Conversions</label>
+      <label class="chk"><input type="checkbox" id="onlyEdit"> Modifiées</label>
+      <input type="search" id="q" class="grow" placeholder="Rechercher SKU ou description" aria-label="Rechercher">
+    </div>
+    <div class="tablewrap">
+      <table class="wide">
+        <thead><tr>
+          <th>SKU</th><th>Description</th><th>Statut</th><th>Origine</th>
+          <th class="n">Qty proposée</th><th class="n">Qty finale</th><th>Raison de la modification</th>
+          <th>Type</th><th class="n">Ventes</th><th class="n">Expected</th><th class="n">Couv. act.</th><th class="n">Multiple</th>
+          <th class="n">Couv. après</th><th class="n">Excel</th><th>Signalements</th>
+        </tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+    <p class="muted" id="count" style="font-size:12px"></p>
+    <div class="row">
+      <button class="btn primary" id="apply">Appliquer les modifications</button>
+      <button class="btn" id="discard">Annuler les saisies non appliquées</button>
+    </div>
+    <div id="vmsg"></div>
+  </section>
+
+  <!-- 3. Résumé & export -->
+  <section id="t-summary" hidden>
+    <div class="tiles" id="tiles"></div>
+    <div class="two">
+      <div>
+        <h2 class="sec">Palettes par famille</h2>
+        <div class="tablewrap"><table><thead><tr><th>Famille</th><th class="n">Unités</th><th class="n">Palettes</th></tr></thead><tbody id="pallets"></tbody></table></div>
+        <p class="muted" id="nopallet" style="font-size:12.5px"></p>
+        <h2 class="sec">Origine des quantités commandées</h2>
+        <div class="tablewrap"><table><thead><tr><th>Origine</th><th class="n">Lignes</th></tr></thead><tbody id="sources"></tbody></table></div>
+      </div>
+      <div>
+        <h2 class="sec">Signalements les plus fréquents</h2>
+        <div class="tablewrap"><table><thead><tr><th>Signalement</th><th class="n">Lignes</th></tr></thead><tbody id="topreasons"></tbody></table></div>
+        <p class="muted" id="unrel" style="font-size:12.5px"></p>
+      </div>
+    </div>
+    <details id="exdetails" style="margin-top:14px"><summary id="exsum"></summary>
+      <div class="tablewrap" style="margin-top:8px"><table><thead><tr><th>SKU</th><th>Description</th><th>Raison</th></tr></thead><tbody id="excluded"></tbody></table></div>
+    </details>
+    <h2 class="sec">Export</h2>
+    <div id="exportinfo"></div>
+    <div class="row" style="margin-top:8px">
+      <button class="btn" id="save">Enregistrer le run</button>
+      <button class="btn primary" id="copylt">Copier le fichier LT (Nessoft)</button>
+      <button class="btn" id="copyrecap">Copier le récapitulatif boutique</button>
+    </div>
+    <div id="smsg"></div>
+    <p class="muted" style="font-size:12.5px">Nom du fichier LT : <span class="mono" id="ltname"></span>. Colle le contenu dans un fichier texte portant ce nom, puis importe-le dans Nessoft à la main : l'outil n'y écrit jamais.</p>
+    <details><summary>Contenu du fichier LT (<span class="mono">SKU;QTY</span>)</summary><pre class="box mono" id="lt"></pre></details>
+    <details><summary>Contenu du récapitulatif</summary><pre class="box mono" id="recap"></pre></details>
+  </section>
+
+  <!-- 4. Historique -->
+  <section id="t-history" hidden>
+    <p class="muted" style="font-size:12.5px">Dans cette démo, les runs enregistrés restent dans ton navigateur uniquement. Dans l'outil installé, ils vont dans la base SQLite locale.</p>
+    <div class="tablewrap"><table><thead><tr><th>N°</th><th>Créé le</th><th>Par</th><th>Livraison</th><th class="n">Cover</th><th>Mode</th><th class="n">Lignes</th><th class="n">Unités</th><th>Exporté</th></tr></thead><tbody id="runs"></tbody></table></div>
+    <div class="row" style="margin-top:12px">
+      <label class="f" style="min-width:220px">Comparer la commande actuelle avec le run
+        <select id="cmp"></select>
+      </label>
+    </div>
+    <div id="cmpout"></div>
+  </section>
+
+  <!-- Qualité -->
+  <section id="t-quality" hidden>
+    <div class="tablewrap"><table><thead><tr><th>Fichier</th><th>Niveau</th><th>Code</th><th>Message</th><th>Lignes (exemples)</th></tr></thead><tbody id="quality"></tbody></table></div>
+    <p class="muted" style="font-size:12.5px">ERROR = fichier inutilisable en l'état · WARNING = à vérifier · INFO = pour mémoire.</p>
+  </section>
+
+  <footer id="foot"></footer>
+</div>
+
+<aside id="panel" hidden aria-live="polite"></aside>
+
+<script>
+const DATA = /*__DATA__*/null;
+const M = DATA.meta, L = DATA.lines, RS = DATA.reasons;
+const STATUS = { O: "OK", R: "REVIEW", B: "BLOCKED" };
+const SRC = { forecast: "Prévision", allocation: "Allocation", launch: "Lancement", target_stock: "Stock cible", override: "Override" };
+const MSRC = { multiple_list: "Multiple list", inferred_family: "inféré depuis la famille (VER/ORI)", excel_default_1: "absent → 1 (comme Excel)", missing_default_1: "absent → 1 (non fiable)", excel_zero_multiple: "0 dans la Multiple list" };
+const FAMILIES = ["Cafés Vertuo (VL)", "Cafés Original (OL)", "Machines", "Autres"];
+const nf0 = new Intl.NumberFormat("fr-CA", { maximumFractionDigits: 0 });
+const nf1 = new Intl.NumberFormat("fr-CA", { maximumFractionDigits: 1 });
+const nf2 = new Intl.NumberFormat("fr-CA", { maximumFractionDigits: 2 });
+const fmt = (x, f = nf0) => x === null || x === undefined || Number.isNaN(x) ? "—" : f.format(x);
+const $ = id => document.getElementById(id);
+const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
+const store = { get(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } },
+                set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); return true; } catch (e) { return false; } } };
+
+const st = { run: null, overrides: {}, edits: {}, s: "", q: "", onlyQty: false, onlyConv: false, onlyEdit: false, sel: null, savedId: null, mode: "safe", tab: "params" };
+
+// ---------- Paramètres ----------
+$("subtitle").textContent = "Boutique B80 · DC " + M.dc + " · historique de ventes " + M.history_days + " jours";
+$("dcinfo").textContent = "DC " + M.dc + " (DC Mapping)";
+$("rundate").value = M.run_date;
+$("delivery").min = M.run_date;
+$("cover").append(new Option("Choisir…", "")); $("coffee").append(new Option("Choisir…", ""));
+M.covers.forEach((c, i) => { $("cover").append(new Option(nf1.format(c) + " j", i)); $("coffee").append(new Option(nf1.format(c) + " j", i)); });
+M.examples.forEach(t => $("exlist").append(el("li", "", t)));
+$("codes").textContent = "Tous les codes sont inclus (ventes ET déstockages), comme dans Excel : " + M.codes.join(", ") + ". Dans l'outil installé, la liste est modifiable.";
+$("author").value = store.get("spc_author", "");
+$("author").oninput = e => store.set("spc_author", e.target.value);
+$("coffeeOn").onchange = e => { $("coffee").disabled = !e.target.checked; };
+document.querySelectorAll("#mode button").forEach(b => b.onclick = () => { st.mode = b.dataset.v; document.querySelectorAll("#mode button").forEach(x => x.classList.toggle("on", x === b)); });
+
+function showMsg(id, kind, text) { const box = $(id); box.replaceChildren(); if (text) box.append(el("div", "msg " + kind, text)); }
+
+$("compute").onclick = () => {
+  const missing = [];
+  const delivery = $("delivery").value, cover = $("cover").value, coffeeOn = $("coffeeOn").checked, coffee = $("coffee").value;
+  if (!delivery) missing.push("la date de livraison");
+  if (cover === "") missing.push("les jours de couverture");
+  if (coffeeOn && coffee === "") missing.push("les jours de couverture café");
+  if (missing.length) return showMsg("pmsg", "err", "Il manque : " + missing.join(", ") + ".");
+  if (delivery < M.run_date) return showMsg("pmsg", "err", "La date de livraison doit être le jour du run ou après.");
+  st.run = { delivery, cover: +cover, coffee: coffeeOn ? +coffee : -1, mode: st.mode, variant: $("examples").checked ? "examples" : "none" };
+  st.overrides = {}; st.edits = {}; st.sel = null; st.savedId = null;
+  showMsg("pmsg", "ok", "Commande calculée. Va dans l'onglet 2. Validation.");
+  $("lastrun").textContent = describeRun(st.run);
+  renderAll();
+};
+function describeRun(r) {
+  return "Dernier calcul : livraison " + r.delivery + " · cover " + nf1.format(M.covers[r.cover]) + " j" +
+    (r.coffee >= 0 ? " · café " + nf1.format(M.covers[r.coffee]) + " j" : "") + " · mode " + (r.mode === "safe" ? "Safe" : "Parité Excel") +
+    (r.variant === "examples" ? " · avec exemples métier" : "");
+}
+
+// ---------- Résultat ----------
+function base(i) {
+  const r = st.run, idx = L[i].coffee && r.coffee >= 0 ? r.coffee : r.cover;
+  const [qty, raw, s, reasons, reliable, post, multiple, msrc, source, fq] = DATA.res[r.mode + "|" + r.variant][i][idx];
+  return { qty, raw, s, reasons: reasons.map(k => RS[k]), reliable, post, multiple, msrc, source, fq, cover: M.covers[idx], coffeeCover: L[i].coffee && r.coffee >= 0 };
+}
+function line(i) {
+  const b = base(i), o = st.overrides[L[i].sku];
+  if (!o) return b;
+  const reasons = [...b.reasons, "Override de " + o.author + " : " + b.qty + " → " + o.after + " (" + o.reason + ")"];
+  let s = b.s;
+  if (b.s === "B" && o.after > 0) { s = "R"; reasons.push("Override sur une ligne bloquée : à vérifier"); }
+  return { ...b, qty: o.after, s, reasons, source: "override", fq: b.fq ?? b.qty, override: o };
+}
+// Couverture après la quantité FINALE (affichage) : (Expected + qty) / ventes × jours.
+function postCover(i, qty) { const l = L[i]; return l.sales > 0 ? (l.exp + qty) / l.sales * M.history_days : null; }
+function allLines() { return L.map((_, i) => line(i)); }
+function reasonKey(r) { for (const sep of [" (", " : "]) { if (r.includes(sep)) r = r.split(sep)[0]; } return r; }
+
+function summary(lines) {
+  const units = {}, pal = {}; FAMILIES.forEach(f => { units[f] = 0; pal[f] = 0; });
+  const noPallet = [], unrel = [], srcCount = {}, stCount = { O: 0, R: 0, B: 0 }, reasons = {};
+  let ordered = 0, total = 0;
+  lines.forEach((r, i) => {
+    stCount[r.s]++;
+    r.reasons.forEach(x => { const k = reasonKey(x); reasons[k] = (reasons[k] || 0) + 1; });
+    if (r.qty <= 0) return;
+    ordered++; total += r.qty; srcCount[r.source] = (srcCount[r.source] || 0) + 1;
+    const f = L[i].family; units[f] += r.qty;
+    if (L[i].pf === null) noPallet.push(L[i].sku); else pal[f] += r.qty * L[i].pf;
+    if (!r.reliable) unrel.push(L[i].sku);
+  });
+  return { units, pal, palTotal: Object.values(pal).reduce((a, b) => a + b, 0), noPallet, unrel, srcCount, stCount, ordered, total,
+           reasons: Object.entries(reasons).sort((a, b) => b[1] - a[1]) };
+}
+
+// ---------- Onglets ----------
+function showTab(t) {
+  st.tab = t;
+  document.querySelectorAll("#tabs button").forEach(b => b.classList.toggle("on", b.dataset.t === t));
+  ["params", "valid", "summary", "history", "quality"].forEach(x => { $("t-" + x).hidden = x !== t; });
+  renderAll();
+}
+document.querySelectorAll("#tabs button").forEach(b => b.onclick = () => showTab(b.dataset.t));
+
+function needRun(sectionId) {
+  if (st.run) return false;
+  const s = $(sectionId); if (!s.querySelector(".needrun")) s.prepend(el("div", "msg info needrun", "Calcule d'abord une commande dans l'onglet 1. Paramètres."));
+  return true;
+}
+function clearNeedRun() { document.querySelectorAll(".needrun").forEach(n => n.remove()); }
+
+// ---------- 2. Validation ----------
+document.querySelectorAll(".chip").forEach(b => b.onclick = () => { st.s = b.dataset.s; document.querySelectorAll(".chip").forEach(x => x.classList.toggle("on", x === b)); renderValid(); });
+$("q").oninput = e => { st.q = e.target.value.trim().toLowerCase(); renderValid(); };
+$("onlyQty").onchange = e => { st.onlyQty = e.target.checked; renderValid(); };
+$("onlyConv").onchange = e => { st.onlyConv = e.target.checked; renderValid(); };
+$("onlyEdit").onchange = e => { st.onlyEdit = e.target.checked; renderValid(); };
+
+function renderValid() {
+  const body = $("rows"); body.replaceChildren();
+  if (!st.run) return;
+  const frag = document.createDocumentFragment(); let n = 0;
+  L.forEach((l, i) => {
+    const r = line(i), b = base(i), ed = st.edits[l.sku];
+    if (st.s && r.s !== st.s) return;
+    if (st.onlyQty && r.qty <= 0) return;
+    if (st.onlyConv && !l.conv) return;
+    if (st.onlyEdit && !st.overrides[l.sku] && !ed) return;
+    if (st.q && !(l.sku.toLowerCase().includes(st.q) || l.desc.toLowerCase().includes(st.q))) return;
+    n++;
+    const tr = el("tr", "pick" + (st.overrides[l.sku] || ed ? " edited" : "") + (st.sel === i ? " sel" : ""));
+    tr.dataset.i = i;
+    const td = (t, c) => { const x = el("td", c, t); tr.append(x); return x; };
+    const skuTd = el("td", "mono"); const a = el("button", "why-link", l.sku); a.title = "Pourquoi cette quantité ?"; a.onclick = () => openPanel(i); skuTd.append(a); tr.append(skuTd);
+    td(l.desc || "—", "desc");
+    const s = el("td"); s.append(el("span", "st " + r.s, STATUS[r.s])); tr.append(s);
+    td(SRC[r.source]);
+    td(fmt(b.qty), "n");
+    const qtd = el("td", "n"); const qi = el("input"); qi.type = "number"; qi.min = 0; qi.step = 1;
+    qi.value = ed ? ed.qty : r.qty; qi.setAttribute("aria-label", "Qty finale " + l.sku);
+    qi.oninput = () => { const cur = st.edits[l.sku] || { qty: r.qty, reason: st.overrides[l.sku]?.reason || "" }; cur.qty = qi.value; st.edits[l.sku] = cur; tr.classList.add("edited"); };
+    qtd.append(qi); tr.append(qtd);
+    const rtd = el("td"); const ri = el("input"); ri.type = "text"; ri.placeholder = "Obligatoire si modifiée";
+    ri.value = ed ? ed.reason : (st.overrides[l.sku]?.reason || ""); ri.setAttribute("aria-label", "Raison " + l.sku);
+    ri.oninput = () => { const cur = st.edits[l.sku] || { qty: qi.value, reason: "" }; cur.reason = ri.value; st.edits[l.sku] = cur; tr.classList.add("edited"); };
+    rtd.append(ri); tr.append(rtd);
+    td(l.type || "—"); td(fmt(l.sales), "n"); td(fmt(l.exp), "n"); td(fmt(l.cur, nf1), "n");
+    td(fmt(r.multiple) + (r.msrc === "multiple_list" ? "" : " *"), "n");
+    td(fmt(postCover(i, r.qty), nf1), "n");
+    const x = td(l.xl === null || l.xl === undefined ? "—" : fmt(l.xl) + (l.xlf ? "" : " ✎"), "n" + (l.xl !== null && l.xl !== undefined && l.xl !== r.qty ? " diff" : ""));
+    x.title = l.xl === null || l.xl === undefined ? "Pas dans la feuille Excel" : l.xlf ? "Valeur de la formule Excel (cover 9 j)" : "Override manuel du planner dans Excel";
+    td(r.reasons.join(" | "), "sig");
+    frag.append(tr);
+  });
+  body.append(frag);
+  $("count").textContent = n + " ligne(s) affichée(s) sur " + L.length + ". Clique sur un SKU pour voir pourquoi. * multiple non issu de la Multiple list · ✎ override manuel dans Excel · Excel = commande du calculateur à 9 j.";
+}
+
+$("discard").onclick = () => { st.edits = {}; renderValid(); showMsg("vmsg", "info", "Saisies non appliquées annulées."); };
+$("apply").onclick = () => {
+  const author = $("author").value.trim(), errs = [], next = { ...st.overrides };
+  const entries = Object.entries(st.edits);
+  if (!entries.length) return showMsg("vmsg", "info", "Aucune saisie à appliquer.");
+  if (!author) return showMsg("vmsg", "err", "Indique ton nom dans l'onglet 1. Paramètres avant de modifier une quantité.");
+  for (const [sku, e] of entries) {
+    const i = L.findIndex(l => l.sku === sku), b = base(i), q = Number(e.qty), reason = (e.reason || "").trim();
+    if (!Number.isInteger(q) || q < 0) { errs.push(sku + " : quantité entière ≥ 0 attendue"); continue; }
+    if (q === b.qty) { delete next[sku]; continue; }
+    if (reason.length < 3) { errs.push(sku + " : raison obligatoire"); continue; }
+    next[sku] = { after: q, reason, author, ts: new Date().toISOString(), before: b.qty };
+  }
+  if (errs.length) return showMsg("vmsg", "err", "Modifications non appliquées : " + errs.join(" ; "));
+  st.overrides = next; st.edits = {}; st.savedId = null;
+  showMsg("vmsg", "ok", Object.keys(next).length + " modification(s) active(s). Résumé et export sont à jour.");
+  renderValid(); renderPanel();
+};
+
+// ---------- Panneau « Pourquoi » ----------
+function openPanel(i) { st.sel = i; renderValid(); renderPanel(); }
+function renderPanel() {
+  const p = $("panel");
+  const open = st.sel !== null && st.run !== null;
+  p.hidden = !open; document.body.classList.toggle("panel-open", open);
+  if (!open) return;
+  const i = st.sel, l = L[i], r = line(i);
+  p.replaceChildren();
+  const close = el("button", "x", "×"); close.setAttribute("aria-label", "Fermer"); close.onclick = () => { st.sel = null; renderValid(); renderPanel(); };
+  p.append(close, el("h2", "", l.sku + " — " + (l.desc || "sans description")));
+  const head = el("div"); head.append(el("span", "st " + r.s, STATUS[r.s]), el("span", "muted", "  type " + (l.type || "inconnu") + " · origine : " + SRC[r.source])); p.append(head);
+  p.append(el("h3", "", "Pourquoi cette quantité ?"));
+  const c = el("div", "calc mono");
+  const row = (a, b, cls) => { const d = el("div", cls); d.append(el("span", "", a), el("span", "", b)); c.append(d); };
+  row("Cover appliqué", nf1.format(r.cover) + " j" + (r.coffeeCover ? " (cover café)" : ""));
+  row("Ventes (" + M.history_days + " j)", fmt(l.sales));
+  row("Expected", fmt(l.exp));
+  if (r.raw === null) row("Calcul", "non effectué (blocage)");
+  else {
+    row("Besoin = cover × ventes / " + M.history_days + " − Expected", fmt(r.raw, nf2));
+    row("Multiple (" + (MSRC[r.msrc] || r.msrc) + ")", fmt(r.multiple));
+  }
+  const fq = r.fq ?? r.qty;
+  if (r.source !== "forecast") row("Quantité prévision", fmt(fq));
+  row("Quantité finale", fmt(r.qty), "tot");
+  p.append(c);
+  const days = Math.round((new Date(st.run.delivery) - new Date(M.run_date)) / 86400000);
+  const proj = l.exp - l.sales / M.history_days * days;
+  p.append(el("p", "muted", "Couverture : " + fmt(l.cur, nf1) + " j aujourd'hui → " + fmt(postCover(i, r.qty), nf1) + " j après la quantité finale. Stock projeté le jour de la livraison (" + days + " j) : " + fmt(proj) + " (affichage seulement)."));
+  if (Object.keys(l.sales_old).length) {
+    p.append(el("h3", "", "Conversion"));
+    Object.keys(l.sales_old).forEach(o => p.append(el("p", "", "Ancien SKU " + o + " ajouté : ventes " + fmt(l.sales_old[o]) + ", Expected " + fmt(l.exp_old[o]) + ". Propre au nouveau SKU : ventes " + fmt(l.sales_own) + ", Expected " + fmt(l.exp_own) + ".")));
+  }
+  p.append(el("h3", "", "Signalements et décisions"));
+  if (r.reasons.length) { const ul = el("ul", "reasons"); r.reasons.forEach(x => ul.append(el("li", "", x))); p.append(ul); }
+  else p.append(el("p", "muted", "Aucun."));
+  p.append(el("h3", "", "Stock DC " + M.dc));
+  p.append(el("p", "", l.dc === null ? "SKU absent du stock DC" : fmt(l.dc) + " disponibles" + (r.qty > 0 && l.dc < r.qty ? " : insuffisant (signalé, jamais plafonné)" : "")));
+  p.append(el("h3", "", "Excel (cover 9 j)"));
+  p.append(el("p", "", l.xl === null || l.xl === undefined ? "SKU absent de la feuille Excel." : fmt(l.xl) + (l.xlf ? " : calculé par la formule" : " : override manuel du planner")));
+}
+
+// ---------- 3. Résumé & export ----------
+const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+function ltName() { const d = new Date(), p = n => String(n).padStart(2, "0"); return M.boutique + " " + p(d.getDate()) + "-" + MONTHS[d.getMonth()] + "-" + d.getFullYear() + "-" + p(d.getHours()) + "_" + p(d.getMinutes()) + ".csv"; }
+function ltText(lines) { return lines.map((r, i) => r.qty > 0 ? L[i].sku + ";" + r.qty : null).filter(Boolean).join("\r\n"); }
+function recapText(lines, s) {
+  const out = ["Boutique;" + M.boutique + ";Livraison;" + st.run.delivery, "", "SKU;Description;Type;Famille;Quantité;Origine"];
+  lines.forEach((r, i) => { if (r.qty > 0) out.push([L[i].sku, L[i].desc, L[i].type, L[i].family, r.qty, r.source].join(";")); });
+  out.push("", "Famille;Unités;Palettes estimées");
+  FAMILIES.forEach(f => out.push(f + ";" + s.units[f] + ";" + s.pal[f].toFixed(2)));
+  out.push("Total;" + s.total + ";" + s.palTotal.toFixed(2));
+  if (s.noPallet.length) out.push("Sans taille de palette;" + s.noPallet.join(", "));
+  return out.join("\r\n");
+}
+function tile(k, v, h) { const t = el("div", "tile"); t.append(el("div", "k", k), el("div", "v", v)); if (h) t.append(el("div", "h", h)); return t; }
+function trow(cells, cls) { const tr = el("tr"); cells.forEach((c, j) => tr.append(el("td", cls && cls[j] || "", c))); return tr; }
+
+function renderSummary() {
+  if (!st.run) return;
+  const lines = allLines(), s = summary(lines);
+  $("tiles").replaceChildren(
+    tile("Lignes à commander", fmt(s.ordered)), tile("Unités", fmt(s.total)),
+    tile("Palettes estimées", fmt(s.palTotal, nf2)), tile("REVIEW", fmt(s.stCount.R), "à vérifier"),
+    tile("BLOCKED", fmt(s.stCount.B), "ne pas commander"), tile("Modifications", fmt(Object.keys(st.overrides).length), "overrides du planner"));
+  $("pallets").replaceChildren(...FAMILIES.map(f => trow([f, fmt(s.units[f]), fmt(s.pal[f], nf2)], ["", "n", "n"])),
+    trow(["Total", fmt(s.total), fmt(s.palTotal, nf2)], ["", "n", "n"]));
+  $("nopallet").textContent = s.noPallet.length ? "Sans taille de palette (non comptés) : " + s.noPallet.join(", ") : "";
+  $("sources").replaceChildren(...Object.entries(s.srcCount).map(([k, v]) => trow([SRC[k], fmt(v)], ["", "n"])));
+  $("topreasons").replaceChildren(...s.reasons.slice(0, 15).map(([k, v]) => trow([k, fmt(v)], ["", "n"])));
+  $("unrel").textContent = s.unrel.length ? "Quantités commandées non fiables (multiple absent) : " + s.unrel.join(", ") : "";
+  $("exsum").textContent = "Lignes exclues par la règle « Filter out » (" + DATA.excluded.length + ")";
+  $("exportinfo").replaceChildren(el("div", "msg info", s.stCount.R + " ligne(s) REVIEW et " + s.stCount.B + " BLOCKED. L'export reste possible : c'est toi qui décides."));
+  $("ltname").textContent = ltName();
+  $("lt").textContent = ltText(lines) || "(aucune ligne à commander)";
+  $("recap").textContent = recapText(lines, s);
+}
+$("exdetails").addEventListener("toggle", () => {
+  const body = $("excluded"); if (!$("exdetails").open || body.childElementCount) return;
+  body.append(...DATA.excluded.map(([sku, d, r]) => trow([sku, d, r], ["mono", "desc", ""])));
+});
+
+function copy(text, msgId, okText) {
+  const fallback = () => showMsg(msgId, "info", "Copie automatique refusée : ouvre le bloc ci-dessous, sélectionne le texte et fais Ctrl+C.");
+  try { navigator.clipboard.writeText(text).then(() => showMsg(msgId, "ok", okText), fallback); } catch (e) { fallback(); }
+}
+function saveRun(ltFile) {
+  const author = $("author").value.trim();
+  if (!author) { showMsg("smsg", "err", "Indique ton nom dans l'onglet 1. Paramètres pour enregistrer."); return null; }
+  const runs = store.get("spc_runs", []);
+  const lines = allLines(), s = summary(lines);
+  if (st.savedId) {
+    const r = runs.find(x => x.id === st.savedId);
+    if (r && ltFile) { r.lt = ltFile; store.set("spc_runs", runs); }
+    return st.savedId;
+  }
+  const id = (runs.reduce((m, r) => Math.max(m, r.id), 0) || 0) + 1;
+  const qty = {}; lines.forEach((r, i) => { if (r.qty > 0) qty[L[i].sku] = r.qty; });
+  runs.unshift({ id, created: new Date().toISOString().slice(0, 16).replace("T", " "), author, delivery: st.run.delivery,
+    cover: M.covers[st.run.cover], coffee: st.run.coffee >= 0 ? M.covers[st.run.coffee] : null, mode: st.run.mode, variant: st.run.variant,
+    lines: s.ordered, units: s.total, pallets: +s.palTotal.toFixed(2), qty, overrides: Object.entries(st.overrides).map(([sku, o]) => ({ sku, ...o })), lt: ltFile || "" });
+  if (!store.set("spc_runs", runs)) { showMsg("smsg", "err", "Ton navigateur bloque l'enregistrement local (navigation privée ?)."); return null; }
+  st.savedId = id; return id;
+}
+$("save").onclick = () => { const id = saveRun(); if (id) showMsg("smsg", "ok", "Run n° " + id + " enregistré (onglet 4. Historique)."); };
+$("copylt").onclick = () => {
+  const name = ltName(), text = ltText(allLines());
+  copy(text + "\r\n", "smsg", "Fichier LT copié (" + text.split("\r\n").filter(Boolean).length + " lignes). Colle-le dans « " + name + " ».");
+  saveRun(name);
+};
+$("copyrecap").onclick = () => copy($("recap").textContent, "smsg", "Récapitulatif copié.");
+
+// ---------- 4. Historique ----------
+function renderHistory() {
+  const runs = store.get("spc_runs", []);
+  $("runs").replaceChildren(...(runs.length ? runs.map(r => trow([String(r.id), r.created, r.author, r.delivery, nf1.format(r.cover) + (r.coffee ? " / café " + nf1.format(r.coffee) : ""), r.mode === "safe" ? "Safe" : "Parité Excel", fmt(r.lines), fmt(r.units), r.lt || ""], ["", "", "", "", "n", "", "n", "n", "mono"]))
+    : [trow(["Aucun run enregistré pour l'instant."], ["muted"])]));
+  const sel = $("cmp"), keep = sel.value; sel.replaceChildren(new Option("Choisir un run…", ""));
+  runs.forEach(r => sel.append(new Option("n° " + r.id + " · " + r.created + " · " + r.author, r.id)));
+  sel.value = keep; renderCompare();
+}
+$("cmp").onchange = renderCompare;
+function renderCompare() {
+  const out = $("cmpout"); out.replaceChildren();
+  const id = +$("cmp").value; if (!id) return;
+  const r = store.get("spc_runs", []).find(x => x.id === id); if (!r) return;
+  if (!st.run) { out.append(el("div", "msg info", "Calcule une commande pour la comparer à ce run.")); return; }
+  const now = {}; allLines().forEach((x, i) => { if (x.qty > 0) now[L[i].sku] = x.qty; });
+  const skus = [...new Set([...Object.keys(r.qty), ...Object.keys(now)])].sort();
+  const diff = skus.map(s => [s, r.qty[s] || 0, now[s] || 0]).filter(([, a, b]) => a !== b);
+  out.append(el("h2", "sec", diff.length + " SKU dont la quantité change"));
+  const wrap = el("div", "tablewrap"), t = el("table"), head = el("thead"), hr = el("tr");
+  ["SKU", "Avant", "Maintenant", "Écart"].forEach((h, j) => hr.append(el("th", j ? "n" : "", h))); head.append(hr);
+  const body = el("tbody"); diff.forEach(([s, a, b]) => body.append(trow([s, fmt(a), fmt(b), (b - a > 0 ? "+" : "") + fmt(b - a)], ["mono", "n", "n", "n"])));
+  t.append(head, body); wrap.append(t); out.append(wrap);
+  if (r.overrides.length) {
+    out.append(el("h2", "sec", "Overrides de ce run"));
+    const w2 = el("div", "tablewrap"), t2 = el("table"), b2 = el("tbody");
+    r.overrides.forEach(o => b2.append(trow([o.sku, fmt(o.before) + " → " + fmt(o.after), o.reason, o.author, o.ts.slice(0, 16).replace("T", " ")], ["mono", "n", "", "", ""])));
+    t2.append(b2); w2.append(t2); out.append(w2);
+  }
+}
+
+// ---------- Qualité ----------
+$("quality").replaceChildren(...(DATA.quality.length ? DATA.quality.map(q => {
+  const tr = trow([q.fichier, "", q.code, q.message, q["lignes (exemples)"]], ["", "", "mono", "desc", "mono"]);
+  tr.children[1].append(el("span", "st " + (q.niveau === "ERROR" ? "B" : q.niveau === "WARNING" ? "R" : "O"), q.niveau)); return tr;
+}) : [trow(["Aucun problème détecté."], ["muted"])]));
+
+function renderAll() {
+  clearNeedRun();
+  if (st.tab === "valid" && !needRun("t-valid")) renderValid();
+  if (st.tab === "summary" && !needRun("t-summary")) renderSummary();
+  if (st.tab === "history") renderHistory();
+  renderPanel();
+}
+$("foot").textContent = "Moteurs : " + Object.entries(M.rule_versions).map(([k, v]) => v).join(" · ") + " · aucune quantité n'est calculée par le navigateur ni par une IA.";
+</script>

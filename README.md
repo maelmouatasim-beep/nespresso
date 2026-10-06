@@ -62,6 +62,7 @@ ruff check . && ruff format --check .
 
 ```bash
 python tools/build_preview.py   # écrit preview/apercu_B80.html, à ouvrir dans un navigateur
+python tools/build_demo_app.py  # écrit preview/outil_B80.html : version web complète de la démo
 ```
 
 Les quantités de l'aperçu sont pré-calculées par le moteur Python ; la page ne fait que les afficher.
