@@ -9,7 +9,9 @@ import streamlit as st
 from pydantic import ValidationError
 
 from app.domain.models import Exclusion
+from app.engines.categories import CATEGORIES
 from app.ingestion import referential_checks as checks
+from app.ingestion.categories import check_mapping
 from app.ingestion.exclusions import parse_boutiques
 from app.ingestion.masters import load_masters_dir
 from app.ui.common import author, fmt_date, reset_all, ss, workspace
@@ -40,6 +42,11 @@ def _anomalies(ref: Referential) -> list[str]:
         return checks.dc_mapping_anomalies(masters)
     if ref.key == "schedule":
         return masters.schedule_issues
+    if ref.key == "categories":
+        mapping, rep = ws.load_categories()
+        return [i.message for i in rep.issues if i.level != "info"] + checks.categories_anomalies(
+            mapping, masters
+        )
     if ref.key == "exclusions":
         exclusions, rep = ws.load_exclusions()
         return [i.message for i in rep.issues if i.level != "info"] + checks.exclusions_anomalies(
@@ -114,6 +121,40 @@ def _exclusions_editor() -> None:
         st.success(f"{len(rows)} exclusion(s) enregistrée(s).")
 
 
+def _categories_editor() -> None:
+    ws = workspace()
+    mapping, _ = ws.load_categories()
+    order = {c: i for i, c in enumerate(CATEGORIES)}
+    df = pd.DataFrame(
+        sorted(mapping.items(), key=lambda kv: (order[kv[1]], kv[0])),
+        columns=["Type produit", "Catégorie"],
+    )
+    st.caption("Classement des types produit dans le filtre « Catégorie » de la commande. "
+               "Un type absent est classé « Autres ». Aucune quantité n'en dépend.")  # fmt: skip
+    edited = st.data_editor(
+        df, num_rows="dynamic", hide_index=True, key=f"cats_{ss.nonce}", width=420,
+        column_config={
+            "Type produit": st.column_config.TextColumn(width=120, required=True),
+            "Catégorie": st.column_config.SelectboxColumn(options=list(CATEGORIES), width=220,
+                                                          required=True),
+        },
+    )  # fmt: skip
+    if st.button("Enregistrer les catégories", type="primary", key="save_cats"):
+        if not author():
+            st.error("Indique ton nom dans la barre de gauche.")
+            return
+        rows = [(str(r["Type produit"] or ""), str(r["Catégorie"] or ""))
+                for r in edited.to_dict("records")
+                if not (pd.isna(r["Type produit"]) and pd.isna(r["Catégorie"]))]  # fmt: skip
+        new, errors = check_mapping(rows)
+        if errors:
+            st.error(" · ".join(errors))
+            return
+        ws.save_categories(new, author())
+        ss.day, ss.day_error = None, None  # recharge l'affichage ; la commande reste valable
+        st.success(f"{len(new)} type(s) produit enregistré(s).")
+
+
 def _referential_tab(ref: Referential) -> None:
     ws = workspace()
     meta = ws.meta().get(ref.key, {})
@@ -136,6 +177,8 @@ def _referential_tab(ref: Referential) -> None:
         st.success("Aucune anomalie.")
     if ref.kind == "exclusions":
         _exclusions_editor()
+    elif ref.kind == "categories":
+        _categories_editor()
     else:
         _preview(ref)
     u1, u2 = st.columns([3, 1], vertical_alignment="bottom")

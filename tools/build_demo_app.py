@@ -34,7 +34,7 @@ from app.domain.models import (  # noqa: E402
     PlanningParameters,
     TargetStock,
 )
-from app.engines.families import DISPLAY_ORDER, line_family  # noqa: E402
+from app.engines.categories import CATEGORIES  # noqa: E402
 from app.engines.pallets import OTHERS, PER_PALLET, family  # noqa: E402
 from app.engines.schedule import boutiques_ordering_on  # noqa: E402
 from app.ingestion import referential_checks as checks  # noqa: E402
@@ -210,7 +210,6 @@ def build() -> Path:  # noqa: PLR0915 - un seul script linéaire, plus simple à
                                 "sku": line.sku,
                                 "desc": line.description or "",
                                 "type": line.product_type or "",
-                                "fam": line_family(line),
                                 "pfam": family(line),
                                 "pf": _pallet_factor(line, masters, dc),
                                 "coffee": line.product_type == "C",
@@ -258,6 +257,7 @@ def build() -> Path:  # noqa: PLR0915 - un seul script linéaire, plus simple à
         "dc_mapping": checks.dc_mapping_anomalies(masters),
         "schedule": list(masters.schedule_issues),
         "exclusions": checks.exclusions_anomalies(data.exclusions, masters),
+        "categories": checks.categories_anomalies(data.categories, masters),
     }
     refs = []
     for ref in REFERENTIALS:
@@ -296,7 +296,6 @@ def build() -> Path:  # noqa: PLR0915 - un seul script linéaire, plus simple à
             "history_days": inputs.sales.history_days,
             "rule_versions": RULE_VERSIONS,
             "covers": COVERS,
-            "families": list(DISPLAY_ORDER),
             "codes": sorted({m.movement_code for m in data.movements if m.location == BOUTIQUE}),
             "categories": [[c.value, label] for c, label in OVERRIDE_CATEGORY_LABELS.items()],
             "period": [dates[0].isoformat(), dates[-1].isoformat()] if dates else None,
@@ -312,6 +311,8 @@ def build() -> Path:  # noqa: PLR0915 - un seul script linéaire, plus simple à
         },  # fmt: skip
         "quality": quality,
         "refs": refs,
+        "category_map": dict(data.categories),
+        "category_names": list(CATEGORIES),
         "text": text.items,
         "lines": meta,
         "variants": variants,

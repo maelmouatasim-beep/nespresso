@@ -100,6 +100,8 @@ Décisions du planner (étape 2, 07-oct-2026) :
 - **Historique (A7).** L'export de mouvements peut couvrir plusieurs semaines. La fenêtre de la formule reste au choix du planner (défaut 7 jours). L'historique de secours = moyenne journalière sur les X dernières semaines complètes avec ventes (défaut 4), utilisé seulement pour les SKU dormants et toujours cité dans le « Pourquoi ».
 - **Exclusions (A8).** Plus aucun SKU codé en dur (ex. `7010.70`) : un référentiel éditable « Exclusions » (SKU, boutiques ou toutes, raison, auteur, date) bloque la ligne (`BLOCKED`, quantité 0) et la raison apparaît dans le « Pourquoi ».
 - **Doublons de multiples (A9).** `7922.70` est un café ORI → 800. Quand un SKU a deux multiples différents, la ligne passe en `REVIEW` « Deux multiples dans la Multiple list » ; en mode standard, le multiple de la famille (240 VER / 800 ORI) l'emporte s'il fait partie des deux. Les autres doublons restent une question ouverte.
+- **Catégories d'affichage (étape 2 bis).** Le filtre « Catégorie » de la commande classe les SKU par type produit : Cafés = C ; Machines = M ; Consommables & sacs = A, AP, D, FB, PA, PM, MD ; Accessoires = LC, CH, GC, T, TX, F ; tout le reste = Autres. Cafés Vertuo et Original restent ensemble. Cette table est un référentiel modifiable (Référentiels → Catégories) ; elle ne change aucune quantité.
+- **Écran Commande = une seule grille, comme le calculateur Excel** : pas de blocs ni de sections repliées ; filtres Catégorie / Statut / Qty > 0 / recherche sans recalcul ; tri au clic sur chaque en-tête ; tri par défaut REVIEW et BLOCKED en haut puis Qty proposée décroissante ; panneau « Pourquoi » à droite, sans quitter la table.
 
 ## Périmètre des sources
 

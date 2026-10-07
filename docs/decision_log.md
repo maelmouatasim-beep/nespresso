@@ -149,3 +149,12 @@ Format : contexte → décision → conséquence.
 - Une modification de quantité exige une catégorie et une raison ; le nom du planner est saisi une fois par session.
 - La version web de démonstration reprend les mêmes écrans ; ses quantités sont calculées d'avance par le moteur Python, la page n'en calcule aucune.
 
+## D-025 — Commande en une seule grille, catégories par type produit (2026-10-07)
+
+- Demande du planner : l'écran Commande boutique ressemble au calculateur Excel. Une seule table pleine largeur, en-tête figé, défilement interne ; plus de regroupement par famille ni de lignes repliées (remplace la partie « tableau groupé par famille » de D-024).
+- Filtres sans recalcul : Catégorie (Tous / Cafés / Machines / Accessoires / Consommables & sacs / Autres), Statut (Tous / OK / REVIEW / BLOCKED / Modifié), « Qty > 0 seulement », recherche SKU ou description. Le filtre Statut suit ce qui est affiché : une ligne modifiée n'apparaît que sous « Modifié ».
+- Tri au clic sur chaque en-tête ; tri par défaut : REVIEW et BLOCKED en haut, puis Qty proposée décroissante. Les nombres sont de vrais nombres dans la grille (tri correct), les cases vides affichent « — ».
+- La catégorie vient du type produit via un référentiel modifiable (`masters/categories.csv`, modèle `templates/categories.xlsx`) ; valeurs par défaut données par le planner. Un type inconnu va dans « Autres » et l'écran Référentiels liste ces types. Un fichier invalide est signalé et le classement par défaut est gardé (affichage seulement, ne bloque pas le calcul).
+- Limite de Streamlit : une grille modifiable ne sait pas réagir au clic sur une ligne. Une petite case 🔍 en première colonne ouvre le panneau « Pourquoi » à droite (la version web, elle, ouvre le panneau au clic sur la ligne).
+- « Accepter toutes les lignes OK » marque les lignes OK comme validées (« ✓ » dans le Statut) ; une ligne REVIEW se valide depuis son panneau « Pourquoi ».
+

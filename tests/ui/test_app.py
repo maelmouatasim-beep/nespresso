@@ -88,3 +88,34 @@ def test_referential_owner_is_saved(app: AppTest) -> None:
     from app.ui.workspace import demo_workspace
 
     assert demo_workspace().meta()["multiples"]["owner"] == "Équipe planning MTL"
+
+
+def grid(at: AppTest):
+    return next(d for d in at.dataframe if d.key and d.key.startswith("grid_")).value
+
+
+def test_single_grid_default_order_and_filters(app: AppTest) -> None:
+    compute_b80(app)
+    df = grid(app)
+    assert len(df) == len(app.session_state["base"].lines)  # une seule grille, toutes les lignes
+    flagged = ~df["Statut"].str.contains("OK")
+    first_ok = int(flagged.values.argmin())
+    assert flagged[:first_ok].all() and not flagged[first_ok:].any()  # REVIEW/BLOCKED en haut
+    ok = df[first_ok:]["Qty proposée"].tolist()
+    assert ok == sorted(ok, reverse=True)  # puis Qty proposée décroissante
+    assert list(df.columns[1:5]) == ["Statut", "SKU", "Description", "Catégorie"]
+
+    next(b for b in app.button_group if b.key == "f_cat").set_value("Cafés").run()
+    assert set(grid(app)["Catégorie"]) == {"Cafés"}
+    next(b for b in app.button_group if b.key == "f_status").set_value("REVIEW").run()
+    assert grid(app)["Statut"].str.contains("REVIEW").all()
+    app.checkbox(key="f_qty").check().run()
+    assert (grid(app)["Qty finale"] > 0).all()
+
+
+def test_accept_all_ok_marks_ok_lines(app: AppTest) -> None:
+    compute_b80(app)
+    app.button(key="accept_ok").click().run()
+    df = grid(app)
+    assert df[df["Statut"].str.contains("OK")]["Statut"].str.endswith("✓").all()
+    assert not df[df["Statut"].str.contains("REVIEW")]["Statut"].str.endswith("✓").any()

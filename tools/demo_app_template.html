@@ -71,7 +71,11 @@ button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-v
 .msg.warn { background: var(--review-bg); color: var(--review); }
 .msg.ok { background: var(--ok-bg); color: var(--ok); }
 .msg.info { background: var(--surface-2); color: var(--text); }
-.params { display: grid; grid-template-columns: minmax(200px, 2.3fr) repeat(3, minmax(92px, .9fr)) minmax(80px, .7fr) minmax(120px, 1fr) auto auto; gap: 10px; align-items: end; }
+.params { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; }
+.params > * { flex: 1 1 105px; min-width: 0; }
+.params > .f:first-child { flex: 2.2 1 220px; }
+.params > .gear { flex: 0 0 auto; }
+.params > .bt { flex: 0 0 130px; }
 .params .gear { position: relative; }
 .pop { position: absolute; right: 0; top: calc(100% + 6px); width: 300px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 12px; box-shadow: 0 10px 30px rgba(0,0,0,.18); z-index: 6; display: flex; flex-direction: column; gap: 10px; font-weight: 400; color: var(--text); }
 .ctx { margin: 14px 0 10px; font-size: 14.5px; }
@@ -84,6 +88,20 @@ button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-v
 .progress { height: 6px; background: var(--surface-2); border-radius: 99px; overflow: hidden; margin: 4px 0 2px; }
 .progress div { height: 100%; background: var(--ok); }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0 8px; }
+.filters { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: flex-end; margin: 12px 0 10px; }
+.filters .grow { flex: 1 1 220px; min-width: 0; }
+.seg { display: flex; flex-wrap: wrap; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--surface); }
+.seg button { font: inherit; font-size: 13.5px; border: 0; border-right: 1px solid var(--border); background: none; color: var(--text); padding: 5px 11px; cursor: pointer; white-space: nowrap; }
+.seg button:last-child { border-right: 0; }
+.seg button.on { background: var(--text); color: var(--bg); }
+.seg button b { font-weight: 600; margin-left: 5px; opacity: .65; font-variant-numeric: tabular-nums; }
+.chk { display: inline-flex; gap: 6px; align-items: center; font-size: 14px; padding-bottom: 6px; }
+.tablewrap.grid { max-height: calc(100vh - 120px); min-height: 420px; }
+th.sortable { cursor: pointer; user-select: none; }
+th.sortable:hover { color: var(--text); }
+th.sortable.on { color: var(--accent); }
+table.order tr.sel td { box-shadow: inset 0 2px 0 var(--accent), inset 0 -2px 0 var(--accent); }
+@media (min-width: 1100px) { body.why-open main { margin-right: min(440px, 34vw); } body.why-open #why { width: min(440px, 34vw); } }
 .chip { font: inherit; font-size: 13.5px; border: 1px solid var(--border); background: var(--surface); color: var(--text); border-radius: 999px; padding: 4px 12px; cursor: pointer; }
 .chip.on { background: var(--text); color: var(--bg); border-color: var(--text); }
 .chip b { font-weight: 600; font-variant-numeric: tabular-nums; margin-left: 4px; opacity: .7; }
@@ -132,7 +150,7 @@ ol.steps li.tot { font-weight: 700; }
 #dock { position: fixed; left: 228px; right: 0; bottom: 0; background: var(--surface); border-top: 2px solid var(--mod); padding: 10px 24px calc(10px + env(safe-area-inset-bottom, 0px)); box-shadow: 0 -10px 30px rgba(0,0,0,.12); z-index: 15; max-height: 45vh; overflow-y: auto; }
 #dock .pl { display: grid; grid-template-columns: minmax(180px, 2.2fr) minmax(150px, 1.2fr) minmax(200px, 3fr); gap: 8px; align-items: center; padding: 4px 0; border-bottom: 1px solid var(--border); }
 footer { color: var(--muted); font-size: 12.5px; margin-top: 28px; }
-@media (max-width: 1100px) { .params { grid-template-columns: repeat(3, minmax(0, 1fr)); } .params .bt { grid-column: span 3; } .tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 1100px) {  .tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 @media (max-width: 860px) {
   .app { grid-template-columns: minmax(0, 1fr); }
   aside.side { position: static; height: auto; }
@@ -140,7 +158,7 @@ footer { color: var(--muted); font-size: 12.5px; margin-top: 28px; }
   #dock { left: 0; padding-inline: 16px; }
   main { padding-inline: 16px; }
   .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .params { grid-template-columns: repeat(2, minmax(0, 1fr)); } .params .bt { grid-column: span 2; }
+  .params > .bt { flex: 1 1 100%; }
   .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   #dock .pl { grid-template-columns: minmax(0, 1fr); }
 }
@@ -168,7 +186,8 @@ const STATUS = { O: "OK", R: "REVIEW", B: "BLOCKED" };
 const SRC = { forecast: "Prévision", allocation: "Allocation", launch: "Lancement", target_stock: "Stock cible", dc_return: "Retour DC", exclusion: "Exclusion", override: "Modifié" };
 const MSRC = { multiple_list: "Multiple list", multiple_list_family: "famille (deux multiples)", inferred_family: "inféré (famille)", excel_default_1: "absent → 1 (Excel)", missing_default_1: "absent" };
 const CAT = Object.fromEntries(M.categories);
-const CHIPS = ["Tous", "OK", "REVIEW", "BLOCKED", "Qty > 0", "Promo/Allocation", "Lancement", "Conversion", "Retour DC"];
+const CATEGORY_FILTERS = ["Tous", ...DATA.category_names];
+const STATUS_FILTERS = ["Tous", "OK", "REVIEW", "BLOCKED", "Modifié"];
 const MODES = { "Standard": "standard", "Parité Excel": "excel_parity" };
 const MODE_LABEL = { standard: "Standard", excel_parity: "Parité Excel" };
 const NAMES = Object.fromEntries(DATA.boutiques);
@@ -204,9 +223,12 @@ const store = { get(k, d) { try { const v = localStorage.getItem(k); return v ? 
 const st = {
   page: store.get("spc2_page", PAGES[0]), author: store.get("spc_author", ""), examples: store.get("spc2_examples", true),
   form: { boutique: "", delivery: "", cover: "", coffee: "", mode: "standard" }, order: null, err: "",
-  overrides: {}, pending: {}, seen: new Set(), chip: "Tous", q: "", why: null, gear: false, savedId: null, xmsg: null,
+  overrides: {}, pending: {}, seen: new Set(), f: { cat: "Tous", status: "Tous", qty: false }, sort: null, q: "", why: null, gear: false, savedId: null, xmsg: null,
   day: null, refTab: 0,
 };
+
+// Catégories : table du référentiel (modifiable dans Référentiels, gardée dans ce navigateur).
+function categories() { return store.get("spc2_categories", null) || DATA.category_map; }
 
 // ---------- Résultat pré-calculé ----------
 function variantKey(mode) { return mode + "|" + (st.examples ? "examples" : "none"); }
@@ -348,44 +370,67 @@ function paramsRow() {
   return out;
 }
 function setExamples(on) { st.examples = on; store.set("spc2_examples", on); st.overrides = {}; st.pending = {}; st.savedId = null; render(); }
-function matches(chip, x) {
-  if (chip in { OK: 1, REVIEW: 1, BLOCKED: 1 }) return STATUS[x.s] === chip;
-  if (chip === "Qty > 0") return x.qty > 0;
-  if (chip === "Promo/Allocation") return x.source === "allocation" || (x.ov && x.ov.cat === "promo");
-  if (chip === "Lancement") return x.source === "launch";
-  if (chip === "Conversion") return x.conv;
-  if (chip === "Retour DC") return x.dcr;
-  return true;
+function categoryOf(m) { return categories()[(m.type || "").trim().toUpperCase()] || "Autres"; }
+function statusKey(x) { return x.ov ? "Modifié" : STATUS[x.s]; }
+function matches(x) {
+  const f = st.f;
+  if (f.cat !== "Tous" && categoryOf(x.m) !== f.cat) return false;
+  if (f.status !== "Tous" && statusKey(x) !== f.status) return false;
+  if (f.qty && x.qty <= 0) return false;
+  return !st.q || x.m.sku.toLowerCase().includes(st.q) || x.m.desc.toLowerCase().includes(st.q);
 }
-function rank(x) { return x.s !== "O" ? [0, -x.qty, x.m.sku] : x.qty > 0 ? [1, -x.qty, x.m.sku] : [2, 0, x.m.sku]; }
-function cmpRank(a, b) { const ra = rank(a), rb = rank(b); for (let i = 0; i < 3; i++) { if (ra[i] < rb[i]) return -1; if (ra[i] > rb[i]) return 1; } return 0; }
-const COLS = [["Statut", 104], ["SKU", 92], ["Description", 200], ["Expected", 76, 1], ["Ventes", 66, 1], ["Couv. act.", 70, 1], ["Proposée", 76, 1], ["Qty finale ✎", 90, 1], ["Couv. après", 78, 1], ["Multiple", 66, 1], ["Stock DC", 74, 1], ["Source", 92], ["Raisons", 210], ["Vu", 40]];
+// Colonnes : [titre, largeur, numérique, valeur de tri]
+const COLS = [
+  ["Statut", 112, 0, x => statusKey(x)], ["SKU", 96, 0, x => x.m.sku], ["Description", 210, 0, x => x.m.desc],
+  ["Catégorie", 130, 0, x => categoryOf(x.m)], ["Expected", 86, 1, x => x.m.exp], ["Ventes", 68, 1, x => x.m.sales],
+  ["Couv. act.", 72, 1, x => x.m.cur], ["Proposée", 78, 1, (x, b) => b[x.m.sku]], ["Qty finale ✎", 92, 1, x => x.qty],
+  ["Couv. après", 80, 1, x => postCover(x.m, x.qty)], ["Multiple", 68, 1, x => x.multiple], ["Stock DC", 80, 1, x => x.m.dc],
+  ["Source", 92, 0, x => SRC[x.source]], ["Raisons", 300, 0, x => x.reasons.join(" | ")]];
+function defaultCmp(baseQty) { return (a, b) => ((a.s === "O") - (b.s === "O")) || (baseQty[b.m.sku] - baseQty[a.m.sku]) || a.m.sku.localeCompare(b.m.sku); }
+function sortRows(rows, baseQty) {
+  if (!st.sort) return rows.sort(defaultCmp(baseQty));
+  const get = COLS[st.sort.col][3], dir = st.sort.dir;
+  return rows.sort((a, b) => {
+    const va = get(a, baseQty), vb = get(b, baseQty);
+    const na = va === null || va === undefined || Number.isNaN(va), nb = vb === null || vb === undefined || Number.isNaN(vb);
+    if (na !== nb) return na ? 1 : -1;  // les vides toujours en bas
+    if (na) return 0;
+    return (typeof va === "number" ? va - vb : String(va).localeCompare(String(vb), "fr")) * dir;
+  });
+}
+function clickSort(i) {
+  if (!st.sort || st.sort.col !== i) st.sort = { col: i, dir: COLS[i][2] ? -1 : 1 };
+  else if (st.sort.dir === (COLS[i][2] ? -1 : 1)) st.sort.dir = -st.sort.dir;
+  else st.sort = null;  // troisième clic : retour au tri par défaut
+  render();
+}
 function orderTable(rows, baseQty) {
-  const t = el("table", "order", el("colgroup", "", COLS.map(c => el("col", { style: "width:" + c[1] + "px" }))),
-    el("thead", "", el("tr", "", COLS.map(c => el("th", c[2] ? "n" : "", c[0])))));
+  const head = el("tr", "", COLS.map((c, i) => {
+    const on = st.sort && st.sort.col === i, arrow = on ? (st.sort.dir > 0 ? " ▲" : " ▼") : "";
+    return el("th", { class: (c[2] ? "n " : "") + "sortable" + (on ? " on" : ""), title: "Trier", onclick: () => clickSort(i) }, c[0] + arrow);
+  }));
+  const t = el("table", "order", el("colgroup", "", COLS.map(c => el("col", { style: "width:" + c[1] + "px" }))), el("thead", "", head));
   const body = el("tbody");
   for (const x of rows) {
     const m = x.m, sku = m.sku, pend = sku in st.pending;
-    const tr = el("tr", (x.ov ? "mod" : "") + (pend ? " pend" : ""));
+    const tr = el("tr", (x.ov ? "mod" : "") + (pend ? " pend" : "") + (st.why === sku ? " sel" : ""));
     tr.onclick = e => { if (e.target.closest("input")) return; openWhy(sku); };
-    const stCell = x.ov ? el("span", "st M", "Modifié") : el("span", "st " + x.s, STATUS[x.s]);
+    const seen = st.seen.has(sku) ? " ✓" : "";
+    const stCell = x.ov ? el("span", "st M", "Modifié" + seen) : el("span", "st " + x.s, STATUS[x.s] + seen);
     const qi = el("input", { type: "number", min: 0, step: x.multiple || 1, value: pend ? st.pending[sku] : x.qty, "aria-label": "Qty finale " + sku });
     qi.onchange = () => { const v = Math.round(Number(qi.value)); if (!Number.isFinite(v) || v < 0) { qi.value = x.qty; return; } if (v !== x.qty) st.pending[sku] = v; else delete st.pending[sku]; renderDock(); tr.classList.toggle("pend", sku in st.pending); };
-    const vu = el("input", { type: "checkbox", checked: st.seen.has(sku), "aria-label": "Vu " + sku });
-    vu.onchange = () => { vu.checked ? st.seen.add(sku) : st.seen.delete(sku); updateProgress(); };
     const reasons = x.reasons.join(" | ");
-    tr.append(el("td", "", stCell), el("td", "mono", sku), el("td", { title: m.desc }, m.desc || "—"),
+    tr.append(el("td", "", stCell), el("td", "mono", sku), el("td", { title: m.desc }, m.desc || "—"), el("td", "", categoryOf(m)),
       el("td", "n", fmt(m.exp)), el("td", "n", fmt(m.sales)), el("td", "n", fmt1(m.cur)), el("td", "n", fmt(baseQty[sku])),
       el("td", "n q", qi), el("td", "n", fmt1(postCover(m, x.qty))), el("td", "n", fmt(x.multiple)),
-      el("td", "n", m.dc === null ? "—" : fmt(m.dc)), el("td", "", SRC[x.source]), el("td", { title: reasons, class: "small" }, reasons || ""), el("td", "vu", vu));
+      el("td", "n", m.dc === null ? "—" : fmt(m.dc)), el("td", "", SRC[x.source]), el("td", { title: reasons, class: "small" }, reasons || ""));
     body.append(tr);
   }
   t.append(body);
-  return el("div", { class: "tablewrap", style: "max-height:" + Math.min(42 + 33 * Math.max(rows.length, 1), 470) + "px" }, t);
+  return el("div", { class: "tablewrap grid", id: "grid" }, t);
 }
-function updateProgress() {
-  const n = lines().length, seen = st.seen.size;
-  const p = $("prog"); if (p) { p.firstChild.style.width = (100 * seen / Math.max(n, 1)) + "%"; $("progtxt").textContent = "Lignes vérifiées : " + seen + " / " + n; }
+function segmented(label, options, value, counts, onpick) {
+  return el("div", "f", label, el("div", "seg", options.map(o => el("button", { class: value === o ? "on" : "", onclick: () => onpick(o) }, o, el("b", "", String(counts[o] || 0))))));
 }
 function renderOrder() {
   const out = [el("h1", "", "Commande boutique"), ...paramsRow()];
@@ -399,24 +444,21 @@ function renderOrder() {
     tile("Palettes estimées", fmt1(s.palTotal), "VL " + fmt1(s.pal.VL) + " · OL " + fmt1(s.pal.OL) + " · Mach. " + fmt1(s.pal.MACHINES) + " · Autres " + fmt1(s.pal.OTHERS)),
     tile("OK", fmt(s.by.O), null, "O"), tile("REVIEW", fmt(s.by.R), null, "R"), tile("BLOCKED", fmt(s.by.B), null, "B")));
   v.warnings.forEach(w => out.push(el("div", "msg warn", w)));
-  out.push(el("div", { id: "prog", class: "progress" }, el("div", { style: "width:" + (100 * st.seen.size / Math.max(ls.length, 1)) + "%" })),
-    el("div", { id: "progtxt", class: "small muted" }, "Lignes vérifiées : " + st.seen.size + " / " + ls.length));
-  out.push(el("div", "chips", CHIPS.map(c => el("button", { class: "chip" + (st.chip === c ? " on" : ""), onclick: () => { st.chip = c; render(); } }, c, el("b", "", String(ls.filter(x => matches(c, x)).length))))));
-  const search = el("input", { type: "search", id: "search", placeholder: "Rechercher un SKU ou une description", value: st.q, style: "max-width:360px" });
-  search.oninput = () => { st.q = search.value.trim().toLowerCase(); clearTimeout(search._t); search._t = setTimeout(() => { render(); const s2 = $("search"); s2.focus(); s2.setSelectionRange(s2.value.length, s2.value.length); }, 220); };
-  out.push(el("div", "row", search, el("button", { class: "btn", onclick: () => { ls.forEach(x => { if (x.s === "O") st.seen.add(x.m.sku); }); render(); } }, "✓ Accepter toutes les lignes OK")));
-  const shown = ls.filter(x => matches(st.chip, x) && (!st.q || x.m.sku.toLowerCase().includes(st.q) || x.m.desc.toLowerCase().includes(st.q)));
-  for (const fam of M.families) {
-    const fl = shown.filter(x => x.m.fam === fam).sort(cmpRank);
-    if (!fl.length) continue;
-    const units = fl.reduce((a, x) => a + x.qty, 0), flagged = fl.filter(x => x.s !== "O").length;
-    out.push(el("h2", "fam", fam, el("span", "", fl.length + " lignes · " + fmt(units) + " unités" + (flagged ? " · " + flagged + " à vérifier" : ""))));
-    const main = fl.filter(x => x.s !== "O" || x.qty > 0 || x.ov || x.m.sku in st.pending), rest = fl.filter(x => !main.includes(x));
-    if (main.length) out.push(orderTable(main, baseQty));
-    if (rest.length) { const d = el("details", "zero", el("summary", "", "Lignes à 0 sans alerte (" + rest.length + ")")); d.ontoggle = () => { if (d.open && d.children.length === 1) d.append(orderTable(rest, baseQty)); }; out.push(d); }
-  }
-  if (!shown.length) out.push(el("div", "msg info", "Aucune ligne pour ce filtre."));
-  out.push(el("div", { style: "margin-top:16px" }, el("button", { class: "btn primary", onclick: () => go(PAGES[3]) }, "Continuer vers l'export")));
+  const byCat = { Tous: ls.length }, bySt = { Tous: ls.length };
+  ls.forEach(x => { const c = categoryOf(x.m), k = statusKey(x); byCat[c] = (byCat[c] || 0) + 1; bySt[k] = (bySt[k] || 0) + 1; });
+  const search = el("input", { type: "search", id: "search", placeholder: "Rechercher un SKU ou une description", value: st.q });
+  search.oninput = () => { st.q = search.value.trim().toLowerCase(); clearTimeout(search._t); search._t = setTimeout(() => { render(); const s2 = $("search"); s2.focus(); s2.setSelectionRange(s2.value.length, s2.value.length); }, 200); };
+  out.push(el("div", "filters",
+    segmented("Catégorie", CATEGORY_FILTERS, st.f.cat, byCat, c => { st.f.cat = c; render(); }),
+    segmented("Statut", STATUS_FILTERS, st.f.status, bySt, c => { st.f.status = c; render(); }),
+    el("label", "chk", el("input", { type: "checkbox", id: "f_qty", checked: st.f.qty, onchange: e => { st.f.qty = e.target.checked; render(); } }), "Qty > 0 seulement"),
+    el("div", "grow", search),
+    el("button", { class: "btn", id: "accept_ok", onclick: () => { ls.forEach(x => { if (x.s === "O" && !x.ov) st.seen.add(x.m.sku); }); render(); } }, "✓ Accepter toutes les lignes OK")));
+  const shown = sortRows(ls.filter(matches), baseQty);
+  out.push(shown.length ? orderTable(shown, baseQty) : el("div", "msg info", "Aucune ligne pour ces filtres."));
+  out.push(el("div", "row", { style: "justify-content:space-between;margin-top:8px" },
+    el("span", "small muted", shown.length + " ligne(s) affichée(s) sur " + ls.length + " · lignes validées : " + st.seen.size + " / " + ls.length + " · clic sur un en-tête pour trier, sur une ligne pour le détail"),
+    el("button", { class: "btn primary", onclick: () => go(PAGES[3]) }, "Continuer vers l'export")));
   return out;
 }
 
@@ -455,7 +497,7 @@ function renderDock() {
 }
 
 // ---------- Panneau « Pourquoi » ----------
-function openWhy(sku) { st.why = sku; renderWhy(); }
+function openWhy(sku) { st.why = sku; render(); }
 function steps(x) {
   const m = x.m, days = M.history_days, out = [];
   const when = M.period ? " (du " + fdate(M.period[0]).slice(0, 5) + " au " + fdate(M.period[1]).slice(0, 5) + ")" : "";
@@ -478,7 +520,9 @@ function steps(x) {
 }
 function renderWhy() {
   const p = $("why");
-  if (!st.why || !st.order || st.page !== PAGES[1]) { p.hidden = true; return; }
+  const open = !!(st.why && st.order && st.page === PAGES[1]);
+  document.body.classList.toggle("why-open", open);
+  if (!open) { p.hidden = true; return; }
   const j = DATA.variants[variantKey(st.order.mode)].sel.findIndex(i => L[i].sku === st.why);
   if (j < 0) { p.hidden = true; return; }
   const x = finalLine(j), b = baseLine(j), m = x.m;
@@ -488,16 +532,17 @@ function renderWhy() {
   const cat = catSelect("dlg_cat", x.ov ? x.ov.cat : ""), reason = el("input", { type: "text", id: "dlg_reason", placeholder: "Raison", value: x.ov ? x.ov.reason : "" });
   const msg = el("div");
   p.hidden = false;
-  p.replaceChildren(
-    el("button", { class: "x", "aria-label": "Fermer", onclick: () => { st.why = null; renderWhy(); } }, "×"),
+  p.replaceChildren(...[
+    el("button", { class: "x", "aria-label": "Fermer", onclick: () => { st.why = null; render(); } }, "×"),
     el("h2", "", el("span", "mono", m.sku), " — " + (m.desc || "sans description")),
-    el("div", "", x.ov ? el("span", "st M", "Modifié") : el("span", "st " + x.s, STATUS[x.s]), " ", el("span", "muted small", m.fam + " · source : " + SRC[x.source] + " · multiple " + fmt(x.multiple) + " (" + (MSRC[x.msrc] || x.msrc) + ")")),
+    el("div", "", x.ov ? el("span", "st M", "Modifié") : el("span", "st " + x.s, STATUS[x.s]), " ", el("span", "muted small", categoryOf(m) + " · source : " + SRC[x.source] + " · multiple " + fmt(x.multiple) + " (" + (MSRC[x.msrc] || x.msrc) + ")")),
     el("h3", "", "Pourquoi cette quantité ?"),
     el("ol", "steps", steps(x).map(([a, v]) => el("li", "", a, v !== undefined ? el("b", "", v) : null)), el("li", "tot", "Quantité finale : " + fmt(x.qty))),
     el("p", "small", "Stock DC " + M.dc + " : ", el("b", "", m.dc === null ? "absent" : fmt(m.dc)), " · stock projeté le jour de la livraison (" + days + " j) : ", el("b", "", fmt(proj)),
       x.qty > 0 && m.dc !== null && m.dc < x.qty ? el("span", "", " · ", el("span", "st R", "DC insuffisant")) : null),
     x.reasons.length ? el("div", "", el("h3", "", "Raisons et alertes"), el("ul", "list", x.reasons.map(r => el("li", "", r)))) : null,
     el("p", "small muted", "Excel (cover 9 j) : " + (m.xl === null || m.xl === undefined ? "SKU absent de la feuille" : fmt(m.xl) + (m.xlf ? " (formule)" : " (saisie manuelle dans Excel)"))),
+    el("button", { class: "btn", style: "width:100%;margin-top:6px", onclick: () => { st.seen.has(m.sku) ? st.seen.delete(m.sku) : st.seen.add(m.sku); render(); } }, st.seen.has(m.sku) ? "Retirer la validation" : "✓ Marquer comme vérifiée"),
     el("h3", "", "Modifier la quantité"),
     el("div", "form3", el("label", "f", "Qty finale", qty), el("label", "f", "Catégorie", cat), el("label", "f wide", "Raison", reason)),
     el("div", "row", { style: "margin-top:10px" }, el("button", { class: "btn primary", id: "dlg_save", onclick: () => {
@@ -507,7 +552,7 @@ function renderWhy() {
       if (applyOverride(m.sku, q, cat.value, reason.value)) return msg.replaceChildren(el("div", "msg err", "Catégorie et raison obligatoires."));
       delete st.pending[m.sku]; render(); renderWhy();
     } }, "Enregistrer"), b.qty !== x.qty ? el("button", { class: "btn", onclick: () => { delete st.overrides[m.sku]; render(); } }, "Revenir à " + fmt(b.qty)) : null),
-    msg);
+    msg].filter(Boolean));
 }
 
 // ---------- 3. Journée ----------
@@ -675,6 +720,7 @@ function renderRefs() {
     el("p", { style: "margin:0 0 6px" }, "Mis à jour le ", el("b", "", when), r.by ? " par " + r.by : "", r.src ? " · source : " + r.src : "")));
   out.push(r.anomalies.length ? el("details", { open: true, class: "card", style: "margin:12px 0;border-color:var(--review)" }, el("summary", "", el("b", "", r.anomalies.length + " anomalie(s)")), el("ul", "list", r.anomalies.map(a => el("li", "", a))))
     : el("div", "msg ok", "Aucune anomalie."));
+  if (r.key === "categories") { out.push(...categoriesEditor()); return out; }
   let rows = r.rows;
   if (r.examples.length && st.examples) rows = r.examples;
   if (r.examples.length) out.push(el("label", { style: "display:flex;gap:8px;align-items:center;margin:8px 0" }, el("input", { type: "checkbox", checked: st.examples, onchange: e => setExamples(e.target.checked) }), "Démo : utiliser les exemples d'allocation, lancement et stock cible"));
@@ -687,6 +733,32 @@ function renderRefs() {
     el("div", { class: "drop", style: "flex:1 1 300px" }, "Importer (remplace le fichier actuel)", el("br"), el("span", "small", "Démo : import désactivé.")),
     r.template ? el("button", { class: "btn", disabled: true, title: "Disponible dans l'outil installé" }, "Modèle vierge") : null));
   return out;
+}
+
+function categoriesEditor() {
+  const order = Object.fromEntries(DATA.category_names.map((c, i) => [c, i]));
+  if (!st.catDraft) st.catDraft = Object.entries(categories()).sort((a, b) => order[a[1]] - order[b[1]] || a[0].localeCompare(b[0])).map(([t, c]) => ({ t, c }));
+  const msg = el("div");
+  const rows = st.catDraft.map((r, i) => {
+    const ti = el("input", { type: "text", value: r.t, "aria-label": "Type produit", style: "width:90px", oninput: e => { r.t = e.target.value; } });
+    const cs = el("select", { "aria-label": "Catégorie", onchange: e => { r.c = e.target.value; } }, DATA.category_names.map(c => el("option", { value: c }, c))); cs.value = r.c;
+    return [ti, cs, el("button", { class: "btn link", onclick: () => { st.catDraft.splice(i, 1); render(); } }, "Retirer")];
+  });
+  return [
+    el("p", "small muted", "Classement des types produit dans le filtre « Catégorie » de la commande. Un type absent est classé « Autres ». Aucune quantité n'en dépend."),
+    el("div", { style: "max-width:520px" }, tableOf(["Type produit", "Catégorie", ""], rows)),
+    el("div", "row", { style: "margin-top:10px" },
+      el("button", { class: "btn", onclick: () => { st.catDraft.push({ t: "", c: "Autres" }); render(); } }, "Ajouter un type"),
+      el("button", { class: "btn primary", id: "save_cats", onclick: () => {
+        if (!st.author) return msg.replaceChildren(el("div", "msg err", "Indique ton nom dans la barre de gauche."));
+        const map = {}, errs = [];
+        st.catDraft.forEach((r, i) => { const t = r.t.trim().toUpperCase(); if (!t) errs.push("ligne " + (i + 1) + " : type produit vide"); else if (map[t] && map[t] !== r.c) errs.push("type " + t + " déjà classé en « " + map[t] + " »"); else map[t] = r.c; });
+        if (errs.length) return msg.replaceChildren(el("div", "msg err", errs.join(" · ")));
+        store.set("spc2_categories", map); st.catDraft = null; render();
+        $("catmsg")?.replaceChildren(el("div", "msg ok", Object.keys(map).length + " type(s) produit enregistré(s) dans ce navigateur."));
+      } }, "Enregistrer les catégories"),
+      el("button", { class: "btn", onclick: () => { try { localStorage.removeItem("spc2_categories"); } catch (e) { /* stockage bloqué */ } st.catDraft = null; render(); } }, "Revenir au classement du planner")),
+    el("div", { id: "catmsg" }, msg)];
 }
 
 // ---------- 6. Historique ----------
@@ -731,10 +803,11 @@ function render() {
 }
 function draw() {
   renderNav();
-  const main = $("main");
-  main.replaceChildren(...(SCREENS[st.page] || renderDepot)(), el("footer", "", "Moteurs : " + Object.values(M.rule_versions).join(" · ") + " · aucune quantité n'est calculée par le navigateur ni par une IA."));
+  const main = $("main"), g = $("grid"), keep = g ? [g.scrollTop, g.scrollLeft] : null;
+  main.replaceChildren(...(SCREENS[st.page] || renderDepot)().filter(Boolean), el("footer", "", "Moteurs : " + Object.values(M.rule_versions).join(" · ") + " · aucune quantité n'est calculée par le navigateur ni par une IA."));
+  const g2 = $("grid"); if (g2 && keep) { g2.scrollTop = keep[0]; g2.scrollLeft = keep[1]; }
   renderDock(); renderWhy();
 }
-document.addEventListener("keydown", e => { if (e.key === "Escape" && st.why) { st.why = null; renderWhy(); } });
+document.addEventListener("keydown", e => { if (e.key === "Escape" && st.why) { st.why = null; render(); } });
 render();
 </script>

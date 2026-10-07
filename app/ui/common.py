@@ -14,7 +14,7 @@ from app.domain.models import (
     RecommendationLine,
     Status,
 )
-from app.engines.families import line_family
+from app.engines.categories import category_of
 from app.services.planning import PlanningResult, with_overrides
 from app.ui.workspace import DEMO_EXTRACTION, DayData, Workspace, demo_workspace, real_workspace
 
@@ -146,7 +146,9 @@ def num(x: float | None) -> float:
 
 
 def status_cell(line: RecommendationLine) -> str:
-    return MODIFIED if line.sku in ss.overrides else STATUS_ICON[line.status.value]
+    """Statut affiché : « Modifié » prime ; « ✓ » quand le planner a validé la ligne."""
+    label = MODIFIED if line.sku in ss.overrides else STATUS_ICON[line.status.value]
+    return f"{label} ✓" if line.sku in ss.seen else label
 
 
 def make_override(sku: str, before: int, after: int, category_label: str, reason: str) -> Override:
@@ -161,82 +163,81 @@ def make_override(sku: str, before: int, after: int, category_label: str, reason
     )
 
 
-def order_frame(lines: list[RecommendationLine], base_qty: dict[str, int]) -> pd.DataFrame:
-    """Tableau de commande, colonnes dans l'ordre demandé par le planner."""
+def category_of_line(line: RecommendationLine, mapping: dict[str, str]) -> str:
+    return category_of(line.product_type, mapping)
+
+
+def _round1(x: float | None) -> float | None:
+    return None if x is None else round(float(x), 1)
+
+
+def order_frame(
+    lines: list[RecommendationLine], base_qty: dict[str, int], mapping: dict[str, str]
+) -> pd.DataFrame:
+    """Une seule grille, colonnes dans l'ordre du planner ; nombres en vrais nombres (tri)."""
     rows = []
     for x in lines:
         e, inp = x.explanation, x.explanation["inputs"]
         sales = inp["sales_total"]
-        after = (inp["expected_total"] + x.qty) / sales * e["parameters"]["sales_history_days"] \
-            if sales else None  # fmt: skip
+        days = e["parameters"]["sales_history_days"]
+        after = (inp["expected_total"] + x.qty) / sales * days if sales else None
         rows.append(
             {
-                "🔍": False,
+                "🔍": x.sku == ss.get("why_sku"),
                 "Statut": status_cell(x),
                 "SKU": x.sku,
                 "Description": x.description or "",
-                "Expected": fmt_int(inp["expected_total"]),
-                "Ventes": fmt_int(sales),
-                "Couv. actuelle": fmt_1(e["current_cover_days"]),
-                "Qty proposée": fmt_int(base_qty.get(x.sku, x.qty)),
+                "Catégorie": category_of_line(x, mapping),
+                "Expected": num(inp["expected_total"]),
+                "Ventes": num(sales),
+                "Couv. actuelle": num(_round1(e["current_cover_days"])),
+                "Qty proposée": base_qty.get(x.sku, x.qty),
                 "Qty finale": ss.pending.get(x.sku, x.qty),
-                "Couv. après": fmt_1(after),
-                "Multiple": fmt_int(e["multiple"]),
-                "Stock DC": fmt_int(inp["dc_available"]),
+                "Couv. après": num(_round1(after)),
+                "Multiple": num(e["multiple"]),
+                "Stock DC": num(inp["dc_available"]),
                 "Source": SOURCE_LABEL[x.source.value],
                 "Raisons": " | ".join(x.reasons),
-                "Vu": x.sku in ss.seen,
             }
         )
     return pd.DataFrame(rows, columns=ORDER_COLUMNS)
 
 
 ORDER_COLUMNS = [
-    "🔍", "Statut", "SKU", "Description", "Expected", "Ventes", "Couv. actuelle",
-    "Qty proposée", "Qty finale", "Couv. après", "Multiple", "Stock DC", "Source",
-    "Raisons", "Vu",
+    "🔍", "Statut", "SKU", "Description", "Catégorie", "Expected", "Ventes", "Couv. actuelle",
+    "Qty proposée", "Qty finale", "Couv. après", "Multiple", "Stock DC", "Source", "Raisons",
 ]  # fmt: skip
 
-_RIGHT = {"alignment": "right"}
+_INT = {"format": "localized"}
 ORDER_COLUMN_CONFIG = {
     "🔍": st.column_config.CheckboxColumn(
         "🔍", width=40, help="Pourquoi cette quantité ?", pinned=True
     ),
-    "Statut": st.column_config.TextColumn(width=105, pinned=True),
-    "SKU": st.column_config.TextColumn(width=105, pinned=True),
-    "Description": st.column_config.TextColumn(width=200),
-    "Expected": st.column_config.TextColumn(width=75, **_RIGHT),
-    "Ventes": st.column_config.TextColumn(width=70, **_RIGHT),
-    "Couv. actuelle": st.column_config.TextColumn("Couv. act.", width=70, **_RIGHT),
-    "Qty proposée": st.column_config.TextColumn("Proposée", width=80, **_RIGHT),
+    "Statut": st.column_config.TextColumn(width=110, pinned=True),
+    "SKU": st.column_config.TextColumn(width=100, pinned=True),
+    "Description": st.column_config.TextColumn(width=210),
+    "Catégorie": st.column_config.TextColumn(width=120),
+    "Expected": st.column_config.NumberColumn(width=80, **_INT),
+    "Ventes": st.column_config.NumberColumn(width=70, **_INT),
+    "Couv. actuelle": st.column_config.NumberColumn("Couv. act.", width=75, format="%.1f"),
+    "Qty proposée": st.column_config.NumberColumn("Proposée", width=80, **_INT),
     "Qty finale": st.column_config.NumberColumn(
-        "Qty finale ✎", format="localized", width=90, min_value=0, step=1
+        "Qty finale ✎", width=90, min_value=0, step=1, **_INT
     ),
-    "Couv. après": st.column_config.TextColumn("Couv. après", width=80, **_RIGHT),
-    "Multiple": st.column_config.TextColumn(width=65, **_RIGHT),
-    "Stock DC": st.column_config.TextColumn(width=80, **_RIGHT),
+    "Couv. après": st.column_config.NumberColumn("Couv. après", width=80, format="%.1f"),
+    "Multiple": st.column_config.NumberColumn(width=70, **_INT),
+    "Stock DC": st.column_config.NumberColumn(width=85, **_INT),
     "Source": st.column_config.TextColumn(width=95),
-    "Raisons": st.column_config.TextColumn(width=320),
-    "Vu": st.column_config.CheckboxColumn("Vu", width=45),
+    "Raisons": st.column_config.TextColumn(width=340),
 }
-EDITABLE_COLUMNS = ("🔍", "Qty finale", "Vu")
+EDITABLE_COLUMNS = ("🔍", "Qty finale")
 
 
-def exceptions_first(lines: list[RecommendationLine]) -> list[RecommendationLine]:
-    """REVIEW et BLOCKED d'abord, puis les lignes commandées, puis le reste."""
-
-    def rank(x: RecommendationLine) -> tuple[int, int, str]:
-        if x.status is not Status.OK:
-            return (0, -x.qty, x.sku)
-        if x.qty > 0:
-            return (1, -x.qty, x.sku)
-        return (2, 0, x.sku)
-
-    return sorted(lines, key=rank)
-
-
-def family_of(line: RecommendationLine) -> str:
-    return line_family(line)
+def default_order(
+    lines: list[RecommendationLine], base_qty: dict[str, int]
+) -> list[RecommendationLine]:
+    """Tri par défaut : REVIEW et BLOCKED en haut, puis Qty proposée décroissante."""
+    return sorted(lines, key=lambda x: (x.status is Status.OK, -base_qty.get(x.sku, x.qty), x.sku))
 
 
 def explain_steps(line: RecommendationLine) -> list[str]:

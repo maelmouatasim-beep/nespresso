@@ -8,3 +8,7 @@ maxUploadSize = 200
 
 [theme]
 primaryColor = "#6f4524"
+
+[client]
+# Pas de bouton « Deploy » ni de menu développeur : outil de travail, pas de jargon.
+toolbarMode = "minimal"

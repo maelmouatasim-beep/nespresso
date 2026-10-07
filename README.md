@@ -33,15 +33,17 @@ Le navigateur s'ouvre sur l'outil. Dans la barre de gauche : tape ton nom, chois
    rouge = plus vieux), puis les contrôles qualité. Clique sur « Prêt ».
    L'outil ne se connecte jamais à Power BI : c'est toi qui déposes les fichiers.
 2. **Commande boutique** : boutique (recherche par code ou nom), date de livraison, cover, cover café
-   (facultatif), jours d'historique, mode, puis « Calculer ». Le tableau est groupé par famille, les
-   exceptions d'abord. Clique sur une ligne pour voir « Pourquoi cette quantité ? ». Une modification
-   de quantité demande une catégorie et une raison.
+   (facultatif), jours d'historique, mode, puis « Calculer ». Toutes les lignes sont dans une seule
+   grille, comme dans le calculateur Excel : filtres Catégorie et Statut, « Qty > 0 seulement »,
+   recherche, tri au clic sur un en-tête. Coche 🔍 sur une ligne pour voir « Pourquoi cette quantité ? »
+   à droite. Tape la « Qty finale » directement dans la cellule : une catégorie et une raison sont
+   demandées.
 3. **Journée** : plusieurs boutiques d'un coup (présélection du Schedule, modifiable), un cover par
    boutique, puis le zip des fichiers LT.
 4. **Export** : fichier LT pour Nessoft, récapitulatif boutique, export Excel détaillé.
    L'outil n'écrit jamais dans Nessoft : tu importes le fichier toi-même.
 5. **Référentiels** : multiples, conversions, portfolio, boutiques/DC, Schedule, exclusions,
-   allocations, lancements, stocks cibles, règles boutique. Propriétaire, date de mise à jour,
+   catégories (type produit → catégorie du filtre), allocations, lancements, stocks cibles, règles boutique. Propriétaire, date de mise à jour,
    anomalies, import depuis un modèle.
 6. **Historique** : commandes enregistrées, modifications par catégorie, SKU les plus modifiés,
    comparaison de deux commandes.
