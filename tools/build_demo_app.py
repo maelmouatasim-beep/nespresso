@@ -16,6 +16,7 @@ import json
 import os
 import sys
 import tempfile
+import zipfile
 from datetime import date
 from pathlib import Path
 
@@ -35,7 +36,6 @@ from app.domain.models import (  # noqa: E402
     TargetStock,
 )
 from app.engines.categories import CATEGORIES  # noqa: E402
-from app.engines.pallets import OTHERS, PER_PALLET, family  # noqa: E402
 from app.engines.schedule import boutiques_ordering_on  # noqa: E402
 from app.ingestion import referential_checks as checks  # noqa: E402
 from app.ingestion.depot import freshness  # noqa: E402
@@ -47,8 +47,13 @@ from app.ui.workspace import (  # noqa: E402
     REFERENTIALS,
     demo_workspace,
 )
+from app.web.bridge import masters_payload  # noqa: E402
+from app.web.serialize import Strings, line_meta, line_tuple  # noqa: E402
 
 TEMPLATE = Path(__file__).with_name("demo_app_template.html")
+ENGINE_DIR = ROOT / "preview" / "engine"
+# Modules du moteur publiés avec la page (sans l'interface Streamlit ni les exports Excel).
+ENGINE_EXCLUDED = ("app/ui/", "app/exports/")
 OUTPUT = ROOT / "preview" / "outil_B80.html"
 FIXTURES = ROOT / "tests" / "fixtures" / "b80_2026-10-05"
 COVERS = [x / 2 for x in range(2, 43)]  # 1 à 21 jours
@@ -95,79 +100,26 @@ FIXTURE_FILES = {
 }
 
 
-def _r(x: float | None, nd: int = 2) -> float | None:
-    return None if x is None else round(float(x), nd)
-
-
-class Strings:
-    """Table de textes dédupliqués (raisons, étapes) pour alléger la page."""
-
-    def __init__(self) -> None:
-        self.items: list[str] = []
-        self._idx: dict[str, int] = {}
-
-    def id(self, text: str | None) -> int:
-        if text is None:
-            return -1
-        if text not in self._idx:
-            self._idx[text] = len(self.items)
-            self.items.append(text)
-        return self._idx[text]
-
-
-def _fmt(x: float | None) -> str:
-    return "—" if x is None else f"{x:,.0f}".replace(",", " ")
-
-
-def _fmt1(x: float | None) -> str:
-    return "—" if x is None else f"{x:,.1f}".replace(",", " ").replace(".", ",")
-
-
-def _business_step(e: dict) -> str | None:
-    b = e.get("business")
-    if not b:
-        return None
-    if "allocation" in b:
-        a = b["allocation"]
-        return (f"Allocation officielle : {_fmt(b['allocation_due'])} dus (total {_fmt(a['total_qty'])}, "
-                f"vague {a['current_wave']}), arrondi au multiple : {_fmt(b['rounded_to_multiple'])}")  # fmt: skip
-    if "launch" in b:
-        la = b["launch"]
-        d = date.fromisoformat(la["launch_date"])
-        return f"Lancement le {d:%d/%m/%Y} : {_fmt(la['qty'])} − Expected, arrondi au multiple"
-    if "target" in b:
-        return "Stock cible appliqué (voir les raisons)"
-    return None
-
-
-def _fallback_step(e: dict) -> str | None:
-    fb = e.get("fallback")
-    if not fb:
-        return None
-    if fb["daily_rate"]:
-        return (f"Historique de secours ({fb['weeks_used']} semaine(s) avec ventes sur "
-                f"{fb['full_weeks_in_export']} dans l'export) : {_fmt1(fb['daily_rate'])} par jour → "
-                f"{_fmt1(e['cover_applied'])} × {_fmt1(fb['daily_rate'])} arrondi au multiple : "
-                f"{_fmt(fb['suggested_qty'])}")  # fmt: skip
-    return (f"Historique de secours : aucune vente dans les semaines déposées "
-            f"({fb['full_weeks_in_export']} semaine(s) complète(s) dans l'export)")  # fmt: skip
-
-
-def _pallet_factor(line, masters, dc: str) -> float | None:  # noqa: ANN001
-    fam = family(line)
-    if fam == OTHERS:
-        prod = masters.products.get(line.sku)
-        upp = prod.units_per_pallet if prod else None
-        return 1 / upp if upp else None
-    return 1 / PER_PALLET[fam].get(dc, PER_PALLET[fam]["default"])
-
-
 def _preview_rows(key: str) -> tuple[int, list[dict]]:
     name = FIXTURE_FILES.get(key)
     if not name:
         return 0, []
     df = pd.read_csv(FIXTURES / name, dtype=str, keep_default_na=False)
     return len(df), df.head(PREVIEW_ROWS).to_dict("records")
+
+
+def write_engine(masters, exclusions) -> None:  # noqa: ANN001
+    """Code Python du moteur + référentiels de test, pour le calcul dans le navigateur."""
+    ENGINE_DIR.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(ENGINE_DIR / "app.zip", "w", zipfile.ZIP_DEFLATED) as z:
+        for path in sorted((ROOT / "app").rglob("*.py")):
+            rel = path.relative_to(ROOT).as_posix()
+            if not rel.startswith(ENGINE_EXCLUDED):
+                z.writestr(zipfile.ZipInfo(rel, date_time=(2026, 1, 1, 0, 0, 0)), path.read_bytes())
+    payload = masters_payload(masters, exclusions, EXAMPLES)
+    (ENGINE_DIR / "masters.json").write_text(
+        json.dumps(payload, ensure_ascii=False, separators=(",", ":")), encoding="utf-8"
+    )
 
 
 def build() -> Path:  # noqa: PLR0915 - un seul script linéaire, plus simple à relire
@@ -179,6 +131,7 @@ def build() -> Path:  # noqa: PLR0915 - un seul script linéaire, plus simple à
         masters.dc_mapping, sources=data.source_hashes, history_days=7, fallback_weeks=4,
         portfolio=masters.portfolio.get(BOUTIQUE, {}), exclusions=data.exclusions,
     )  # fmt: skip
+    write_engine(masters, data.exclusions)
     golden = pd.read_csv(FIXTURES / "golden_stock_cover_final_B80.csv", dtype=str)
     excel_qty = dict(zip(golden["sku"], golden["excel_suggested_qty"].astype(int), strict=True))
     excel_formula = dict(zip(golden["sku"], golden["excel_cell_is_formula"] == "True", strict=True))
@@ -203,47 +156,15 @@ def build() -> Path:  # noqa: PLR0915 - un seul script linéaire, plus simple à
                     warnings = list(res.rule_warnings)
                     for line in res.lines:
                         if line.sku not in meta_idx:
-                            e, inp = line.explanation, line.explanation["inputs"]
-                            fb = e.get("fallback") or {}
                             meta_idx[line.sku] = len(meta)
-                            meta.append({
-                                "sku": line.sku,
-                                "desc": line.description or "",
-                                "type": line.product_type or "",
-                                "pfam": family(line),
-                                "pf": _pallet_factor(line, masters, dc),
-                                "coffee": line.product_type == "C",
-                                "sales": inp["sales_total"],
-                                "sales_own": inp["sales_own"],
-                                "sales_old": inp["sales_from_old_skus"],
-                                "exp": inp["expected_total"],
-                                "exp_own": inp["expected_own"],
-                                "exp_old": inp["expected_from_old_skus"],
-                                "dc": inp["dc_available"],
-                                "cur": _r(e["current_cover_days"], 1),
-                                "pfo": inp.get("in_portfolio"),
-                                "excl": e.get("exclusion"),
-                                "fbw": [fb.get("weeks_used"), fb.get("full_weeks_in_export")] if fb else None,
-                                "xl": excel_qty.get(line.sku),
-                                "xlf": excel_formula.get(line.sku),
-                            })  # fmt: skip
+                            meta.append(
+                                line_meta(line, masters.products, dc, excel_qty, excel_formula)
+                            )
                         sel.append(meta_idx[line.sku])
                     per_line = [[] for _ in res.lines]
                 assert [meta[i]["sku"] for i in sel] == [x.sku for x in res.lines]
                 for i, line in enumerate(res.lines):
-                    e = line.explanation
-                    rules = e["rules_triggered"]
-                    conv = bool(e["inputs"]["sales_from_old_skus"]) or "old_sku_blocked" in rules \
-                        or any("onversion" in r for r in line.reasons)  # fmt: skip
-                    flags = (1 if conv else 0) | (
-                        2 if ("dc_return" in rules or "dc_out_of_stock" in rules) else 0
-                    )
-                    per_line[i].append([
-                        line.qty, _r(e["raw_need"]), line.status.value[0],
-                        [text.id(r) for r in line.reasons], e["multiple"],
-                        text.id(e["multiple_source"]), line.source.value, line.forecast_qty,
-                        text.id(_fallback_step(e)), text.id(_business_step(e)), flags,
-                    ])  # fmt: skip
+                    per_line[i].append(line_tuple(line, text))
             # Une seule valeur si la ligne ne dépend pas du cover (allège la page).
             packed = [cov[0] if all(t == cov[0] for t in cov) else cov for cov in per_line]
             variants[key] = {"sel": sel, "res": packed, "warnings": warnings}
