@@ -12,6 +12,8 @@ from datetime import date, datetime
 
 from openpyxl import load_workbook
 
+from app.ingestion.tables import RawTable, TableSpec, parse_table
+
 _PATTERNS = (
     (re.compile(r"(20\d{2})[-_.](\d{2})[-_.](\d{2})"), ("y", "m", "d")),
     (re.compile(r"(\d{2})[-_.](\d{2})[-_.](20\d{2})"), ("d", "m", "y")),
@@ -71,3 +73,31 @@ def freshness(day: date | None, today: date) -> Freshness:
     if age == 1:
         return Freshness("orange", "Export d'hier")
     return Freshness("red", f"Export de il y a {age} jours")
+
+
+STOCK_KIND, MOVES_KIND = "stock_situation", "stock_movements"
+
+
+def detect_kind(filename: str, data: bytes) -> str | None:
+    """Reconnaît l'export par ses en-têtes (les deux s'appellent souvent « data - … »).
+
+    Retourne "stock_situation", "stock_movements" ou None si aucun des deux.
+    """
+    from app.ingestion.powerbi import MOVEMENTS_SPEC, STOCK_SITUATION_SPEC
+    from app.ingestion.tables import read_raw
+
+    try:
+        head = read_raw(io.BytesIO(data), filename, max_rows=15)
+    except Exception:  # noqa: BLE001 - fichier illisible : simplement « non reconnu »
+        return None
+    found = [
+        kind
+        for kind, spec in ((STOCK_KIND, STOCK_SITUATION_SPEC), (MOVES_KIND, MOVEMENTS_SPEC))
+        if _header_found(head, spec)
+    ]
+    return found[0] if len(found) == 1 else None
+
+
+def _header_found(head: RawTable, spec: TableSpec) -> bool:
+    report = parse_table(head, spec, "").report
+    return not any(i.code == "HEADER_NOT_FOUND" for i in report.issues)

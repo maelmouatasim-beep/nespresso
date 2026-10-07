@@ -7,7 +7,6 @@ un avertissement est affiché au planner mais n'empêche pas le calcul.
 
 from __future__ import annotations
 
-from collections import Counter
 from datetime import date, timedelta
 from pathlib import Path
 from typing import BinaryIO
@@ -41,16 +40,27 @@ STOCK_SITUATION_SPEC = TableSpec(
 
 MOVEMENTS_SPEC = TableSpec(
     name="Stock Movements",
+    # Noms vérifiés sur l'export Power BI réel (07-oct-2026) : « Stock Movement Id »,
+    # « Stock », « Product Nr », « Product Type (Prod) », « Stock Mvt Date », « Mvt Code »,
+    # « Quantity (Sum) », « Mvt Code Descr (Mvt Cd) ». Les autres noms restent acceptés.
     columns={
-        "movement_id": ("movement_id", "Movement Id", "Movement ID", "Id"),
+        "movement_id": ("movement_id", "Stock Movement Id", "Movement Id", "Movement ID", "Id"),
         "location": ("location", "Stock", "Location", "Boutique", "Stock Location"),
-        "sku": ("sku", "Product", "SKU", "Product Code"),
-        "product_type": ("product_type", "Product Type", "Type"),
-        "movement_date": ("movement_date", "Movement Date", "Date", "Posting Date"),
-        "movement_code": ("movement_code", "Movement Code", "Movement Type", "Code"),
-        "quantity": ("quantity", "Quantity", "Qty"),
+        "sku": ("sku", "Product Nr", "Product", "SKU", "Product Code"),
+        "product_type": ("product_type", "Product Type (Prod)", "Product Type", "Type"),
+        "movement_date": (
+            "movement_date",
+            "Stock Mvt Date",
+            "Movement Date",
+            "Date",
+            "Posting Date",
+        ),
+        "movement_code": ("movement_code", "Mvt Code", "Movement Code", "Movement Type", "Code"),
+        "quantity": ("quantity", "Quantity (Sum)", "Quantity", "Qty"),
         "movement_description": (
             "movement_description",
+            "Mvt Code Descr (Mvt Cd)",
+            "Mvt Code Descr",
             "Movement Description",
             "Movement Descr",
             "Description",
@@ -143,15 +153,57 @@ def stock_situation_from_records(
             f"{len(inconsistent)} ligne(s) où Expected ≠ Available + Incoming − Waiting",
             inconsistent,
         )
-    dupes = [k for k, n in Counter((x.location, x.sku) for x in lines).items() if n > 1]
-    if dupes:
+    lines = _resolve_duplicates(lines, report)
+    report.rows_kept = len(lines)
+    return lines, report
+
+
+def _is_empty(line: StockSnapshotLine) -> bool:
+    return not any(getattr(line, f) for f in NUMERIC_STOCK_FIELDS)
+
+
+def _resolve_duplicates(
+    lines: list[StockSnapshotLine], report: ValidationReport
+) -> list[StockSnapshotLine]:
+    """Même SKU deux fois au même emplacement.
+
+    Cas réel : Nessoft a deux produits « 473ECO/B » et «  473ECO/B » (espace au début) ;
+    une fois les espaces retirés, ils se confondent. Si une seule des lignes a du stock,
+    on garde celle-là (avertissement). Si plusieurs lignes ont du stock, on ne peut pas
+    choisir : erreur bloquante.
+    """
+    groups: dict[tuple[str, str], list[StockSnapshotLine]] = {}
+    for line in lines:
+        groups.setdefault((line.location, line.sku), []).append(line)
+    dupes = {k: g for k, g in groups.items() if len(g) > 1}
+    if not dupes:
+        return lines
+    conflicts = [k for k, g in dupes.items() if sum(not _is_empty(x) for x in g) > 1]
+    if conflicts:
         report.add(
             "error",
             "DUPLICATE_SKU",
-            f"{len(dupes)} SKU en double pour un même emplacement, ex. {dupes[:5]}",
+            f"{len(conflicts)} SKU en double avec du stock sur plusieurs lignes, "
+            f"ex. {conflicts[:5]}",
         )
-    report.rows_kept = len(lines)
-    return lines, report
+        return lines
+    kept: list[StockSnapshotLine] = []
+    seen: set[tuple[str, str]] = set()
+    for line in lines:
+        key = (line.location, line.sku)
+        if key not in dupes:
+            kept.append(line)
+        elif key not in seen:
+            seen.add(key)
+            group = dupes[key]
+            kept.append(next((x for x in group if not _is_empty(x)), group[0]))
+    report.add(
+        "warning",
+        "DUPLICATE_SKU_MERGED",
+        f"{len(dupes)} SKU présents deux fois au même emplacement (souvent un espace en trop "
+        f"dans le code Nessoft) ; la ligne avec du stock est gardée, ex. {sorted(dupes)[:5]}",
+    )
+    return kept
 
 
 def read_movements(
@@ -167,16 +219,18 @@ def read_movements(
         return [], report
     if fmt and fmt != "ISO":
         report.add("info", "DATE_FORMAT", f"Dates lues au format {fmt} (seul format cohérent)")
+    quantities = [parse_number(r["quantity"]) for r in parsed.records]
+    sign = _quantity_sign(quantities, parsed.records, report)
+    if sign == 0:
+        return [], report
     moves: list[StockMovement] = []
-    bad, negative = [], []
-    for rec, day in zip(parsed.records, dates, strict=True):
+    bad = []
+    for rec, day, raw_qty in zip(parsed.records, dates, quantities, strict=True):
         row = int(rec["_row"])
-        qty = parse_number(rec["quantity"])
-        if qty is None or day is None:
+        if raw_qty is None or day is None:
             bad.append(row)
             continue
-        if qty < 0:
-            negative.append(row)
+        qty = raw_qty * sign
         moves.append(
             StockMovement(
                 movement_id=rec.get("movement_id") or f"row{row}",
@@ -191,15 +245,42 @@ def read_movements(
         )
     if bad:
         report.add("error", "BAD_NUMBER", f"{len(bad)} mouvement(s) illisible(s)", bad)
-    if negative:
-        report.add(
-            "warning",
-            "NEGATIVE_QUANTITY",
-            f"{len(negative)} quantité(s) négative(s) : vérifier le signe des sorties de stock",
-            negative,
-        )
     report.rows_kept = len(moves)
     return moves, report
+
+
+def _quantity_sign(
+    quantities: list[float | None], records: list[dict[str, str]], report: ValidationReport
+) -> int:
+    """Convention de signe des sorties de stock.
+
+    L'export Power BI réel donne les sorties en négatif (filtre « Quantity (Sum) ≤ 0 ») ;
+    le calculateur et les données de test les donnent en positif. Les ventes de l'outil
+    sont toujours positives : -1 = inverser le signe, 1 = garder, 0 = fichier refusé
+    (signes mélangés : impossible de savoir ce qui est une vente).
+    """
+    values = [q for q in quantities if q is not None]
+    negative = [int(r["_row"]) for r, q in zip(records, quantities, strict=True) if q and q < 0]
+    positive = [int(r["_row"]) for r, q in zip(records, quantities, strict=True) if q and q > 0]
+    if negative and positive:
+        report.add(
+            "error",
+            "MIXED_SIGNS",
+            f"Quantités positives ({len(positive)}) et négatives ({len(negative)}) mélangées : "
+            "impossible de savoir lesquelles sont des sorties de stock. Exporter seulement les "
+            "sorties (filtre Power BI « Quantity ≤ 0 »).",
+            positive[:10] + negative[:10],
+        )
+        return 0
+    if negative:
+        report.add(
+            "info",
+            "NEGATIVE_EXITS",
+            f"Sorties de stock en négatif dans l'export ({len(values)} lignes) : "
+            "comptées comme ventes positives",
+        )
+        return -1
+    return 1
 
 
 def check_freshness(

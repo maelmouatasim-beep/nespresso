@@ -13,6 +13,7 @@ from __future__ import annotations
 import csv
 import io
 import re
+import warnings
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime
@@ -20,6 +21,11 @@ from pathlib import Path
 from typing import BinaryIO, Literal
 
 from openpyxl import load_workbook
+
+try:  # lecteur Excel rapide ; openpyxl reste utilisé s'il n'est pas installé
+    from python_calamine import CalamineWorkbook
+except ImportError:  # pragma: no cover
+    CalamineWorkbook = None
 
 MAX_HEADER_SCAN = 25
 FOOTER_PATTERNS = ("no filters applied", "filters applied", "applied filters")
@@ -101,21 +107,55 @@ def _cell_text(value: object) -> str:
     return str(value).strip()
 
 
-def read_raw(source: Path | BinaryIO, filename: str, sheet: str | None = None) -> RawTable:
-    """Lit un .csv / .xlsx / .xlsm en cellules texte."""
+def _read_excel_calamine(
+    source: Path | BinaryIO, sheet: str | None, max_rows: int | None
+) -> RawTable:
+    """Lecture rapide (≈ 1 s pour 90 000 lignes au lieu de ≈ 15 s avec openpyxl)."""
+    assert CalamineWorkbook is not None
+    if isinstance(source, Path):
+        wb = CalamineWorkbook.from_path(str(source))
+    else:
+        source.seek(0)
+        wb = CalamineWorkbook.from_filelike(source)
+    try:
+        ws = wb.get_sheet_by_name(sheet) if sheet else wb.get_sheet_by_index(0)
+        data = ws.to_python(skip_empty_area=False, nrows=max_rows)
+    finally:
+        wb.close()
+    rows: list[list[str]] = []
+    numeric: set[tuple[int, int]] = set()
+    for r, row in enumerate(data):
+        values = []
+        for c, value in enumerate(row):
+            if isinstance(value, int | float) and not isinstance(value, bool):
+                numeric.add((r, c))
+            values.append(_cell_text(value))
+        rows.append(values)
+    return RawTable(rows=rows, numeric_cells=numeric)
+
+
+def read_raw(
+    source: Path | BinaryIO, filename: str, sheet: str | None = None, max_rows: int | None = None
+) -> RawTable:
+    """Lit un .csv / .xlsx / .xlsm en cellules texte (`max_rows` : seulement le début)."""
     suffix = Path(filename).suffix.lower()
+    if suffix in {".xlsx", ".xlsm"} and CalamineWorkbook is not None:
+        return _read_excel_calamine(source, sheet, max_rows)
     if suffix in {".xlsx", ".xlsm"}:
-        wb = load_workbook(source, read_only=True, data_only=True)
+        with warnings.catch_warnings():
+            # Les exports Power BI n'ont pas de style par défaut : avertissement sans intérêt.
+            warnings.filterwarnings("ignore", message="Workbook contains no default style")
+            wb = load_workbook(source, read_only=True, data_only=True)
         try:
             ws = wb[sheet] if sheet else wb.worksheets[0]
             rows: list[list[str]] = []
             numeric: set[tuple[int, int]] = set()
-            for r, row in enumerate(ws.iter_rows()):
+            for r, row in enumerate(ws.iter_rows(values_only=True, max_row=max_rows)):
                 values = []
-                for c, cell in enumerate(row):
-                    if isinstance(cell.value, int | float) and not isinstance(cell.value, bool):
+                for c, value in enumerate(row):
+                    if isinstance(value, int | float) and not isinstance(value, bool):
                         numeric.add((r, c))
-                    values.append(_cell_text(cell.value))
+                    values.append(_cell_text(value))
                 rows.append(values)
             return RawTable(rows=rows, numeric_cells=numeric)
         finally:
@@ -126,7 +166,8 @@ def read_raw(source: Path | BinaryIO, filename: str, sheet: str | None = None) -
         sample = text[:5000]
         delimiter = ";" if sample.count(";") > sample.count(",") else ","
         reader = csv.reader(io.StringIO(text), delimiter=delimiter)
-        return RawTable(rows=[[c.strip() for c in row] for row in reader], numeric_cells=set())
+        rows_csv = [[c.strip() for c in row] for row in reader]
+        return RawTable(rows=rows_csv[:max_rows] if max_rows else rows_csv, numeric_cells=set())
     raise ValueError(f"{filename} : format non pris en charge ({suffix}). Utiliser .csv ou .xlsx")
 
 
