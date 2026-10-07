@@ -209,7 +209,10 @@ def _resolve_duplicates(
 def read_movements(
     source: Path | BinaryIO, filename: str
 ) -> tuple[list[StockMovement], ValidationReport]:
-    parsed = parse_table(read_raw(source, filename), MOVEMENTS_SPEC, filename)
+    return movements_from_records(parse_table(read_raw(source, filename), MOVEMENTS_SPEC, filename))
+
+
+def movements_from_records(parsed: ParsedTable) -> tuple[list[StockMovement], ValidationReport]:
     report = parsed.report
     if not parsed.records:
         return [], report

@@ -7,8 +7,6 @@ from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
-import pandas as pd
-
 from app.domain.models import (
     Exclusion,
     Product,
@@ -51,6 +49,8 @@ def load_schedule(path: Path) -> tuple[list[ScheduleSlot], list[str]]:
 
     Lignes sans jour de commande ignorées ; jours illisibles signalés.
     """
+    import pandas as pd  # seulement pour lire le CSV (absent de la version web)
+
     df = pd.read_csv(path, dtype=str, keep_default_na=False)
     missing = {"boutique", "order_day", "delivery_day"} - set(df.columns)
     if missing:
@@ -74,6 +74,8 @@ def load_schedule(path: Path) -> tuple[list[ScheduleSlot], list[str]]:
 
 def load_boutique_names(path: Path) -> dict[str, str]:
     """Nom de chaque boutique (colonne boutique_name du Schedule, si présente)."""
+    import pandas as pd  # seulement pour lire le CSV (absent de la version web)
+
     df = pd.read_csv(path, dtype=str, keep_default_na=False)
     if "boutique_name" not in df.columns:
         return {}

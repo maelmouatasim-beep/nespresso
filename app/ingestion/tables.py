@@ -20,8 +20,6 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import BinaryIO, Literal
 
-from openpyxl import load_workbook
-
 try:  # lecteur Excel rapide ; openpyxl reste utilisé s'il n'est pas installé
     from python_calamine import CalamineWorkbook
 except ImportError:  # pragma: no cover
@@ -145,6 +143,8 @@ def read_raw(
         with warnings.catch_warnings():
             # Les exports Power BI n'ont pas de style par défaut : avertissement sans intérêt.
             warnings.filterwarnings("ignore", message="Workbook contains no default style")
+            from openpyxl import load_workbook
+
             wb = load_workbook(source, read_only=True, data_only=True)
         try:
             ws = wb[sheet] if sheet else wb.worksheets[0]

@@ -10,8 +10,6 @@ import re
 from dataclasses import dataclass
 from datetime import date, datetime
 
-from openpyxl import load_workbook
-
 from app.ingestion.tables import RawTable, TableSpec, parse_table
 
 _PATTERNS = (
@@ -46,6 +44,8 @@ def detect_extraction_date(filename: str, data: bytes) -> Extraction:
         return Extraction(day, "nom du fichier")
     if filename.lower().endswith((".xlsx", ".xlsm")):
         try:
+            from openpyxl import load_workbook
+
             wb = load_workbook(io.BytesIO(data), read_only=True)
             props = wb.properties
             wb.close()
