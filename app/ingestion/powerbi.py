@@ -216,7 +216,13 @@ def movements_from_records(parsed: ParsedTable) -> tuple[list[StockMovement], Va
     report = parsed.report
     if not parsed.records:
         return [], report
-    dates, fmt, err = parse_dates([r["movement_date"] for r in parsed.records])
+    raw_dates = [r["movement_date"] for r in parsed.records]
+    serial = _excel_serial_dates(raw_dates)
+    if serial is not None:
+        raw_dates = serial
+        msg = "Dates lues comme numéros de série Excel (cellules date sans format)"
+        report.add("info", "DATE_SERIAL", msg)
+    dates, fmt, err = parse_dates(raw_dates)
     if err:
         report.add("error", "BAD_DATE", err)
         return [], report
@@ -250,6 +256,21 @@ def movements_from_records(parsed: ParsedTable) -> tuple[list[StockMovement], Va
         report.add("error", "BAD_NUMBER", f"{len(bad)} mouvement(s) illisible(s)", bad)
     report.rows_kept = len(moves)
     return moves, report
+
+
+EXCEL_EPOCH = date(1899, 12, 30)
+
+
+def _excel_serial_dates(values: list[str]) -> list[str] | None:
+    """Dates restées en numéros de série Excel (ex. « 46295 » = 2026-09-30).
+
+    Certains lecteurs perdent le format date de la cellule. On ne convertit que si TOUTES
+    les valeurs sont des entiers plausibles (années 1955 à 2119) ; sinon on ne touche à rien.
+    """
+    filled = [v for v in values if v]
+    if not filled or not all(v.isdigit() and 20000 <= int(v) <= 80000 for v in filled):
+        return None
+    return [(EXCEL_EPOCH + timedelta(days=int(v))).isoformat() if v else "" for v in values]
 
 
 def _quantity_sign(

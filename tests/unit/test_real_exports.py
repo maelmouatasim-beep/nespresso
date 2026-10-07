@@ -155,3 +155,13 @@ def test_import_calculator_writes_the_referentials(tmp_path: Path) -> None:
     assert ws.meta()["multiples"]["updated_by"] == "Planner"
     assert any(i.code == "SHEET_NOT_FOUND" for r in reports for i in r.issues)  # pas de Schedule
     assert not (tmp_path / "_tmp" / "B80 105.xlsx").exists()
+
+
+def test_dates_left_as_excel_serial_numbers_are_converted() -> None:
+    from app.ingestion.powerbi import MOVEMENTS_SPEC, movements_from_records
+    from app.ingestion.tables import RawTable, parse_table
+
+    rows = [list(MOVES_HEADER), ["1", "B80", "7005.70", "C", "46295", "2801", "-20", "BOGO"]]
+    moves, report = movements_from_records(parse_table(RawTable(rows, set()), MOVEMENTS_SPEC, "m"))
+    assert [m.movement_date for m in moves] == [date(2026, 9, 30)]
+    assert "DATE_SERIAL" in {i.code for i in report.issues}

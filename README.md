@@ -94,5 +94,7 @@ python tools/build_preview.py   # écrit preview/apercu_B80.html, à ouvrir dans
 python tools/build_demo_app.py  # écrit preview/outil_B80.html : version web complète de la démo
 ```
 
-Les quantités de l'aperçu sont pré-calculées par le moteur Python ; la page ne fait que les afficher.
+Version web : « Démo B80 » montre des quantités pré-calculées ; « Mes fichiers » lit tes exports
+dans le navigateur et les calcule avec le même moteur Python (Pyodide), sans rien envoyer.
+Avant de générer la page la première fois : `python tools/fetch_pyodide.py`.
 Le dossier `preview/` n'est pas versionné.

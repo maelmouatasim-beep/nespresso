@@ -1,3 +1,4 @@
+<meta charset="utf-8">
 <title>Supply Planning Copilot</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
@@ -321,16 +322,34 @@ const ENGINE = { bridge: null, loading: null, error: null };
 function loadScript(src) {
   return new Promise((ok, ko) => { const s = document.createElement("script"); s.src = src; s.onload = ok; s.onerror = () => ko(new Error("chargement impossible : " + src)); document.head.append(s); });
 }
+// Les archives (.zip, .whl) sont publiées en base64 (.txt) : on les décode et on les sert
+// à Pyodide depuis la mémoire, sans aucun téléchargement extérieur.
+const BLOBS = {};
+async function fetchText(url) { const r = await fetch(url); if (!r.ok) throw new Error(url + " : " + r.status); return r.text(); }
+function b64bytes(text) { const bin = atob(text), out = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i); return out; }
+function installFetchShim() {
+  if (window.__spcShim) return;
+  const realFetch = window.fetch.bind(window);
+  window.fetch = (input, init) => {
+    const url = typeof input === "string" ? input : (input && input.url) || String(input);
+    const name = decodeURIComponent(url.split("?")[0].split("/").pop());
+    if (BLOBS[name]) return Promise.resolve(new Response(BLOBS[name], { status: 200, headers: { "Content-Type": "application/octet-stream" } }));
+    return realFetch(input, init);
+  };
+  window.__spcShim = true;
+}
 async function engine(step) {
   if (ENGINE.bridge) return ENGINE.bridge;
   if (!ENGINE.loading) ENGINE.loading = (async () => {
-    step("Chargement du moteur de calcul (≈ 15 Mo, la première fois seulement)…");
+    step("Chargement du moteur de calcul (≈ 18 Mo, la première fois seulement)…");
+    const names = JSON.parse(await fetchText("engine/blobs.json"));
+    for (const n of [...names, "app.zip"]) BLOBS[n] = b64bytes(await fetchText("engine/" + n + ".b64.txt"));
+    installFetchShim();
     await loadScript("pyodide/pyodide.js");
     const py = await loadPyodide({ indexURL: new URL("pyodide/", document.baseURI).href });
     step("Chargement des bibliothèques du moteur…");
     await py.loadPackage(["pydantic"]);
-    const zip = new Uint8Array(await (await fetch("engine/app.zip")).arrayBuffer());
-    py.unpackArchive(zip, "zip", { extractDir: "/home/pyodide/eng" });
+    py.unpackArchive(BLOBS["app.zip"], "zip", { extractDir: "/home/pyodide/eng" });
     py.runPython("import sys; sys.path.insert(0, '/home/pyodide/eng')");
     step("Chargement des référentiels…");
     const bridge = py.pyimport("app.web.bridge");

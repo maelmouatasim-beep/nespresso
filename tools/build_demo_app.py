@@ -12,6 +12,7 @@ fait les totaux.
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import sys
@@ -52,6 +53,8 @@ from app.web.serialize import Strings, line_meta, line_tuple  # noqa: E402
 
 TEMPLATE = Path(__file__).with_name("demo_app_template.html")
 ENGINE_DIR = ROOT / "preview" / "engine"
+PYODIDE_PACKAGES = ("pydantic", "pydantic-core", "typing-extensions", "annotated-types",
+                    "typing-inspection")  # fmt: skip
 # Modules du moteur publiés avec la page (sans l'interface Streamlit ni les exports Excel).
 ENGINE_EXCLUDED = ("app/ui/", "app/exports/")
 OUTPUT = ROOT / "preview" / "outil_B80.html"
@@ -116,6 +119,19 @@ def write_engine(masters, exclusions) -> None:  # noqa: ANN001
             rel = path.relative_to(ROOT).as_posix()
             if not rel.startswith(ENGINE_EXCLUDED):
                 z.writestr(zipfile.ZipInfo(rel, date_time=(2026, 1, 1, 0, 0, 0)), path.read_bytes())
+    # La plateforme ne sert pas les .zip / .whl : ils voyagent en base64 dans des .txt,
+    # décodés par la page (aucun téléchargement extérieur).
+    pyodide_dir = ROOT / "preview" / "pyodide"
+    lock = json.loads((pyodide_dir / "pyodide-lock.json").read_text(encoding="utf-8"))
+    blobs = ["python_stdlib.zip"] + [lock["packages"][p]["file_name"] for p in PYODIDE_PACKAGES]
+    index = []
+    for name in blobs:
+        data = (pyodide_dir / name).read_bytes()
+        (ENGINE_DIR / f"{name}.b64.txt").write_text(base64.b64encode(data).decode(), "ascii")
+        index.append(name)
+    data = (ENGINE_DIR / "app.zip").read_bytes()
+    (ENGINE_DIR / "app.zip.b64.txt").write_text(base64.b64encode(data).decode(), "ascii")
+    (ENGINE_DIR / "blobs.json").write_text(json.dumps(index), encoding="utf-8")
     payload = masters_payload(masters, exclusions, EXAMPLES)
     (ENGINE_DIR / "masters.json").write_text(
         json.dumps(payload, ensure_ascii=False, separators=(",", ":")), encoding="utf-8"

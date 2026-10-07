@@ -167,3 +167,12 @@ Format : contexte → décision → conséquence.
 - **Vitesse** : lecture Excel avec `python-calamine` (≈ 1 s au lieu de ≈ 14 s pour 94 000 lignes), cache local du fichier lu (`data/depot/…/_cache_*.pkl`, jamais versionné) et données du jour partagées entre les écrans tant que les fichiers ne changent pas.
 - **Référentiels** : ils s'importent maintenant depuis l'écran (calculateur `.xlsm` → multiples, conversions, DC, portfolio, Schedule), sans ligne de commande. En attendant, un bouton permet de partir des référentiels de test (B80, 05-oct-2026).
 
+## D-027 — Version web : « Mes fichiers » calculés dans le navigateur (2026-10-07)
+
+- Demande du planner : déposer ses vrais exports dans la version web, sans installer l'outil.
+- **Même moteur, pas de copie** : la page charge Pyodide (Python compilé pour le navigateur) et le code `app/` du dépôt ; les quantités viennent de `run_planning`, comme dans l'outil installé. Aucun moteur réécrit en JavaScript. Testé : mêmes quantités que l'outil installé (B80 et B5 sur les exports réels, tests `test_web_bridge.py`).
+- **Confidentialité** : les fichiers sont lus et calculés dans le navigateur ; la page n'envoie rien (elle ne peut joindre que ses propres fichiers). Rien n'est gardé après la fermeture de la page.
+- **Lecture Excel** dans la page par SheetJS (cdnjs). Il perd le format date de certaines cellules des exports Power BI : les dates restées en numéros de série Excel (ex. 46295) sont converties si toutes sont plausibles, avec un message (`DATE_SERIAL`).
+- **Référentiels** : ceux des données de test (multiples, conversions, DC, Schedule du 05/10/2026, portfolio de B80). Le portfolio des autres boutiques n'est pas encore disponible dans la version web.
+- **Publication** : Pyodide et ses bibliothèques sont vérifiés par empreinte (`tools/fetch_pyodide.py`) ; les archives (.zip, .whl), refusées par la plateforme, sont publiées en base64 et décodées par la page.
+
