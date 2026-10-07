@@ -383,7 +383,9 @@ def _cached(path: Path, reader, original_name: str):  # noqa: ANN001, ANN202
         try:
             with cache.open("rb") as fh:
                 model, fields, rows, report = pickle.load(fh)  # noqa: S301 - écrit par l'outil
-            return [model.model_construct(**dict(zip(fields, r, strict=True))) for r in rows], report
+            return [
+                model.model_construct(**dict(zip(fields, r, strict=True))) for r in rows
+            ], report
         except (OSError, pickle.UnpicklingError, EOFError, AttributeError, ValueError, TypeError):
             pass
     items, report = reader(path, original_name)
