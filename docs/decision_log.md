@@ -112,3 +112,40 @@ Format : contexte → décision → conséquence.
 ## D-018 — Confidentialité de l'outil local (2026-10-06)
 
 - `.streamlit/config.toml` coupe la télémétrie de Streamlit (`gatherUsageStats = false`) et n'écoute que sur le poste (`localhost`), conformément à « aucune donnée envoyée à un service externe ».
+
+## D-019 — Dépôt du jour au lieu d'une connexion Power BI (2026-10-07)
+
+- Décision A1 du planner. L'écran « Dépôt du jour » reçoit les deux exports, détecte la date d'extraction (nom du fichier, puis propriétés du classeur ; sinon le planner la confirme) et affiche la fraîcheur (vert aujourd'hui, orange hier, rouge au-delà).
+- Les fichiers sont copiés dans `data/depot/<date>/` (non versionné). L'ancien module qui simulait une source « Power BI » a été supprimé.
+- Le bouton « Prêt » reste grisé tant qu'un contrôle qualité est bloquant.
+
+## D-020 — Sélection des lignes : deux règles selon le mode (2026-10-07)
+
+- **Parité Excel** : règle « Filter out » d'Excel, portfolio comparé en numérique puis en texte (A4). Sur B80 : les 451 lignes d'Excel + `2007.70` = 452 lignes. L'écart sur `2007.70` est documenté (Q-023) au lieu d'être forcé.
+- **Standard** : tous les SKU avec une activité (A5) : portfolio, Expected/Available/Incoming non nul, ou mouvement dans la fenêtre. Sur B80 : 460 lignes.
+- Remplace D-011. Le test de parité des quantités calcule toujours les SKU du golden (D-007, 416/416) ; la sélection est testée à part (`test_a4_b80_selection_matches_excel_451_lines`).
+
+## D-021 — Exclusions éditables, plus aucun SKU codé en dur (2026-10-07)
+
+- Décision A8. Remplace D-008. Une exclusion (SKU, boutiques ou toutes, raison, auteur, date) bloque la ligne dans les deux modes : `BLOCKED`, quantité 0, source « Exclusion », raison visible dans le « Pourquoi ».
+- La comparaison des SKU est numérique puis texte, comme le portfolio.
+- Conséquence parité : `7010.70` reste à 0 tant qu'il est dans le référentiel ; si on le retire, l'outil le calcule normalement (écart volontaire avec Excel).
+
+## D-022 — Multiples : arrondi partout, doublons signalés (2026-10-07)
+
+- Décision A3. Allocation, lancement, stock cible et override sont arrondis au multiple **supérieur**, avec une raison « Arrondi au multiple de M : x → y ». Une saisie du planner (override) est arrondie de la même façon.
+- Décision A9. Un SKU avec deux multiples passe en REVIEW. En mode Standard, si le multiple de la famille (240 VER / 800 ORI) est l'un des deux, il l'emporte (ex. `7922.70` → 800). En Parité Excel, la première ligne est gardée (comportement Excel).
+
+## D-023 — SKU dormants et historique de secours (2026-10-07)
+
+- Décisions A6 et A7. Une ligne sans ventes ni Expected mais avec du stock DC passe en REVIEW « Retour en stock DC » si elle est au portfolio ou a des ventes dans l'historique long.
+- Quantité suggérée (mode Standard) : cover × moyenne journalière des X dernières semaines **complètes** avec ventes (X = 4 par défaut), arrondie au multiple. En Parité Excel, la suggestion est affichée mais pas appliquée (Excel donne 0).
+- Sans historique suffisant (ex. démo B80 : 7 jours de mouvements), la ligne reste en REVIEW avec « Historique de secours insuffisant » et quantité 0 : le planner décide.
+
+## D-024 — Interface en 6 écrans (2026-10-07)
+
+- Ordre de la barre latérale : Dépôt du jour, Commande boutique, Journée, Export, Référentiels, Historique. Une tâche par écran.
+- Couleurs fixes : OK vert, REVIEW orange, BLOCKED rouge, modifié bleu. Nombres alignés à droite avec séparateur de milliers, couvertures à 1 décimale.
+- Une modification de quantité exige une catégorie et une raison ; le nom du planner est saisi une fois par session.
+- La version web de démonstration reprend les mêmes écrans ; ses quantités sont calculées d'avance par le moteur Python, la page n'en calcule aucune.
+

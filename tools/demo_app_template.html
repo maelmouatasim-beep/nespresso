@@ -1,636 +1,740 @@
 <title>Supply Planning Copilot</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
 <style>
-/* Outil de travail : barre d'onglets en haut, contenu en colonne, panneau « Pourquoi » latéral. */
+/* Poste de travail : barre latérale fixe (6 écrans dans l'ordre du planner), contenu à droite,
+   panneau « Pourquoi » qui glisse depuis la droite, dock « Modifications à justifier » en bas. */
 :root {
-  --bg: #f5f4f0; --surface: #ffffff; --surface-2: #efede7; --text: #1e1c19; --muted: #6a645a;
-  --border: #e0dcd3; --accent: #6f4524; --accent-fg: #ffffff; --accent-soft: #f2e7dd;
-  --ok: #2e6a3b; --ok-bg: #e3f0e5; --review: #875800; --review-bg: #fbeed0;
-  --blocked: #a02b2b; --blocked-bg: #f8e0e0; --diff: #fff4cf; --edit: #eef4ff;
-  --font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --bg: #f4f3f1; --surface: #ffffff; --surface-2: #eeece8; --text: #1f1b17; --muted: #6b645c;
+  --border: #dedad3; --accent: #6b4226; --accent-fg: #ffffff; --accent-soft: #efe4da;
+  --ok: #24693a; --ok-bg: #e2f1e6; --review: #9a5a00; --review-bg: #fdecd0;
+  --blocked: #a52a2a; --blocked-bg: #f9e0e0; --mod: #1f5fbf; --mod-bg: #e3edfc;
+  --side: #2a211b; --side-fg: #efe7df; --side-muted: #b3a597; --side-on: #4a392d;
+  --font: "Source Sans 3", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg: #161412; --surface: #201d1a; --surface-2: #2a2622; --text: #f1ede7; --muted: #a59f95;
-    --border: #3a352f; --accent: #e3ab78; --accent-fg: #1e1a16; --accent-soft: #3a2b1f;
-    --ok: #8fd19e; --ok-bg: #1f3324; --review: #f2c46b; --review-bg: #3a2f17;
-    --blocked: #f19a9a; --blocked-bg: #3d1f1f; --diff: #3a3417; --edit: #1f2a3a;
+    --bg: #171412; --surface: #211d1a; --surface-2: #2b2622; --text: #f1ece6; --muted: #a79f95;
+    --border: #3b352f; --accent: #e0a878; --accent-fg: #1d1712; --accent-soft: #3a2b20;
+    --ok: #8fd4a1; --ok-bg: #1d3324; --review: #f3c26a; --review-bg: #3b2e15;
+    --blocked: #f39c9c; --blocked-bg: #3e1f1f; --mod: #8fb6f5; --mod-bg: #1c2a40;
+    --side: #0f0d0b; --side-fg: #efe7df; --side-muted: #9c8f82; --side-on: #2f261f;
     color-scheme: dark;
   }
 }
 :root[data-theme="dark"] {
-  --bg: #161412; --surface: #201d1a; --surface-2: #2a2622; --text: #f1ede7; --muted: #a59f95;
-  --border: #3a352f; --accent: #e3ab78; --accent-fg: #1e1a16; --accent-soft: #3a2b1f;
-  --ok: #8fd19e; --ok-bg: #1f3324; --review: #f2c46b; --review-bg: #3a2f17;
-  --blocked: #f19a9a; --blocked-bg: #3d1f1f; --diff: #3a3417; --edit: #1f2a3a;
+  --bg: #171412; --surface: #211d1a; --surface-2: #2b2622; --text: #f1ece6; --muted: #a79f95;
+  --border: #3b352f; --accent: #e0a878; --accent-fg: #1d1712; --accent-soft: #3a2b20;
+  --ok: #8fd4a1; --ok-bg: #1d3324; --review: #f3c26a; --review-bg: #3b2e15;
+  --blocked: #f39c9c; --blocked-bg: #3e1f1f; --mod: #8fb6f5; --mod-bg: #1c2a40;
+  --side: #0f0d0b; --side-fg: #efe7df; --side-muted: #9c8f82; --side-on: #2f261f;
   color-scheme: dark;
 }
 * { box-sizing: border-box; }
-body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 var(--font); }
-.wrap { max-width: 1320px; margin: 0 auto; padding-inline: 16px; padding-block: 18px 80px; min-width: 0; }
-header.top { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: baseline; margin-bottom: 4px; }
-h1 { font-size: 20px; margin: 0; text-wrap: balance; }
-.sub { color: var(--muted); font-size: 13px; }
-.banner { background: var(--accent-soft); border: 1px solid var(--border); border-radius: 10px; padding: 9px 12px; margin: 10px 0 14px; font-size: 13px; }
-nav.tabs { display: flex; gap: 4px; overflow-x: auto; border-bottom: 1px solid var(--border); margin-bottom: 16px; }
-nav.tabs button { font: inherit; font-size: 13.5px; background: none; border: 0; color: var(--muted); padding: 9px 12px; border-bottom: 2px solid transparent; cursor: pointer; white-space: nowrap; }
-nav.tabs button.on { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
-nav.tabs button:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px; }
-.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 14px; }
-label.f, .f { display: flex; flex-direction: column; gap: 5px; font-size: 12px; color: var(--muted); font-weight: 600; min-width: 0; }
-.f .hint { font-weight: 400; }
-select, input[type=search], input[type=text], input[type=date], input[type=number] {
-  font: inherit; font-size: 14px; color: var(--text); background: var(--surface-2); border: 1px solid var(--border);
-  border-radius: 8px; padding: 7px 9px; width: 100%; min-width: 0; }
-input:disabled, select:disabled { opacity: .55; }
-.seg { display: flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
-.seg button { flex: 1; font: inherit; font-size: 13px; padding: 7px 6px; border: 0; background: var(--surface-2); color: var(--text); cursor: pointer; }
-.seg button + button { border-left: 1px solid var(--border); }
-.seg button.on { background: var(--accent); color: var(--accent-fg); font-weight: 600; }
-.chk { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; color: var(--text); font-weight: 400; }
-.btn { font: inherit; font-size: 13.5px; font-weight: 600; border-radius: 8px; padding: 8px 14px; cursor: pointer; border: 1px solid var(--accent); background: transparent; color: var(--accent); }
-.btn.primary { background: var(--accent); color: var(--accent-fg); }
-.row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
-.row .grow { flex: 1 1 160px; }
-.msg { border-radius: 8px; padding: 8px 12px; font-size: 13px; margin-top: 10px; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.45 var(--font); }
+.app { display: grid; grid-template-columns: 228px minmax(0, 1fr); min-height: 100vh; }
+aside.side { background: var(--side); color: var(--side-fg); padding: 18px 14px; display: flex; flex-direction: column; gap: 14px; position: sticky; top: 0; height: 100vh; overflow-y: auto; }
+.side .brand { font-weight: 700; font-size: 16px; letter-spacing: .01em; }
+.side .brand small { display: block; font-weight: 400; font-size: 12px; color: var(--side-muted); }
+.side label { font-size: 11.5px; text-transform: uppercase; letter-spacing: .06em; color: var(--side-muted); display: flex; flex-direction: column; gap: 5px; }
+.side input { font: inherit; font-size: 14px; text-transform: none; letter-spacing: 0; border-radius: 7px; border: 1px solid var(--side-on); background: var(--side-on); color: var(--side-fg); padding: 7px 9px; }
+.side nav { display: flex; flex-direction: column; gap: 2px; }
+.side nav button { font: inherit; font-size: 14.5px; text-align: left; background: none; border: 0; color: var(--side-fg); padding: 8px 10px; border-radius: 7px; cursor: pointer; }
+.side nav button:hover { background: var(--side-on); }
+.side nav button.on { background: var(--side-on); font-weight: 700; box-shadow: inset 3px 0 0 var(--accent); }
+.side .fresh { font-size: 13px; color: var(--side-fg); }
+.side .demo { font-size: 12px; color: var(--side-muted); margin-top: auto; line-height: 1.4; }
+main { min-width: 0; padding-inline: 24px; padding-block: 20px 120px; }
+h1 { font-size: 22px; margin: 0 0 14px; text-wrap: balance; }
+h2.fam { font-size: 16px; margin: 22px 0 8px; display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; }
+h2.fam span { font-size: 13px; font-weight: 400; color: var(--muted); }
+h3 { font-size: 15px; margin: 18px 0 8px; }
+.muted { color: var(--muted); }
+.small { font-size: 13px; }
+.mono { font-family: var(--mono); font-size: 13px; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px; min-width: 0; }
+.two { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; }
+.row { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; }
+.f { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; font-weight: 600; color: var(--muted); min-width: 0; }
+select, input[type=text], input[type=search], input[type=date], input[type=number] {
+  font: inherit; font-size: 14.5px; color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: 7px; padding: 6px 8px; min-width: 0; width: 100%; }
+input:disabled, select:disabled { opacity: .6; }
+button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.btn { font: inherit; font-size: 14.5px; font-weight: 600; border-radius: 7px; padding: 7px 14px; cursor: pointer; border: 1px solid var(--border); background: var(--surface); color: var(--text); white-space: nowrap; }
+.btn:hover { border-color: var(--accent); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+.btn.link { border: 0; background: none; color: var(--accent); padding: 4px 0; text-decoration: underline; }
+.msg { border-radius: 8px; padding: 9px 12px; font-size: 14px; margin: 10px 0; }
 .msg.err { background: var(--blocked-bg); color: var(--blocked); }
+.msg.warn { background: var(--review-bg); color: var(--review); }
 .msg.ok { background: var(--ok-bg); color: var(--ok); }
 .msg.info { background: var(--surface-2); color: var(--text); }
-.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 14px; }
-.tile { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; }
-.tile .k { font-size: 12px; color: var(--muted); }
-.tile .v { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; }
-.tile .h { font-size: 11px; color: var(--muted); }
-.chip { font: inherit; font-size: 12px; border: 1px solid var(--border); background: var(--surface); color: var(--text); border-radius: 999px; padding: 4px 10px; cursor: pointer; }
+.params { display: grid; grid-template-columns: minmax(200px, 2.3fr) repeat(3, minmax(92px, .9fr)) minmax(80px, .7fr) minmax(120px, 1fr) auto auto; gap: 10px; align-items: end; }
+.params .gear { position: relative; }
+.pop { position: absolute; right: 0; top: calc(100% + 6px); width: 300px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 12px; box-shadow: 0 10px 30px rgba(0,0,0,.18); z-index: 6; display: flex; flex-direction: column; gap: 10px; font-weight: 400; color: var(--text); }
+.ctx { margin: 14px 0 10px; font-size: 14.5px; }
+.tiles { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; margin-bottom: 12px; }
+.tile { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; min-width: 0; }
+.tile .k { font-size: 12.5px; color: var(--muted); font-weight: 600; }
+.tile .v { font-size: 26px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.15; }
+.tile .h { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.tile.O { box-shadow: inset 0 3px 0 var(--ok); } .tile.R { box-shadow: inset 0 3px 0 var(--review); } .tile.B { box-shadow: inset 0 3px 0 var(--blocked); }
+.progress { height: 6px; background: var(--surface-2); border-radius: 99px; overflow: hidden; margin: 4px 0 2px; }
+.progress div { height: 100%; background: var(--ok); }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0 8px; }
+.chip { font: inherit; font-size: 13.5px; border: 1px solid var(--border); background: var(--surface); color: var(--text); border-radius: 999px; padding: 4px 12px; cursor: pointer; }
 .chip.on { background: var(--text); color: var(--bg); border-color: var(--text); }
-.tablewrap { overflow: auto; max-height: 64vh; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
-table { border-collapse: collapse; width: 100%; }
-table.wide { min-width: 1180px; }
-th, td { padding: 6px 9px; border-bottom: 1px solid var(--border); text-align: left; white-space: nowrap; vertical-align: middle; }
-th { position: sticky; top: 0; background: var(--surface-2); font-size: 12px; color: var(--muted); z-index: 1; }
+.chip b { font-weight: 600; font-variant-numeric: tabular-nums; margin-left: 4px; opacity: .7; }
+.tablewrap { overflow: auto; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); max-height: 470px; }
+table { border-collapse: separate; border-spacing: 0; width: 100%; }
+table.order { table-layout: fixed; width: 1240px; }
+th, td { padding: 5px 8px; border-bottom: 1px solid var(--border); text-align: left; white-space: nowrap; vertical-align: middle; overflow: hidden; text-overflow: ellipsis; font-size: 14px; }
+th { position: sticky; top: 0; background: var(--surface-2); font-size: 12.5px; color: var(--muted); z-index: 2; font-weight: 600; white-space: normal; line-height: 1.2; vertical-align: bottom; }
 td.n, th.n { text-align: right; font-variant-numeric: tabular-nums; }
-td.desc { white-space: normal; min-width: 180px; }
-td.sig { white-space: normal; min-width: 220px; font-size: 12px; color: var(--muted); }
-td.diff { background: var(--diff); }
-tr.edited td { background: var(--edit); }
-tbody tr.pick { cursor: pointer; }
-tbody tr.pick:hover td { background: var(--surface-2); }
-tr.sel td { box-shadow: inset 0 2px 0 var(--accent), inset 0 -2px 0 var(--accent); }
-td input[type=number] { width: 90px; text-align: right; padding: 4px 6px; }
-td select { width: 170px; padding: 4px 6px; font-size: 13px; }
-td input[type=text] { width: 190px; padding: 4px 6px; font-size: 13px; }
-.st { font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: 999px; }
+table.order td:nth-child(1), table.order th:nth-child(1) { position: sticky; left: 0; z-index: 1; background: var(--surface); }
+table.order td:nth-child(2), table.order th:nth-child(2) { position: sticky; left: 104px; z-index: 1; background: var(--surface); box-shadow: inset -1px 0 0 var(--border); }
+table.order th:nth-child(1), table.order th:nth-child(2) { z-index: 3; background: var(--surface-2); }
+table.order tbody tr { cursor: pointer; }
+table.order tbody tr:hover td { background: var(--surface-2); }
+table.order tr.mod td { background: var(--mod-bg); }
+table.order tr.pend td.q input { border-color: var(--mod); box-shadow: 0 0 0 1px var(--mod); }
+td.q input { width: 100%; text-align: right; padding: 3px 6px; font-variant-numeric: tabular-nums; }
+td.vu { text-align: center; }
+.st { display: inline-block; font-size: 12px; font-weight: 700; padding: 1px 8px; border-radius: 999px; letter-spacing: .02em; }
 .st.O { color: var(--ok); background: var(--ok-bg); }
 .st.R { color: var(--review); background: var(--review-bg); }
 .st.B { color: var(--blocked); background: var(--blocked-bg); }
-.mono { font-family: var(--mono); font-size: 12.5px; }
-.muted { color: var(--muted); }
-.why-link { font: inherit; font-size: 12px; background: none; border: 0; color: var(--accent); cursor: pointer; text-decoration: underline; padding: 0; }
-#panel { position: fixed; right: 16px; top: calc(16px + env(safe-area-inset-top, 0px)); bottom: calc(16px + env(safe-area-inset-bottom, 0px)); width: min(440px, calc(100vw - 32px)); background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 16px; overflow-y: auto; box-shadow: 0 10px 40px rgba(0,0,0,.25); z-index: 5; }
-#panel h2 { font-size: 16px; margin: 0 0 4px; padding-right: 30px; }
-#panel h3 { font-size: 11.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 16px 0 6px; }
-#panel .x { position: absolute; right: 10px; top: 8px; font-size: 22px; background: none; border: 0; color: var(--muted); cursor: pointer; }
-.calc { background: var(--surface-2); border-radius: 8px; padding: 10px; }
-.calc div { display: flex; justify-content: space-between; gap: 10px; padding: 2px 0; }
-.calc .tot { border-top: 1px solid var(--border); margin-top: 4px; padding-top: 6px; font-weight: 700; }
-ul.reasons { margin: 0; padding-left: 18px; }
-pre.box { max-height: 240px; overflow: auto; background: var(--surface-2); padding: 10px; border-radius: 8px; margin: 8px 0 0; white-space: pre; }
-.two { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; }
-h2.sec { font-size: 15px; margin: 18px 0 8px; }
-details summary { cursor: pointer; }
-footer { color: var(--muted); font-size: 12px; margin-top: 18px; }
-@media (min-width: 980px) { body.panel-open .wrap { margin-right: 470px; max-width: none; } }
-@media (max-width: 640px) { #panel { left: 8px; right: 8px; top: auto; width: auto; max-height: 78vh; bottom: calc(8px + env(safe-area-inset-bottom, 0px)); } }
+.st.M { color: var(--mod); background: var(--mod-bg); }
+.st.G { color: var(--ok); background: var(--ok-bg); } .st.Y { color: var(--review); background: var(--review-bg); } .st.X { color: var(--blocked); background: var(--blocked-bg); } .st.U { color: var(--muted); background: var(--surface-2); }
+details.zero { margin-top: 6px; }
+details.zero summary { cursor: pointer; font-size: 14px; color: var(--muted); padding: 4px 0; }
+.drop { border: 1.5px dashed var(--border); border-radius: 10px; padding: 16px; text-align: center; color: var(--muted); font-size: 14px; background: var(--surface-2); }
+.metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.tabs { display: flex; gap: 2px; overflow-x: auto; border-bottom: 1px solid var(--border); margin-bottom: 14px; }
+.tabs button { font: inherit; font-size: 14px; background: none; border: 0; color: var(--muted); padding: 8px 12px; border-bottom: 2px solid transparent; cursor: pointer; white-space: nowrap; }
+.tabs button.on { color: var(--text); border-bottom-color: var(--accent); font-weight: 700; }
+.tabs button .cnt { font-size: 11.5px; font-weight: 700; color: var(--review); margin-left: 4px; }
+ul.list { margin: 4px 0; padding-left: 20px; }
+.sel-btq { display: flex; flex-wrap: wrap; gap: 6px; padding: 6px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
+.tag { display: inline-flex; gap: 6px; align-items: center; font-size: 13.5px; background: var(--surface-2); border-radius: 6px; padding: 2px 4px 2px 8px; }
+.tag button { border: 0; background: none; color: var(--muted); cursor: pointer; font-size: 16px; line-height: 1; padding: 0 4px; }
+.sel-btq input { flex: 1 1 180px; border: 0; background: transparent; }
+#why { position: fixed; right: 0; top: 0; bottom: 0; width: min(500px, 100vw); background: var(--surface); border-left: 1px solid var(--border); padding: calc(18px + env(safe-area-inset-top, 0px)) 20px calc(18px + env(safe-area-inset-bottom, 0px)); overflow-y: auto; box-shadow: -12px 0 40px rgba(0,0,0,.2); z-index: 20; }
+#why h2 { font-size: 17px; margin: 0 0 6px; padding-right: 34px; }
+#why .x { position: absolute; right: 12px; top: calc(10px + env(safe-area-inset-top, 0px)); font-size: 24px; background: none; border: 0; color: var(--muted); cursor: pointer; }
+ol.steps { padding-left: 22px; margin: 8px 0; display: flex; flex-direction: column; gap: 5px; }
+ol.steps li { font-variant-numeric: tabular-nums; }
+ol.steps li.tot { font-weight: 700; }
+.form3 { display: grid; grid-template-columns: 100px 1fr; gap: 8px; }
+.form3 .wide { grid-column: 1 / -1; }
+#dock { position: fixed; left: 228px; right: 0; bottom: 0; background: var(--surface); border-top: 2px solid var(--mod); padding: 10px 24px calc(10px + env(safe-area-inset-bottom, 0px)); box-shadow: 0 -10px 30px rgba(0,0,0,.12); z-index: 15; max-height: 45vh; overflow-y: auto; }
+#dock .pl { display: grid; grid-template-columns: minmax(180px, 2.2fr) minmax(150px, 1.2fr) minmax(200px, 3fr); gap: 8px; align-items: center; padding: 4px 0; border-bottom: 1px solid var(--border); }
+footer { color: var(--muted); font-size: 12.5px; margin-top: 28px; }
+@media (max-width: 1100px) { .params { grid-template-columns: repeat(3, minmax(0, 1fr)); } .params .bt { grid-column: span 3; } .tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 860px) {
+  .app { grid-template-columns: minmax(0, 1fr); }
+  aside.side { position: static; height: auto; }
+  .side nav { flex-direction: row; flex-wrap: wrap; }
+  #dock { left: 0; padding-inline: 16px; }
+  main { padding-inline: 16px; }
+  .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .params { grid-template-columns: repeat(2, minmax(0, 1fr)); } .params .bt { grid-column: span 2; }
+  .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  #dock .pl { grid-template-columns: minmax(0, 1fr); }
+}
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 </style>
 
-<div class="wrap">
-  <header class="top">
-    <h1>Supply Planning Copilot</h1>
-    <span class="sub" id="subtitle"></span>
-  </header>
-  <div class="banner"><strong>Version de démonstration</strong> sur les données de test B80 du 05-oct-2026.
-    Les quantités sont celles du moteur Python, calculées à l'avance pour chaque réglage proposé.
-    La page ne fait qu'afficher, appliquer tes modifications et additionner.</div>
-
-  <nav class="tabs" role="tablist" id="tabs">
-    <button data-t="params" class="on">1. Paramètres</button>
-    <button data-t="valid">2. Validation</button>
-    <button data-t="summary">3. Résumé &amp; export</button>
-    <button data-t="history">4. Historique</button>
-    <button data-t="quality">Qualité des données</button>
-  </nav>
-
-  <!-- 1. Paramètres -->
-  <section id="t-params">
-    <div class="card grid">
-      <label class="f">Ton nom (planner)
-        <input type="text" id="author" placeholder="ex. Marie" autocomplete="name">
-        <span class="hint">Obligatoire pour modifier une quantité et enregistrer.</span>
-      </label>
-      <label class="f">Boutique
-        <select id="boutique"><option>B80</option></select>
-        <span class="hint" id="dcinfo"></span>
-      </label>
-      <label class="f">Date du run
-        <input type="date" id="rundate" disabled>
-        <span class="hint">Fixée par les données de démo.</span>
-      </label>
-      <label class="f">Date de livraison
-        <input type="date" id="delivery">
-        <span class="hint">Obligatoire. N'entre pas dans la quantité (affichage du stock projeté).</span>
-      </label>
-      <label class="f">Jours de couverture
-        <select id="cover"></select>
-        <span class="hint">Obligatoire, pas de valeur par défaut.</span>
-      </label>
-      <div class="f">Cover café (type C)
-        <label class="chk"><input type="checkbox" id="coffeeOn"> Cover différent pour les cafés</label>
-        <select id="coffee" disabled></select>
-      </div>
-      <div class="f">Mode
-        <div class="seg" id="mode">
-          <button data-v="safe" class="on">Safe (recommandé)</button>
-          <button data-v="excel_parity">Parité Excel</button>
-        </div>
-        <span class="hint">Safe : café sans multiple → 240 (VER) / 800 (ORI) au lieu de 1.</span>
-      </div>
-      <div class="f">Entrées métier
-        <label class="chk"><input type="checkbox" id="examples"> Ajouter les exemples d'allocation, lancement et stock cible</label>
-        <ul class="hint" id="exlist" style="margin:2px 0 0;padding-left:16px"></ul>
-      </div>
-    </div>
-    <details style="margin-top:10px"><summary class="muted">Avancé : codes de mouvement inclus dans les ventes</summary>
-      <p class="muted" id="codes" style="font-size:12.5px"></p>
-    </details>
-    <div class="row" style="margin-top:14px">
-      <button class="btn primary" id="compute">Calculer la commande</button>
-      <span class="muted" id="lastrun" style="font-size:12.5px"></span>
-    </div>
-    <div id="pmsg"></div>
-  </section>
-
-  <!-- 2. Validation -->
-  <section id="t-valid" hidden>
-    <div class="row" style="margin-bottom:10px">
-      <span class="muted" style="font-size:12px">Statut :</span>
-      <button class="chip on" data-s="">Tous</button>
-      <button class="chip" data-s="O">OK</button>
-      <button class="chip" data-s="R">REVIEW</button>
-      <button class="chip" data-s="B">BLOCKED</button>
-      <label class="chk"><input type="checkbox" id="onlyQty"> Qty &gt; 0</label>
-      <label class="chk"><input type="checkbox" id="onlyConv"> Conversions</label>
-      <label class="chk"><input type="checkbox" id="onlyEdit"> Modifiées</label>
-      <input type="search" id="q" class="grow" placeholder="Rechercher SKU ou description" aria-label="Rechercher">
-    </div>
-    <div class="tablewrap">
-      <table class="wide">
-        <thead><tr>
-          <th>SKU</th><th>Description</th><th>Statut</th><th>Origine</th>
-          <th class="n">Qty proposée</th><th class="n">Qty finale</th><th>Catégorie</th><th>Raison de la modification</th>
-          <th>Type</th><th class="n">Ventes</th><th class="n">Expected</th><th class="n">Couv. act.</th><th class="n">Multiple</th>
-          <th class="n">Couv. après</th><th class="n">Excel</th><th>Signalements</th>
-        </tr></thead>
-        <tbody id="rows"></tbody>
-      </table>
-    </div>
-    <p class="muted" id="count" style="font-size:12px"></p>
-    <div class="row">
-      <button class="btn primary" id="apply">Appliquer les modifications</button>
-      <button class="btn" id="discard">Annuler les saisies non appliquées</button>
-    </div>
-    <div id="vmsg"></div>
-  </section>
-
-  <!-- 3. Résumé & export -->
-  <section id="t-summary" hidden>
-    <div class="tiles" id="tiles"></div>
-    <div class="two">
-      <div>
-        <h2 class="sec">Palettes par famille</h2>
-        <div class="tablewrap"><table><thead><tr><th>Famille</th><th class="n">Unités</th><th class="n">Palettes</th></tr></thead><tbody id="pallets"></tbody></table></div>
-        <p class="muted" id="nopallet" style="font-size:12.5px"></p>
-        <h2 class="sec">Origine des quantités commandées</h2>
-        <div class="tablewrap"><table><thead><tr><th>Origine</th><th class="n">Lignes</th></tr></thead><tbody id="sources"></tbody></table></div>
-      </div>
-      <div>
-        <h2 class="sec">Signalements les plus fréquents</h2>
-        <div class="tablewrap"><table><thead><tr><th>Signalement</th><th class="n">Lignes</th></tr></thead><tbody id="topreasons"></tbody></table></div>
-        <p class="muted" id="unrel" style="font-size:12.5px"></p>
-      </div>
-    </div>
-    <details id="exdetails" style="margin-top:14px"><summary id="exsum"></summary>
-      <div class="tablewrap" style="margin-top:8px"><table><thead><tr><th>SKU</th><th>Description</th><th>Raison</th></tr></thead><tbody id="excluded"></tbody></table></div>
-    </details>
-    <h2 class="sec">Export</h2>
-    <div id="exportinfo"></div>
-    <div class="row" style="margin-top:8px">
-      <button class="btn" id="save">Enregistrer le run</button>
-      <button class="btn primary" id="dllt">Télécharger le fichier LT (Nessoft)</button>
-      <button class="btn" id="dlrecap">Télécharger le récapitulatif boutique</button>
-      <button class="btn" id="copylt" hidden>Copier le fichier LT</button>
-      <button class="btn" id="copyrecap" hidden>Copier le récapitulatif</button>
-    </div>
-    <div id="smsg"></div>
-    <p class="muted" style="font-size:12.5px">Nom du fichier LT : <span class="mono" id="ltname"></span>. Importe-le dans Nessoft à la main : l'outil n'y écrit jamais.</p>
-    <details><summary>Contenu du fichier LT (<span class="mono">SKU;QTY</span>)</summary><pre class="box mono" id="lt"></pre></details>
-    <details><summary>Contenu du récapitulatif</summary><pre class="box mono" id="recap"></pre></details>
-  </section>
-
-  <!-- 4. Historique -->
-  <section id="t-history" hidden>
-    <p class="muted" style="font-size:12.5px">Dans cette démo, les runs enregistrés restent dans ton navigateur uniquement. Dans l'outil installé, ils vont dans la base SQLite locale.</p>
-    <div class="tablewrap"><table><thead><tr><th>N°</th><th>Créé le</th><th>Par</th><th>Livraison</th><th class="n">Cover</th><th>Mode</th><th class="n">Lignes</th><th class="n">Unités</th><th>Exporté</th></tr></thead><tbody id="runs"></tbody></table></div>
-    <div class="row" style="margin-top:12px">
-      <label class="f" style="min-width:220px">Comparer la commande actuelle avec le run
-        <select id="cmp"></select>
-      </label>
-    </div>
-    <div id="cmpout"></div>
-  </section>
-
-  <!-- Qualité -->
-  <section id="t-quality" hidden>
-    <div class="tablewrap"><table><thead><tr><th>Fichier</th><th>Niveau</th><th>Code</th><th>Message</th><th>Lignes (exemples)</th></tr></thead><tbody id="quality"></tbody></table></div>
-    <p class="muted" style="font-size:12.5px">ERROR = fichier inutilisable en l'état · WARNING = à vérifier · INFO = pour mémoire.</p>
-  </section>
-
-  <footer id="foot"></footer>
+<div class="app">
+  <aside class="side">
+    <div class="brand">Supply Planning Copilot<small>Boutique Planning · Nespresso Canada</small></div>
+    <label>Planner<input type="text" id="author" placeholder="Ton nom" autocomplete="name"></label>
+    <nav id="nav"></nav>
+    <div class="fresh" id="sidefresh"></div>
+    <div class="demo">Démo web sur les données de test B80 du 05/10/2026. Les quantités viennent du moteur Python, calculées à l'avance. Rien n'est envoyé ailleurs.</div>
+  </aside>
+  <main id="main"></main>
 </div>
-
-<aside id="panel" hidden aria-live="polite"></aside>
+<aside id="why" hidden aria-live="polite"></aside>
+<div id="dock" hidden></div>
 
 <script>
 const DATA = /*__DATA__*/null;
-const M = DATA.meta, L = DATA.lines, RS = DATA.reasons;
+const M = DATA.meta, L = DATA.lines, T = DATA.text;
+const PAGES = ["1. Dépôt du jour", "2. Commande boutique", "3. Journée", "4. Export", "5. Référentiels", "6. Historique"];
 const STATUS = { O: "OK", R: "REVIEW", B: "BLOCKED" };
-const CATS = [["promo", "Promo / événement"], ["launch", "Lancement"], ["stockout", "Rupture / ventes sous-estimées"], ["overstock", "Surstock / place en boutique"], ["dc_stock", "Stock DC insuffisant"], ["data_error", "Donnée erronée"], ["other", "Autre"]];
-const CAT_LABEL = Object.fromEntries(CATS);
-const SRC = { forecast: "Prévision", allocation: "Allocation", launch: "Lancement", target_stock: "Stock cible", override: "Override" };
-const MSRC = { multiple_list: "Multiple list", inferred_family: "inféré depuis la famille (VER/ORI)", excel_default_1: "absent → 1 (comme Excel)", missing_default_1: "absent → 1 (non fiable)", excel_zero_multiple: "0 dans la Multiple list" };
-const FAMILIES = ["Cafés Vertuo (VL)", "Cafés Original (OL)", "Machines", "Autres"];
+const SRC = { forecast: "Prévision", allocation: "Allocation", launch: "Lancement", target_stock: "Stock cible", dc_return: "Retour DC", exclusion: "Exclusion", override: "Modifié" };
+const MSRC = { multiple_list: "Multiple list", multiple_list_family: "famille (deux multiples)", inferred_family: "inféré (famille)", excel_default_1: "absent → 1 (Excel)", missing_default_1: "absent" };
+const CAT = Object.fromEntries(M.categories);
+const CHIPS = ["Tous", "OK", "REVIEW", "BLOCKED", "Qty > 0", "Promo/Allocation", "Lancement", "Conversion", "Retour DC"];
+const MODES = { "Standard": "standard", "Parité Excel": "excel_parity" };
+const MODE_LABEL = { standard: "Standard", excel_parity: "Parité Excel" };
+const NAMES = Object.fromEntries(DATA.boutiques);
+const PLANNED = Object.fromEntries(DATA.planned);
+const FR_DAYS = ["dim.", "lun.", "mar.", "mer.", "jeu.", "ven.", "sam."];
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const nf0 = new Intl.NumberFormat("fr-CA", { maximumFractionDigits: 0 });
-const nf1 = new Intl.NumberFormat("fr-CA", { maximumFractionDigits: 1 });
-const nf2 = new Intl.NumberFormat("fr-CA", { maximumFractionDigits: 2 });
-const fmt = (x, f = nf0) => x === null || x === undefined || Number.isNaN(x) ? "—" : f.format(x);
+const nf1 = new Intl.NumberFormat("fr-CA", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+const fmt = x => x === null || x === undefined || Number.isNaN(x) ? "—" : nf0.format(x);
+const fmt1 = x => x === null || x === undefined || Number.isNaN(x) ? "—" : nf1.format(x);
+const pad = n => String(n).padStart(2, "0");
+const iso = d => d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate());
+const parseIso = s => { const [y, m, d] = s.split("-").map(Number); return new Date(y, m - 1, d); };
+const fdate = s => { if (!s) return "—"; const d = parseIso(s); return pad(d.getDate()) + "/" + pad(d.getMonth() + 1) + "/" + d.getFullYear(); };
+const frday = s => { const d = parseIso(s); return FR_DAYS[d.getDay()] + " " + pad(d.getDate()) + "/" + pad(d.getMonth() + 1); };
+const btqLabel = b => NAMES[b] ? b + " — " + NAMES[b] : b;
 const $ = id => document.getElementById(id);
-const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
+const isAttrs = x => x && typeof x === "object" && !(x instanceof Node) && !Array.isArray(x);
+function el(tag, attrs, ...kids) {
+  const e = document.createElement(tag);
+  const sets = [];
+  if (typeof attrs === "string") { e.className = attrs; if (isAttrs(kids[0])) sets.push(kids.shift()); }
+  else if (isAttrs(attrs)) sets.push(attrs);
+  for (const a of sets) for (const [k, v] of Object.entries(a)) {
+    if (k === "class") e.className = v; else if (k === "style") e.style.cssText = v; else if (k.startsWith("on")) e[k] = v; else if (k in e && k !== "list") e[k] = v; else e.setAttribute(k, v);
+  }
+  for (const k of kids.flat()) if (k !== null && k !== undefined && k !== false) e.append(k instanceof Node ? k : String(k));
+  return e;
+}
 const store = { get(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } },
                 set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); return true; } catch (e) { return false; } } };
 
-const st = { run: null, overrides: {}, edits: {}, s: "", q: "", onlyQty: false, onlyConv: false, onlyEdit: false, sel: null, savedId: null, mode: "safe", tab: "params" };
-
-// ---------- Paramètres ----------
-$("subtitle").textContent = "Boutique B80 · DC " + M.dc + " · historique de ventes " + M.history_days + " jours";
-$("dcinfo").textContent = "DC " + M.dc + " (DC Mapping)";
-$("rundate").value = M.run_date;
-$("delivery").min = M.run_date;
-$("cover").append(new Option("Choisir…", "")); $("coffee").append(new Option("Choisir…", ""));
-M.covers.forEach((c, i) => { $("cover").append(new Option(nf1.format(c) + " j", i)); $("coffee").append(new Option(nf1.format(c) + " j", i)); });
-M.examples.forEach(t => $("exlist").append(el("li", "", t)));
-$("codes").textContent = "Tous les codes sont inclus (ventes ET déstockages), comme dans Excel : " + M.codes.join(", ") + ". Dans l'outil installé, la liste est modifiable.";
-$("author").value = store.get("spc_author", "");
-$("author").oninput = e => store.set("spc_author", e.target.value);
-$("coffeeOn").onchange = e => { $("coffee").disabled = !e.target.checked; };
-document.querySelectorAll("#mode button").forEach(b => b.onclick = () => { st.mode = b.dataset.v; document.querySelectorAll("#mode button").forEach(x => x.classList.toggle("on", x === b)); });
-
-function showMsg(id, kind, text) { const box = $(id); box.replaceChildren(); if (text) box.append(el("div", "msg " + kind, text)); }
-
-$("compute").onclick = () => {
-  const missing = [];
-  const delivery = $("delivery").value, cover = $("cover").value, coffeeOn = $("coffeeOn").checked, coffee = $("coffee").value;
-  if (!delivery) missing.push("la date de livraison");
-  if (cover === "") missing.push("les jours de couverture");
-  if (coffeeOn && coffee === "") missing.push("les jours de couverture café");
-  if (missing.length) return showMsg("pmsg", "err", "Il manque : " + missing.join(", ") + ".");
-  if (delivery < M.run_date) return showMsg("pmsg", "err", "La date de livraison doit être le jour du run ou après.");
-  st.run = { delivery, cover: +cover, coffee: coffeeOn ? +coffee : -1, mode: st.mode, variant: $("examples").checked ? "examples" : "none" };
-  st.overrides = {}; st.edits = {}; st.sel = null; st.savedId = null;
-  showMsg("pmsg", "ok", "Commande calculée. Va dans l'onglet 2. Validation.");
-  $("lastrun").textContent = describeRun(st.run);
-  renderAll();
+const st = {
+  page: store.get("spc2_page", PAGES[0]), author: store.get("spc_author", ""), examples: store.get("spc2_examples", true),
+  form: { boutique: "", delivery: "", cover: "", coffee: "", mode: "standard" }, order: null, err: "",
+  overrides: {}, pending: {}, seen: new Set(), chip: "Tous", q: "", why: null, gear: false, savedId: null, xmsg: null,
+  day: null, refTab: 0,
 };
-function describeRun(r) {
-  return "Dernier calcul : livraison " + r.delivery + " · cover " + nf1.format(M.covers[r.cover]) + " j" +
-    (r.coffee >= 0 ? " · café " + nf1.format(M.covers[r.coffee]) + " j" : "") + " · mode " + (r.mode === "safe" ? "Safe" : "Parité Excel") +
-    (r.variant === "examples" ? " · avec exemples métier" : "");
-}
 
-// ---------- Résultat ----------
-function base(i) {
-  const r = st.run, idx = L[i].coffee && r.coffee >= 0 ? r.coffee : r.cover;
-  const [qty, raw, s, reasons, reliable, post, multiple, msrc, source, fq] = DATA.res[r.mode + "|" + r.variant][i][idx];
-  return { qty, raw, s, reasons: reasons.map(k => RS[k]), reliable, post, multiple, msrc, source, fq, cover: M.covers[idx], coffeeCover: L[i].coffee && r.coffee >= 0 };
+// ---------- Résultat pré-calculé ----------
+function variantKey(mode) { return mode + "|" + (st.examples ? "examples" : "none"); }
+function baseLine(j) {
+  const o = st.order, v = DATA.variants[variantKey(o.mode)], m = L[v.sel[j]];
+  const cell = v.res[j], ci = m.coffee && o.coffee !== "" ? +o.coffee : +o.cover;
+  const t = Array.isArray(cell[0]) ? cell[ci] : cell;
+  const [qty, raw, s, rids, multiple, msrc, source, fq, fbs, bzs, flags] = t;
+  return { m, qty, raw, s, reasons: rids.map(i => T[i]), multiple, msrc: T[msrc], source, fq, fb: fbs < 0 ? null : T[fbs], biz: bzs < 0 ? null : T[bzs],
+           conv: !!(flags & 1), dcr: !!(flags & 2), cover: M.covers[ci], coffeeCover: m.coffee && o.coffee !== "" };
 }
-function line(i) {
-  const b = base(i), o = st.overrides[L[i].sku];
-  if (!o) return b;
-  const reasons = [...b.reasons, "Override de " + o.author + " : " + b.qty + " → " + o.after + " (" + CAT_LABEL[o.cat] + " : " + o.reason + ")"];
+function finalLine(j) {
+  const b = baseLine(j), ov = st.overrides[b.m.sku];
+  if (!ov) return b;
+  const reasons = [...b.reasons, "Modifié par " + ov.author + " : " + ov.before + " → " + ov.final + " (" + CAT[ov.cat] + " : " + ov.reason + ")"];
+  if (ov.final !== ov.after) reasons.push("Saisie " + ov.after + " arrondie au multiple de " + (b.multiple || 1) + " : " + ov.final);
   let s = b.s;
-  if (b.s === "B" && o.after > 0) { s = "R"; reasons.push("Override sur une ligne bloquée : à vérifier"); }
-  return { ...b, qty: o.after, s, reasons, source: "override", fq: b.fq ?? b.qty, override: o };
+  if (b.s === "B" && ov.after > 0) { s = "R"; reasons.push("Override sur une ligne bloquée : à vérifier"); }
+  return { ...b, qty: ov.final, s, reasons, source: "override", fq: b.fq ?? b.qty, ov };
 }
-// Couverture après la quantité FINALE (affichage) : (Expected + qty) / ventes × jours.
-function postCover(i, qty) { const l = L[i]; return l.sales > 0 ? (l.exp + qty) / l.sales * M.history_days : null; }
-function allLines() { return L.map((_, i) => line(i)); }
-function reasonKey(r) { for (const sep of [" (", " : "]) { if (r.includes(sep)) r = r.split(sep)[0]; } return r; }
+// Même règle que le moteur d'overrides : la saisie est arrondie au multiple supérieur.
+function roundToMultiple(q, multiple) { const m = multiple > 0 ? multiple : 1; return Math.ceil(q / m) * m; }
+function lines() { if (!st.order) return []; const n = DATA.variants[variantKey(st.order.mode)].sel.length; const out = []; for (let j = 0; j < n; j++) out.push(finalLine(j)); return out; }
+function postCover(m, qty) { return m.sales > 0 ? (m.exp + qty) / m.sales * M.history_days : null; }
+function summarize(ls) {
+  const pal = { VL: 0, OL: 0, MACHINES: 0, OTHERS: 0 }, by = { O: 0, R: 0, B: 0 }; let units = 0, ordered = 0; const noPal = [];
+  for (const x of ls) {
+    by[x.s]++;
+    if (x.qty <= 0) continue;
+    units += x.qty; ordered++;
+    const k = palKey(x.m.pfam);
+    if (x.m.pf === null) noPal.push(x.m.sku); else pal[k] += x.qty * x.m.pf;
+  }
+  return { units, ordered, by, pal, palTotal: pal.VL + pal.OL + pal.MACHINES + pal.OTHERS, noPal };
+}
+function palKey(f) { const u = (f || "").toUpperCase(); if (u.includes("VERTUO") || u.startsWith("VL")) return "VL"; if (u.includes("ORIGINAL") || u.startsWith("OL")) return "OL"; if (u.includes("MACHINE")) return "MACHINES"; return "OTHERS"; }
 
-function summary(lines) {
-  const units = {}, pal = {}; FAMILIES.forEach(f => { units[f] = 0; pal[f] = 0; });
-  const noPallet = [], unrel = [], srcCount = {}, stCount = { O: 0, R: 0, B: 0 }, reasons = {};
-  let ordered = 0, total = 0;
-  lines.forEach((r, i) => {
-    stCount[r.s]++;
-    r.reasons.forEach(x => { const k = reasonKey(x); reasons[k] = (reasons[k] || 0) + 1; });
-    if (r.qty <= 0) return;
-    ordered++; total += r.qty; srcCount[r.source] = (srcCount[r.source] || 0) + 1;
-    const f = L[i].family; units[f] += r.qty;
-    if (L[i].pf === null) noPallet.push(L[i].sku); else pal[f] += r.qty * L[i].pf;
-    if (!r.reliable) unrel.push(L[i].sku);
-  });
-  return { units, pal, palTotal: Object.values(pal).reduce((a, b) => a + b, 0), noPallet, unrel, srcCount, stCount, ordered, total,
-           reasons: Object.entries(reasons).sort((a, b) => b[1] - a[1]) };
+// ---------- Navigation ----------
+function go(p) { st.page = p; store.set("spc2_page", p); st.why = null; render(); window.scrollTo(0, 0); }
+function renderNav() {
+  $("nav").replaceChildren(...PAGES.map(p => el("button", { class: p === st.page ? "on" : "", onclick: () => go(p) }, p)));
+  const days = DATA.depot.map(d => d.day).filter(Boolean).sort();
+  const worst = DATA.depot.find(d => d.day === days[0]);
+  $("sidefresh").replaceChildren(worst ? el("span", "", el("span", "st " + freshCls(worst.level), worst.level === "green" ? "●" : "●"), " ", worst.fresh) : "Aucun export déposé");
+}
+const freshCls = l => ({ green: "G", orange: "Y", red: "X" }[l] || "U");
+$("author").value = st.author;
+$("author").oninput = e => { st.author = e.target.value.trim(); store.set("spc_author", st.author); if (st.page === PAGES[3] || st.page === PAGES[2]) render(); };
+function needAuthor() { return st.author ? null : el("div", "msg err", "Indique ton nom dans la barre de gauche."); }
+
+// ---------- 1. Dépôt du jour ----------
+function renderDepot() {
+  const out = [el("h1", "", "Dépôt du jour")];
+  const cards = el("div", "two");
+  for (const kind of ["stock_situation", "stock_movements"]) {
+    const d = DATA.depot.find(x => x.kind === kind);
+    cards.append(el("div", "card",
+      el("h3", { style: "margin-top:0" }, d ? d.label : kind),
+      el("div", "drop", "Glisse ici l'export Power BI (.csv ou .xlsx)", el("br"), el("span", "small", "Démo : le fichier de test est déjà déposé.")),
+      d ? el("div", { style: "margin-top:10px" },
+        el("div", "", el("span", "st " + freshCls(d.level), d.fresh)),
+        el("div", "small", el("span", "mono", d.name), " · extrait le ", el("b", "", fdate(d.day)), " (" + d.how + ")")) : el("div", "msg info", "Aucun fichier déposé.")));
+  }
+  out.push(cards);
+  out.push(el("h3", "", "Contrôles qualité"));
+  const q = DATA.dq, weeks = Math.floor(q.days / 7);
+  out.push(el("div", "metrics",
+    tile("Lignes de stock", fmt(q.stock_rows)), tile("Emplacements", fmt(q.locations)),
+    tile("Mouvements", fmt(q.moves)), tile("Historique", q.days + " j" + (weeks ? " (" + weeks + " sem.)" : ""))));
+  if (M.period) out.push(el("p", "small muted", "Mouvements du " + fdate(M.period[0]) + " au " + fdate(M.period[1])));
+  if (weeks < 4) out.push(el("div", "msg warn", "Moins de 4 semaines de mouvements : l'historique de secours des SKU dormants sera incomplet."));
+  const errs = DATA.quality.filter(i => i.niveau === "ERROR"), warns = DATA.quality.filter(i => i.niveau === "WARNING");
+  out.push(errs.length ? el("div", "msg err", errs.length + " erreur(s) bloquante(s) à corriger avant de continuer.")
+    : warns.length ? el("div", "msg warn", warns.length + " point(s) à vérifier.") : el("div", "msg ok", "Aucun problème détecté."));
+  if (DATA.quality.length) out.push(el("details", "", el("summary", "", "Détail des contrôles (" + DATA.quality.length + ")"),
+    tableOf(["Fichier", "Niveau", "Message", "Lignes (exemples)"], DATA.quality.map(i => [i.fichier, el("span", "st " + (i.niveau === "ERROR" ? "B" : i.niveau === "WARNING" ? "R" : "O"), i.niveau), i.message, i["lignes (exemples)"]]))));
+  out.push(el("div", { style: "margin-top:16px" }, el("button", { class: "btn primary", disabled: errs.length > 0, onclick: () => go(PAGES[1]) }, "Prêt")));
+  return out;
+}
+function tile(k, v, h, cls) { return el("div", "tile" + (cls ? " " + cls : ""), el("div", "k", k), el("div", "v", v), h ? el("div", "h", h) : null); }
+function tableOf(head, rows, numCols = []) {
+  return el("div", "tablewrap", el("table", "", el("thead", "", el("tr", "", head.map((h, i) => el("th", numCols.includes(i) ? "n" : "", h)))),
+    el("tbody", "", rows.map(r => el("tr", "", r.map((c, i) => el("td", numCols.includes(i) ? "n" : "", c)))))));
 }
 
-// ---------- Onglets ----------
-function showTab(t) {
-  st.tab = t;
-  document.querySelectorAll("#tabs button").forEach(b => b.classList.toggle("on", b.dataset.t === t));
-  ["params", "valid", "summary", "history", "quality"].forEach(x => { $("t-" + x).hidden = x !== t; });
-  renderAll();
+// ---------- 2. Commande boutique ----------
+function coverSelect(id, value, optional) {
+  const s = el("select", { id }); s.append(new Option(optional ? "—" : "Choisir", ""));
+  M.covers.forEach((c, i) => s.append(new Option(fmt1(c), String(i))));
+  s.value = value; return s;
 }
-document.querySelectorAll("#tabs button").forEach(b => b.onclick = () => showTab(b.dataset.t));
-
-function needRun(sectionId) {
-  if (st.run) return false;
-  const s = $(sectionId); if (!s.querySelector(".needrun")) s.prepend(el("div", "msg info needrun", "Calcule d'abord une commande dans l'onglet 1. Paramètres."));
+function boutiqueInput() {
+  const wrap = el("div", "f", "Boutique");
+  const dl = el("datalist", { id: "btqlist" }, DATA.boutiques.map(([b]) => el("option", { value: btqLabel(b) })));
+  const inp = el("input", { type: "search", id: "p_boutique", placeholder: "Rechercher une boutique", value: st.form.boutique ? btqLabel(st.form.boutique) : "" });
+  inp.setAttribute("list", "btqlist");
+  inp.onchange = () => { const v = inp.value.trim(), code = v.split(" — ")[0].trim().toUpperCase(); st.form.boutique = NAMES[code] !== undefined || DATA.boutiques.some(b => b[0] === code) ? code : ""; render(); };
+  wrap.append(inp, dl); return wrap;
+}
+function compute() {
+  const f = st.form, missing = [];
+  if (!f.boutique) missing.push("la boutique");
+  if (!f.delivery) missing.push("la date de livraison");
+  if (f.cover === "") missing.push("le cover");
+  st.err = "";
+  if (missing.length) { st.err = "Il manque " + missing.join(", ") + "."; return render(); }
+  if (f.delivery < M.run_date) { st.err = "La date de livraison doit être le " + fdate(M.run_date) + " ou après."; return render(); }
+  if (f.boutique !== M.boutique) { st.err = "Calcul impossible : Aucune ligne de Stock Situation pour la boutique " + f.boutique + ". (Démo : seules les données de B80 sont fournies.)"; return render(); }
+  st.order = { ...f }; st.overrides = {}; st.pending = {}; st.seen = new Set(); st.savedId = null; st.why = null; st.xmsg = null;
+  render();
+}
+function paramsRow() {
+  const f = st.form;
+  const delivery = el("input", { type: "date", id: "p_delivery", min: M.run_date, value: f.delivery, onchange: e => { f.delivery = e.target.value; render(); } });
+  const cover = coverSelect("p_cover", f.cover); cover.onchange = e => { f.cover = e.target.value; };
+  const coffee = coverSelect("p_coffee", f.coffee, true); coffee.onchange = e => { f.coffee = e.target.value; }; coffee.title = "Facultatif : cover propre aux cafés (type C)";
+  const mode = el("select", { id: "p_mode", onchange: e => { f.mode = e.target.value; } }, Object.entries(MODES).map(([k, v]) => el("option", { value: v }, k))); mode.value = f.mode;
+  const gear = el("div", "gear", el("button", { class: "btn", title: "Options avancées", "aria-expanded": String(st.gear), onclick: () => { st.gear = !st.gear; render(); } }, "⚙"));
+  if (st.gear) gear.append(el("div", "pop",
+    el("label", "f", "Semaines de secours (SKU dormants)", el("input", { type: "number", value: 4, disabled: true, title: "Démo : 4 semaines" })),
+    el("div", "f", "Codes de mouvement comptés", el("span", "small", { style: "font-weight:400" }, M.codes.join(", ") || "—"), el("span", { class: "small muted", style: "font-weight:400" }, "Tous inclus (ventes et déstockages).")),
+    el("label", { style: "display:flex;gap:8px;align-items:center;font-size:14px" }, el("input", { type: "checkbox", checked: st.examples, onchange: e => setExamples(e.target.checked) }), "Exemples d'allocation, lancement, stock cible")));
+  const row = el("div", "params",
+    boutiqueInput(),
+    el("label", "f", "Livraison", delivery),
+    el("label", "f", "Cover (j)", cover),
+    el("label", "f", "Cover café", coffee),
+    el("label", "f", "Historique (j)", el("input", { type: "number", id: "p_hist", value: M.history_days, disabled: true, title: "Démo : 7 jours de mouvements" })),
+    el("label", "f", "Mode", mode),
+    gear,
+    el("div", "bt", el("button", { class: "btn primary", id: "compute", onclick: compute, style: "width:100%" }, "Calculer")));
+  const out = [row];
+  if (f.boutique) {
+    const slot = PLANNED[f.boutique];
+    if (slot && slot !== f.delivery) out.push(el("div", { style: "margin-top:8px" }, el("button", { class: "btn", onclick: () => { f.delivery = slot; render(); } }, "Livraison selon le Schedule : " + frday(slot))));
+    else if (!slot) out.push(el("p", "small muted", "Pas de commande prévue au Schedule le " + frday(M.run_date) + " pour cette boutique."));
+  }
+  if (st.err) out.push(el("div", "msg err", st.err));
+  return out;
+}
+function setExamples(on) { st.examples = on; store.set("spc2_examples", on); st.overrides = {}; st.pending = {}; st.savedId = null; render(); }
+function matches(chip, x) {
+  if (chip in { OK: 1, REVIEW: 1, BLOCKED: 1 }) return STATUS[x.s] === chip;
+  if (chip === "Qty > 0") return x.qty > 0;
+  if (chip === "Promo/Allocation") return x.source === "allocation" || (x.ov && x.ov.cat === "promo");
+  if (chip === "Lancement") return x.source === "launch";
+  if (chip === "Conversion") return x.conv;
+  if (chip === "Retour DC") return x.dcr;
   return true;
 }
-function clearNeedRun() { document.querySelectorAll(".needrun").forEach(n => n.remove()); }
-
-// ---------- 2. Validation ----------
-document.querySelectorAll(".chip").forEach(b => b.onclick = () => { st.s = b.dataset.s; document.querySelectorAll(".chip").forEach(x => x.classList.toggle("on", x === b)); renderValid(); });
-$("q").oninput = e => { st.q = e.target.value.trim().toLowerCase(); renderValid(); };
-$("onlyQty").onchange = e => { st.onlyQty = e.target.checked; renderValid(); };
-$("onlyConv").onchange = e => { st.onlyConv = e.target.checked; renderValid(); };
-$("onlyEdit").onchange = e => { st.onlyEdit = e.target.checked; renderValid(); };
-
-function renderValid() {
-  const body = $("rows"); body.replaceChildren();
-  if (!st.run) return;
-  const frag = document.createDocumentFragment(); let n = 0;
-  L.forEach((l, i) => {
-    const r = line(i), b = base(i), ed = st.edits[l.sku];
-    if (st.s && r.s !== st.s) return;
-    if (st.onlyQty && r.qty <= 0) return;
-    if (st.onlyConv && !l.conv) return;
-    if (st.onlyEdit && !st.overrides[l.sku] && !ed) return;
-    if (st.q && !(l.sku.toLowerCase().includes(st.q) || l.desc.toLowerCase().includes(st.q))) return;
-    n++;
-    const tr = el("tr", "pick" + (st.overrides[l.sku] || ed ? " edited" : "") + (st.sel === i ? " sel" : ""));
-    tr.dataset.i = i;
-    const td = (t, c) => { const x = el("td", c, t); tr.append(x); return x; };
-    const skuTd = el("td", "mono"); const a = el("button", "why-link", l.sku); a.title = "Pourquoi cette quantité ?"; a.onclick = () => openPanel(i); skuTd.append(a); tr.append(skuTd);
-    td(l.desc || "—", "desc");
-    const s = el("td"); s.append(el("span", "st " + r.s, STATUS[r.s])); tr.append(s);
-    td(SRC[r.source]);
-    td(fmt(b.qty), "n");
-    const qtd = el("td", "n"); const qi = el("input"); qi.type = "number"; qi.min = 0; qi.step = 1;
-    qi.value = ed ? ed.qty : r.qty; qi.setAttribute("aria-label", "Qty finale " + l.sku);
-    const draft = () => st.edits[l.sku] || (st.edits[l.sku] = { qty: qi.value, reason: st.overrides[l.sku]?.reason || "", cat: st.overrides[l.sku]?.cat || "" });
-    qi.oninput = () => { draft().qty = qi.value; tr.classList.add("edited"); };
-    qtd.append(qi); tr.append(qtd);
-    const ctd = el("td"); const ci = el("select"); ci.setAttribute("aria-label", "Catégorie " + l.sku);
-    ci.append(new Option("—", "")); CATS.forEach(([v, t]) => ci.append(new Option(t, v)));
-    ci.value = ed ? (ed.cat || "") : (st.overrides[l.sku]?.cat || "");
-    ci.onchange = () => { draft().cat = ci.value; tr.classList.add("edited"); };
-    ctd.append(ci); tr.append(ctd);
-    const rtd = el("td"); const ri = el("input"); ri.type = "text"; ri.placeholder = "Obligatoire si modifiée";
-    ri.value = ed ? ed.reason : (st.overrides[l.sku]?.reason || ""); ri.setAttribute("aria-label", "Raison " + l.sku);
-    ri.oninput = () => { draft().reason = ri.value; tr.classList.add("edited"); };
-    rtd.append(ri); tr.append(rtd);
-    td(l.type || "—"); td(fmt(l.sales), "n"); td(fmt(l.exp), "n"); td(fmt(l.cur, nf1), "n");
-    td(fmt(r.multiple) + (r.msrc === "multiple_list" ? "" : " *"), "n");
-    td(fmt(postCover(i, r.qty), nf1), "n");
-    const x = td(l.xl === null || l.xl === undefined ? "—" : fmt(l.xl) + (l.xlf ? "" : " ✎"), "n" + (l.xl !== null && l.xl !== undefined && l.xl !== r.qty ? " diff" : ""));
-    x.title = l.xl === null || l.xl === undefined ? "Pas dans la feuille Excel" : l.xlf ? "Valeur de la formule Excel (cover 9 j)" : "Override manuel du planner dans Excel";
-    td(r.reasons.join(" | "), "sig");
-    frag.append(tr);
-  });
-  body.append(frag);
-  $("count").textContent = n + " ligne(s) affichée(s) sur " + L.length + ". Clique sur un SKU pour voir pourquoi. * multiple non issu de la Multiple list · ✎ override manuel dans Excel · Excel = commande du calculateur à 9 j.";
+function rank(x) { return x.s !== "O" ? [0, -x.qty, x.m.sku] : x.qty > 0 ? [1, -x.qty, x.m.sku] : [2, 0, x.m.sku]; }
+function cmpRank(a, b) { const ra = rank(a), rb = rank(b); for (let i = 0; i < 3; i++) { if (ra[i] < rb[i]) return -1; if (ra[i] > rb[i]) return 1; } return 0; }
+const COLS = [["Statut", 104], ["SKU", 92], ["Description", 200], ["Expected", 76, 1], ["Ventes", 66, 1], ["Couv. act.", 70, 1], ["Proposée", 76, 1], ["Qty finale ✎", 90, 1], ["Couv. après", 78, 1], ["Multiple", 66, 1], ["Stock DC", 74, 1], ["Source", 92], ["Raisons", 210], ["Vu", 40]];
+function orderTable(rows, baseQty) {
+  const t = el("table", "order", el("colgroup", "", COLS.map(c => el("col", { style: "width:" + c[1] + "px" }))),
+    el("thead", "", el("tr", "", COLS.map(c => el("th", c[2] ? "n" : "", c[0])))));
+  const body = el("tbody");
+  for (const x of rows) {
+    const m = x.m, sku = m.sku, pend = sku in st.pending;
+    const tr = el("tr", (x.ov ? "mod" : "") + (pend ? " pend" : ""));
+    tr.onclick = e => { if (e.target.closest("input")) return; openWhy(sku); };
+    const stCell = x.ov ? el("span", "st M", "Modifié") : el("span", "st " + x.s, STATUS[x.s]);
+    const qi = el("input", { type: "number", min: 0, step: x.multiple || 1, value: pend ? st.pending[sku] : x.qty, "aria-label": "Qty finale " + sku });
+    qi.onchange = () => { const v = Math.round(Number(qi.value)); if (!Number.isFinite(v) || v < 0) { qi.value = x.qty; return; } if (v !== x.qty) st.pending[sku] = v; else delete st.pending[sku]; renderDock(); tr.classList.toggle("pend", sku in st.pending); };
+    const vu = el("input", { type: "checkbox", checked: st.seen.has(sku), "aria-label": "Vu " + sku });
+    vu.onchange = () => { vu.checked ? st.seen.add(sku) : st.seen.delete(sku); updateProgress(); };
+    const reasons = x.reasons.join(" | ");
+    tr.append(el("td", "", stCell), el("td", "mono", sku), el("td", { title: m.desc }, m.desc || "—"),
+      el("td", "n", fmt(m.exp)), el("td", "n", fmt(m.sales)), el("td", "n", fmt1(m.cur)), el("td", "n", fmt(baseQty[sku])),
+      el("td", "n q", qi), el("td", "n", fmt1(postCover(m, x.qty))), el("td", "n", fmt(x.multiple)),
+      el("td", "n", m.dc === null ? "—" : fmt(m.dc)), el("td", "", SRC[x.source]), el("td", { title: reasons, class: "small" }, reasons || ""), el("td", "vu", vu));
+    body.append(tr);
+  }
+  t.append(body);
+  return el("div", { class: "tablewrap", style: "max-height:" + Math.min(42 + 33 * Math.max(rows.length, 1), 470) + "px" }, t);
+}
+function updateProgress() {
+  const n = lines().length, seen = st.seen.size;
+  const p = $("prog"); if (p) { p.firstChild.style.width = (100 * seen / Math.max(n, 1)) + "%"; $("progtxt").textContent = "Lignes vérifiées : " + seen + " / " + n; }
+}
+function renderOrder() {
+  const out = [el("h1", "", "Commande boutique"), ...paramsRow()];
+  if (!st.order) return out;
+  const o = st.order, ls = lines(), s = summarize(ls), v = DATA.variants[variantKey(o.mode)];
+  const baseQty = {}; for (let j = 0; j < ls.length; j++) baseQty[ls[j].m.sku] = baseLine(j).qty;
+  out.push(el("div", "ctx", el("b", "", btqLabel(o.boutique)), " · DC " + M.dc + " · livraison ", el("b", "", fdate(o.delivery)),
+    " · cover " + fmt1(M.covers[+o.cover]) + " j" + (o.coffee !== "" ? " (café " + fmt1(M.covers[+o.coffee]) + " j)" : "") + " · historique " + M.history_days + " j · " + MODE_LABEL[o.mode] + (st.examples ? " · exemples métier" : "")));
+  out.push(el("div", "tiles",
+    tile("Unités", fmt(s.units), fmt(s.ordered) + " lignes commandées"),
+    tile("Palettes estimées", fmt1(s.palTotal), "VL " + fmt1(s.pal.VL) + " · OL " + fmt1(s.pal.OL) + " · Mach. " + fmt1(s.pal.MACHINES) + " · Autres " + fmt1(s.pal.OTHERS)),
+    tile("OK", fmt(s.by.O), null, "O"), tile("REVIEW", fmt(s.by.R), null, "R"), tile("BLOCKED", fmt(s.by.B), null, "B")));
+  v.warnings.forEach(w => out.push(el("div", "msg warn", w)));
+  out.push(el("div", { id: "prog", class: "progress" }, el("div", { style: "width:" + (100 * st.seen.size / Math.max(ls.length, 1)) + "%" })),
+    el("div", { id: "progtxt", class: "small muted" }, "Lignes vérifiées : " + st.seen.size + " / " + ls.length));
+  out.push(el("div", "chips", CHIPS.map(c => el("button", { class: "chip" + (st.chip === c ? " on" : ""), onclick: () => { st.chip = c; render(); } }, c, el("b", "", String(ls.filter(x => matches(c, x)).length))))));
+  const search = el("input", { type: "search", id: "search", placeholder: "Rechercher un SKU ou une description", value: st.q, style: "max-width:360px" });
+  search.oninput = () => { st.q = search.value.trim().toLowerCase(); clearTimeout(search._t); search._t = setTimeout(() => { render(); const s2 = $("search"); s2.focus(); s2.setSelectionRange(s2.value.length, s2.value.length); }, 220); };
+  out.push(el("div", "row", search, el("button", { class: "btn", onclick: () => { ls.forEach(x => { if (x.s === "O") st.seen.add(x.m.sku); }); render(); } }, "✓ Accepter toutes les lignes OK")));
+  const shown = ls.filter(x => matches(st.chip, x) && (!st.q || x.m.sku.toLowerCase().includes(st.q) || x.m.desc.toLowerCase().includes(st.q)));
+  for (const fam of M.families) {
+    const fl = shown.filter(x => x.m.fam === fam).sort(cmpRank);
+    if (!fl.length) continue;
+    const units = fl.reduce((a, x) => a + x.qty, 0), flagged = fl.filter(x => x.s !== "O").length;
+    out.push(el("h2", "fam", fam, el("span", "", fl.length + " lignes · " + fmt(units) + " unités" + (flagged ? " · " + flagged + " à vérifier" : ""))));
+    const main = fl.filter(x => x.s !== "O" || x.qty > 0 || x.ov || x.m.sku in st.pending), rest = fl.filter(x => !main.includes(x));
+    if (main.length) out.push(orderTable(main, baseQty));
+    if (rest.length) { const d = el("details", "zero", el("summary", "", "Lignes à 0 sans alerte (" + rest.length + ")")); d.ontoggle = () => { if (d.open && d.children.length === 1) d.append(orderTable(rest, baseQty)); }; out.push(d); }
+  }
+  if (!shown.length) out.push(el("div", "msg info", "Aucune ligne pour ce filtre."));
+  out.push(el("div", { style: "margin-top:16px" }, el("button", { class: "btn primary", onclick: () => go(PAGES[3]) }, "Continuer vers l'export")));
+  return out;
 }
 
-$("discard").onclick = () => { st.edits = {}; renderValid(); showMsg("vmsg", "info", "Saisies non appliquées annulées."); };
-$("apply").onclick = () => {
-  const author = $("author").value.trim(), errs = [], next = { ...st.overrides };
-  const entries = Object.entries(st.edits);
-  if (!entries.length) return showMsg("vmsg", "info", "Aucune saisie à appliquer.");
-  if (!author) return showMsg("vmsg", "err", "Indique ton nom dans l'onglet 1. Paramètres avant de modifier une quantité.");
-  for (const [sku, e] of entries) {
-    const i = L.findIndex(l => l.sku === sku), b = base(i), q = Number(e.qty), reason = (e.reason || "").trim();
-    if (!Number.isInteger(q) || q < 0) { errs.push(sku + " : quantité entière ≥ 0 attendue"); continue; }
-    if (q === b.qty) { delete next[sku]; continue; }
-    if (!e.cat) { errs.push(sku + " : catégorie obligatoire"); continue; }
-    if (reason.length < 3) { errs.push(sku + " : raison obligatoire"); continue; }
-    next[sku] = { after: q, cat: e.cat, reason, author, ts: new Date().toISOString(), before: b.qty };
-  }
-  if (errs.length) return showMsg("vmsg", "err", "Modifications non appliquées : " + errs.join(" ; "));
-  st.overrides = next; st.edits = {}; st.savedId = null;
-  showMsg("vmsg", "ok", Object.keys(next).length + " modification(s) active(s). Résumé et export sont à jour.");
-  renderValid(); renderPanel();
-};
+// ---------- Modifications ----------
+function catSelect(id, value) { const s = el("select", { id }); s.append(new Option("Choisir", "")); M.categories.forEach(([v, t]) => s.append(new Option(t, v))); s.value = value || ""; return s; }
+function applyOverride(sku, qty, cat, reason) {
+  const j = DATA.variants[variantKey(st.order.mode)].sel.findIndex(i => L[i].sku === sku), b = baseLine(j);
+  if (qty === b.qty) { delete st.overrides[sku]; return null; }
+  if (!cat || reason.trim().length < 3) return sku;
+  st.overrides[sku] = { before: b.qty, after: qty, final: roundToMultiple(qty, b.multiple), cat, reason: reason.trim(), author: st.author, ts: new Date().toISOString() };
+  st.savedId = null; return null;
+}
+function renderDock() {
+  const d = $("dock"), skus = Object.keys(st.pending);
+  d.hidden = !(st.page === PAGES[1] && st.order && skus.length);
+  if (d.hidden) { d.replaceChildren(); return; }
+  const keep = {}; d.querySelectorAll("[data-k]").forEach(x => { keep[x.dataset.k] = x.value; });
+  const msg = el("div");
+  d.replaceChildren(el("h3", { style: "margin:0 0 6px" }, "Modifications à justifier (" + skus.length + ")"),
+    ...skus.map(sku => {
+      const m = L.find(l => l.sku === sku), cs = catSelect("cat_" + sku, keep["c" + sku]), ri = el("input", { type: "text", id: "reason_" + sku, placeholder: "Raison", value: keep["r" + sku] || "" });
+      cs.dataset.k = "c" + sku; ri.dataset.k = "r" + sku;
+      const cur = finalLine(DATA.variants[variantKey(st.order.mode)].sel.findIndex(i => L[i].sku === sku)).qty;
+      return el("div", "pl", el("div", "", el("b", "mono", sku), " " + (m.desc || "") , el("br"), el("span", "small", fmt(cur) + " → "), el("b", "", fmt(st.pending[sku]))), cs, ri);
+    }),
+    el("div", "row", { style: "margin-top:8px" },
+      el("button", { class: "btn primary", onclick: () => {
+        if (!st.author) { msg.replaceChildren(el("div", "msg err", "Indique ton nom dans la barre de gauche.")); return; }
+        const bad = [];
+        for (const sku of skus) { const r = applyOverride(sku, st.pending[sku], $("cat_" + sku).value, $("reason_" + sku).value); if (r) bad.push(r); }
+        if (bad.length) { for (const sku of skus) if (!bad.includes(sku)) delete st.pending[sku]; render(); $("dockmsg")?.replaceChildren(el("div", "msg err", "Catégorie et raison obligatoires pour : " + bad.join(", "))); return; }
+        st.pending = {}; render();
+      } }, "Valider les modifications"),
+      el("button", { class: "btn", onclick: () => { st.pending = {}; render(); } }, "Annuler")),
+    el("div", { id: "dockmsg" }, msg));
+}
 
 // ---------- Panneau « Pourquoi » ----------
-function openPanel(i) { st.sel = i; renderValid(); renderPanel(); }
-function renderPanel() {
-  const p = $("panel");
-  const open = st.sel !== null && st.run !== null;
-  p.hidden = !open; document.body.classList.toggle("panel-open", open);
-  if (!open) return;
-  const i = st.sel, l = L[i], r = line(i);
-  p.replaceChildren();
-  const close = el("button", "x", "×"); close.setAttribute("aria-label", "Fermer"); close.onclick = () => { st.sel = null; renderValid(); renderPanel(); };
-  p.append(close, el("h2", "", l.sku + " — " + (l.desc || "sans description")));
-  const head = el("div"); head.append(el("span", "st " + r.s, STATUS[r.s]), el("span", "muted", "  type " + (l.type || "inconnu") + " · origine : " + SRC[r.source])); p.append(head);
-  p.append(el("h3", "", "Pourquoi cette quantité ?"));
-  const c = el("div", "calc mono");
-  const row = (a, b, cls) => { const d = el("div", cls); d.append(el("span", "", a), el("span", "", b)); c.append(d); };
-  row("Cover appliqué", nf1.format(r.cover) + " j" + (r.coffeeCover ? " (cover café)" : ""));
-  row("Ventes (" + M.history_days + " j)", fmt(l.sales));
-  row("Expected", fmt(l.exp));
-  if (r.raw === null) row("Calcul", "non effectué (blocage)");
-  else {
-    row("Besoin = cover × ventes / " + M.history_days + " − Expected", fmt(r.raw, nf2));
-    row("Multiple (" + (MSRC[r.msrc] || r.msrc) + ")", fmt(r.multiple));
-  }
-  const fq = r.fq ?? r.qty;
-  if (r.source !== "forecast") row("Quantité prévision", fmt(fq));
-  row("Quantité finale", fmt(r.qty), "tot");
-  p.append(c);
-  const days = Math.round((new Date(st.run.delivery) - new Date(M.run_date)) / 86400000);
-  const proj = l.exp - l.sales / M.history_days * days;
-  p.append(el("p", "muted", "Couverture : " + fmt(l.cur, nf1) + " j aujourd'hui → " + fmt(postCover(i, r.qty), nf1) + " j après la quantité finale. Stock projeté le jour de la livraison (" + days + " j) : " + fmt(proj) + " (affichage seulement)."));
-  if (Object.keys(l.sales_old).length) {
-    p.append(el("h3", "", "Conversion"));
-    Object.keys(l.sales_old).forEach(o => p.append(el("p", "", "Ancien SKU " + o + " ajouté : ventes " + fmt(l.sales_old[o]) + ", Expected " + fmt(l.exp_old[o]) + ". Propre au nouveau SKU : ventes " + fmt(l.sales_own) + ", Expected " + fmt(l.exp_own) + ".")));
-  }
-  p.append(el("h3", "", "Signalements et décisions"));
-  if (r.reasons.length) { const ul = el("ul", "reasons"); r.reasons.forEach(x => ul.append(el("li", "", x))); p.append(ul); }
-  else p.append(el("p", "muted", "Aucun."));
-  p.append(el("h3", "", "Stock DC " + M.dc));
-  p.append(el("p", "", l.dc === null ? "SKU absent du stock DC" : fmt(l.dc) + " disponibles" + (r.qty > 0 && l.dc < r.qty ? " : insuffisant (signalé, jamais plafonné)" : "")));
-  p.append(el("h3", "", "Excel (cover 9 j)"));
-  p.append(el("p", "", l.xl === null || l.xl === undefined ? "SKU absent de la feuille Excel." : fmt(l.xl) + (l.xlf ? " : calculé par la formule" : " : override manuel du planner")));
+function openWhy(sku) { st.why = sku; renderWhy(); }
+function steps(x) {
+  const m = x.m, days = M.history_days, out = [];
+  const when = M.period ? " (du " + fdate(M.period[0]).slice(0, 5) + " au " + fdate(M.period[1]).slice(0, 5) + ")" : "";
+  out.push(["Ventes des " + days + " derniers jours" + when + " : ", fmt(m.sales)]);
+  for (const old of Object.keys(m.sales_old)) out.push(["dont l'ancien SKU " + old + " (conversion) : ventes " + fmt(m.sales_old[old]) + ", Expected " + fmt(m.exp_old[old])]);
+  out.push(["Stock attendu en boutique (Expected) : ", fmt(m.exp)]);
+  const coverTxt = fmt1(x.cover) + " jours" + (x.coffeeCover ? " (cover café)" : "");
+  if (m.excl) out.push(["Exclusion : " + m.excl.reason + " (ajoutée par " + m.excl.author + " le " + fdate(m.excl.updated_on) + ") → ", "quantité 0"]);
+  else if (x.raw !== null) {
+    const need = x.cover * m.sales / days;
+    out.push(["Besoin pour " + coverTxt + " : " + fmt1(x.cover) + " × " + fmt(m.sales) + " ÷ " + days + " = ", fmt1(need)]);
+    out.push(["Moins l'Expected : " + fmt1(need) + " − " + fmt(m.exp) + " = ", fmt1(x.raw)]);
+    if (x.raw > 0) out.push(["Arrondi au multiple de " + fmt(x.multiple) + " supérieur : ", fmt(x.fq ?? x.qty)]);
+    else out.push(["Le stock couvre déjà le besoin : ", "0"]);
+  } else out.push(["Pas de calcul : la ligne est bloquée (voir les raisons)"]);
+  if (x.fb) out.push([x.fb]);
+  if (x.biz) out.push([x.biz]);
+  if (x.ov) out.push(["Modifié par " + x.ov.author + " : " + fmt(x.ov.before) + " → " + fmt(x.ov.final) + " (" + x.ov.reason + ")"]);
+  return out;
+}
+function renderWhy() {
+  const p = $("why");
+  if (!st.why || !st.order || st.page !== PAGES[1]) { p.hidden = true; return; }
+  const j = DATA.variants[variantKey(st.order.mode)].sel.findIndex(i => L[i].sku === st.why);
+  if (j < 0) { p.hidden = true; return; }
+  const x = finalLine(j), b = baseLine(j), m = x.m;
+  const days = Math.round((parseIso(st.order.delivery) - parseIso(M.run_date)) / 86400000);
+  const proj = m.sales ? m.exp - m.sales / M.history_days * days : m.exp;
+  const qty = el("input", { type: "number", id: "dlg_qty", min: 0, step: x.multiple || 1, value: x.qty });
+  const cat = catSelect("dlg_cat", x.ov ? x.ov.cat : ""), reason = el("input", { type: "text", id: "dlg_reason", placeholder: "Raison", value: x.ov ? x.ov.reason : "" });
+  const msg = el("div");
+  p.hidden = false;
+  p.replaceChildren(
+    el("button", { class: "x", "aria-label": "Fermer", onclick: () => { st.why = null; renderWhy(); } }, "×"),
+    el("h2", "", el("span", "mono", m.sku), " — " + (m.desc || "sans description")),
+    el("div", "", x.ov ? el("span", "st M", "Modifié") : el("span", "st " + x.s, STATUS[x.s]), " ", el("span", "muted small", m.fam + " · source : " + SRC[x.source] + " · multiple " + fmt(x.multiple) + " (" + (MSRC[x.msrc] || x.msrc) + ")")),
+    el("h3", "", "Pourquoi cette quantité ?"),
+    el("ol", "steps", steps(x).map(([a, v]) => el("li", "", a, v !== undefined ? el("b", "", v) : null)), el("li", "tot", "Quantité finale : " + fmt(x.qty))),
+    el("p", "small", "Stock DC " + M.dc + " : ", el("b", "", m.dc === null ? "absent" : fmt(m.dc)), " · stock projeté le jour de la livraison (" + days + " j) : ", el("b", "", fmt(proj)),
+      x.qty > 0 && m.dc !== null && m.dc < x.qty ? el("span", "", " · ", el("span", "st R", "DC insuffisant")) : null),
+    x.reasons.length ? el("div", "", el("h3", "", "Raisons et alertes"), el("ul", "list", x.reasons.map(r => el("li", "", r)))) : null,
+    el("p", "small muted", "Excel (cover 9 j) : " + (m.xl === null || m.xl === undefined ? "SKU absent de la feuille" : fmt(m.xl) + (m.xlf ? " (formule)" : " (saisie manuelle dans Excel)"))),
+    el("h3", "", "Modifier la quantité"),
+    el("div", "form3", el("label", "f", "Qty finale", qty), el("label", "f", "Catégorie", cat), el("label", "f wide", "Raison", reason)),
+    el("div", "row", { style: "margin-top:10px" }, el("button", { class: "btn primary", id: "dlg_save", onclick: () => {
+      if (!st.author) return msg.replaceChildren(el("div", "msg err", "Indique ton nom dans la barre de gauche."));
+      const q = Math.round(Number(qty.value));
+      if (!Number.isFinite(q) || q < 0) return msg.replaceChildren(el("div", "msg err", "Quantité entière ≥ 0 attendue."));
+      if (applyOverride(m.sku, q, cat.value, reason.value)) return msg.replaceChildren(el("div", "msg err", "Catégorie et raison obligatoires."));
+      delete st.pending[m.sku]; render(); renderWhy();
+    } }, "Enregistrer"), b.qty !== x.qty ? el("button", { class: "btn", onclick: () => { delete st.overrides[m.sku]; render(); } }, "Revenir à " + fmt(b.qty)) : null),
+    msg);
 }
 
-// ---------- 3. Résumé & export ----------
-const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-function ltName() { const d = new Date(), p = n => String(n).padStart(2, "0"); return M.boutique + " " + p(d.getDate()) + "-" + MONTHS[d.getMonth()] + "-" + d.getFullYear() + "-" + p(d.getHours()) + "_" + p(d.getMinutes()) + ".csv"; }
-function ltText(lines) { return lines.map((r, i) => r.qty > 0 ? L[i].sku + ";" + r.qty : null).filter(Boolean).join("\r\n"); }
-function recapText(lines, s) {
-  const out = ["Boutique;" + M.boutique + ";Livraison;" + st.run.delivery, "", "SKU;Description;Type;Famille;Quantité;Origine"];
-  lines.forEach((r, i) => { if (r.qty > 0) out.push([L[i].sku, L[i].desc, L[i].type, L[i].family, r.qty, r.source].join(";")); });
+// ---------- 3. Journée ----------
+function dayState() {
+  if (!st.day) st.day = { chosen: DATA.planned.map(p => p[0]).filter(b => NAMES[b] !== undefined || DATA.boutiques.some(x => x[0] === b)), rows: {}, mode: "standard", outcomes: null, err: "" };
+  for (const b of st.day.chosen) if (!st.day.rows[b]) st.day.rows[b] = { delivery: PLANNED[b] || "", confirmed: false, cover: "", coffee: "" };
+  return st.day;
+}
+function renderDay() {
+  const d = dayState(), out = [el("h1", "", "Journée")];
+  const add = el("input", { type: "search", id: "day_add", placeholder: "Ajouter une boutique" }); add.setAttribute("list", "btqlist2");
+  add.onchange = () => { const code = add.value.split(" — ")[0].trim().toUpperCase(); if (DATA.boutiques.some(x => x[0] === code) && !d.chosen.includes(code)) { d.chosen.push(code); render(); $("day_add")?.focus(); } };
+  out.push(el("div", "row", { style: "align-items:flex-start" },
+    el("div", { class: "f", style: "flex:1 1 420px" }, "Boutiques", el("div", "sel-btq", d.chosen.map(b => el("span", "tag", b, el("button", { "aria-label": "Retirer " + b, onclick: () => { d.chosen = d.chosen.filter(x => x !== b); render(); } }, "×"))), add,
+      el("datalist", { id: "btqlist2" }, DATA.boutiques.map(([b]) => el("option", { value: btqLabel(b) }))))),
+    el("label", { class: "f", style: "width:110px" }, "Historique (j)", el("input", { type: "number", value: M.history_days, disabled: true })),
+    el("label", { class: "f", style: "width:150px" }, "Mode", (() => { const s = el("select", { onchange: e => { d.mode = e.target.value; } }, Object.entries(MODES).map(([k, v]) => el("option", { value: v }, k))); s.value = d.mode; return s; })())));
+  out.push(el("p", "small muted", "Présélection du Schedule pour le " + fdate(M.run_date) + " : " + DATA.planned.length + " boutique(s), modifiable."));
+  const rows = d.chosen.map(b => {
+    const r = d.rows[b];
+    const dt = el("input", { type: "date", min: M.run_date, value: r.delivery, onchange: e => { r.delivery = e.target.value; } });
+    const ok = el("input", { type: "checkbox", checked: r.confirmed, onchange: e => { r.confirmed = e.target.checked; } });
+    const cv = coverSelect("dc_" + b, r.cover); cv.onchange = e => { r.cover = e.target.value; };
+    const cf = coverSelect("df_" + b, r.coffee, true); cf.onchange = e => { r.coffee = e.target.value; };
+    return [el("span", "mono", b), NAMES[b] || "", dt, ok, cv, cf];
+  });
+  out.push(tableOf(["Boutique", "Nom", "Livraison", "Date confirmée", "Cover (j)", "Cover café (j)"], rows));
+  out.push(el("div", "row", { style: "margin-top:10px" },
+    el("button", { class: "btn", disabled: !d.chosen.length, onclick: () => { d.chosen.forEach(b => { if (d.rows[b].delivery) d.rows[b].confirmed = true; }); render(); } }, "Confirmer les dates suggérées"),
+    el("button", { class: "btn primary", id: "day_compute", onclick: () => {
+      d.err = ""; const errors = [];
+      if (!d.chosen.length) d.err = "Choisis au moins une boutique.";
+      for (const b of d.chosen) { const r = d.rows[b]; if (!r.delivery || !r.confirmed) errors.push(b + " : date de livraison à saisir ou confirmer"); else if (r.cover === "") errors.push(b + " : cover manquant"); }
+      if (errors.length) d.err = errors.join(" · ");
+      d.outcomes = d.err ? null : d.chosen.map(b => b === M.boutique ? { b, r: { ...d.rows[b] } } : { b, error: "Aucune ligne de Stock Situation pour la boutique " + b });
+      render();
+    } }, "Calculer toutes les commandes")));
+  if (d.err) out.push(el("div", "msg err", d.err));
+  if (d.outcomes) {
+    const prev = st.order, res = [];
+    for (const o of d.outcomes) {
+      if (o.error) { res.push([btqLabel(o.b), "—", "", "", "", "", "", el("span", "st B", o.error), ""]); continue; }
+      st.order = { boutique: o.b, delivery: o.r.delivery, cover: o.r.cover, coffee: o.r.coffee, mode: d.mode };
+      const saveOv = st.overrides; st.overrides = {}; const s = summarize(lines()); st.overrides = saveOv;
+      const order = st.order;
+      res.push([btqLabel(o.b), frday(o.r.delivery), fmt(s.ordered), fmt(s.units), fmt1(s.palTotal), el("span", "st R", String(s.by.R)), el("span", "st B", String(s.by.B)), DATA.variants[variantKey(d.mode)].warnings.join(" | ") || "—",
+        el("button", { class: "btn", onclick: () => { st.form = { ...order }; st.order = { ...order }; st.overrides = {}; st.pending = {}; st.seen = new Set(); st.savedId = null; go(PAGES[1]); } }, "Ouvrir")]);
+    }
+    st.order = prev;
+    out.push(el("h3", "", "Résultats"), tableOf(["Boutique", "Livraison", "Lignes", "Unités", "Palettes", "REVIEW", "BLOCKED", "Alertes", ""], res, [2, 3, 4]));
+    const okOnes = d.outcomes.filter(o => !o.error);
+    if (okOnes.length) {
+      const m2 = el("div");
+      out.push(el("div", { style: "margin-top:10px" }, el("button", { class: "btn primary", disabled: !st.author, onclick: () => dayZip(okOnes, m2) }, okOnes.length === 1 ? "Télécharger le fichier LT (zip)" : "Télécharger les " + okOnes.length + " fichiers LT (zip)")), m2);
+      if (!st.author) out.push(el("p", "small muted", "Indique ton nom dans la barre de gauche pour télécharger."));
+    }
+  }
+  return out;
+}
+async function dayZip(okOnes, box) {
+  const now = new Date(), files = [];
+  const prev = st.order, prevOv = st.overrides;
+  for (const o of okOnes) {
+    st.order = { boutique: o.b, delivery: o.r.delivery, cover: o.r.cover, coffee: o.r.coffee, mode: st.day.mode }; st.overrides = {};
+    const ls = lines(), text = ltText(ls);
+    if (text) { files.push([ltName(o.b, now), text]); saveRun(ls, ltName(o.b, now), true); }
+    st.order = prev; st.overrides = prevOv;
+  }
+  st.order = prev; st.overrides = prevOv;
+  if (!files.length) return box.replaceChildren(el("div", "msg info", "Aucune ligne à commander."));
+  await offer("LT " + now.getFullYear() + "-" + pad(now.getMonth() + 1) + "-" + pad(now.getDate()) + " " + pad(now.getHours()) + "_" + pad(now.getMinutes()) + ".zip", zipStore(files), box, files.length + " fichier(s) LT dans le zip.");
+}
+
+// ---------- 4. Export ----------
+function ltName(b, d) { return b + " " + pad(d.getDate()) + "-" + MONTHS[d.getMonth()] + "-" + d.getFullYear() + "-" + pad(d.getHours()) + "_" + pad(d.getMinutes()) + ".csv"; }
+function ltText(ls) { return ls.filter(x => x.qty > 0).map(x => x.m.sku + ";" + x.qty + "\r\n").join(""); }
+function recapText(ls, s) {
+  const q = v => /[;"\r\n]/.test(String(v)) ? '"' + String(v).replace(/"/g, '""') + '"' : String(v);
+  const out = ["Boutique;" + st.order.boutique + ";Livraison;" + st.order.delivery, "", "SKU;Description;Type;Famille;Quantité;Origine"];
+  ls.forEach(x => { if (x.qty > 0) out.push([x.m.sku, x.m.desc, x.m.type, x.m.pfam, x.qty, x.source].map(q).join(";")); });
   out.push("", "Famille;Unités;Palettes estimées");
-  FAMILIES.forEach(f => out.push(f + ";" + s.units[f] + ";" + s.pal[f].toFixed(2)));
-  out.push("Total;" + s.total + ";" + s.palTotal.toFixed(2));
-  if (s.noPallet.length) out.push("Sans taille de palette;" + s.noPallet.join(", "));
-  return out.join("\r\n");
+  const units = { VL: 0, OL: 0, MACHINES: 0, OTHERS: 0 }; ls.forEach(x => { if (x.qty > 0) units[palKey(x.m.pfam)] += x.qty; });
+  for (const k of ["VL", "OL", "MACHINES", "OTHERS"]) out.push(k + ";" + units[k] + ";" + s.pal[k].toFixed(2));
+  out.push("Total;" + s.units + ";" + s.palTotal.toFixed(2));
+  if (s.noPal.length) out.push("Sans taille de palette;" + q(s.noPal.join(", ")));
+  return out.join("\r\n") + "\r\n";
 }
-function tile(k, v, h) { const t = el("div", "tile"); t.append(el("div", "k", k), el("div", "v", v)); if (h) t.append(el("div", "h", h)); return t; }
-function trow(cells, cls) { const tr = el("tr"); cells.forEach((c, j) => tr.append(el("td", cls && cls[j] || "", c))); return tr; }
-
-function renderSummary() {
-  if (!st.run) return;
-  const lines = allLines(), s = summary(lines);
-  $("tiles").replaceChildren(
-    tile("Lignes à commander", fmt(s.ordered)), tile("Unités", fmt(s.total)),
-    tile("Palettes estimées", fmt(s.palTotal, nf2)), tile("REVIEW", fmt(s.stCount.R), "à vérifier"),
-    tile("BLOCKED", fmt(s.stCount.B), "ne pas commander"), tile("Modifications", fmt(Object.keys(st.overrides).length), "overrides du planner"));
-  $("pallets").replaceChildren(...FAMILIES.map(f => trow([f, fmt(s.units[f]), fmt(s.pal[f], nf2)], ["", "n", "n"])),
-    trow(["Total", fmt(s.total), fmt(s.palTotal, nf2)], ["", "n", "n"]));
-  $("nopallet").textContent = s.noPallet.length ? "Sans taille de palette (non comptés) : " + s.noPallet.join(", ") : "";
-  $("sources").replaceChildren(...Object.entries(s.srcCount).map(([k, v]) => trow([SRC[k], fmt(v)], ["", "n"])));
-  $("topreasons").replaceChildren(...s.reasons.slice(0, 15).map(([k, v]) => trow([k, fmt(v)], ["", "n"])));
-  $("unrel").textContent = s.unrel.length ? "Quantités commandées non fiables (multiple absent) : " + s.unrel.join(", ") : "";
-  $("exsum").textContent = "Lignes exclues par la règle « Filter out » (" + DATA.excluded.length + ")";
-  $("exportinfo").replaceChildren(el("div", "msg info", s.stCount.R + " ligne(s) REVIEW et " + s.stCount.B + " BLOCKED. L'export reste possible : c'est toi qui décides."));
-  $("ltname").textContent = ltName();
-  $("lt").textContent = ltText(lines) || "(aucune ligne à commander)";
-  $("recap").textContent = recapText(lines, s);
+function saveRun(ls, lt, fromDay) {
+  if (!st.author) return null;
+  if (!fromDay && st.savedId) { if (lt) { const runs = store.get("spc2_runs", []); const r = runs.find(x => x.id === st.savedId); if (r) { r.lt = lt; store.set("spc2_runs", runs); } } return st.savedId; }
+  const runs = store.get("spc2_runs", []), s = summarize(ls), id = runs.reduce((m, r) => Math.max(m, r.id), 0) + 1, qty = {};
+  ls.forEach(x => { if (x.qty > 0) qty[x.m.sku] = x.qty; });
+  const ovs = fromDay ? [] : Object.entries(st.overrides).map(([sku, o]) => ({ sku, ...o }));
+  runs.unshift({ id, created: new Date().toISOString(), author: st.author, boutique: st.order.boutique, delivery: st.order.delivery, cover: M.covers[+st.order.cover],
+                 mode: st.order.mode, lines: s.ordered, units: s.units, qty, overrides: ovs, lt: lt || "" });
+  if (!store.set("spc2_runs", runs)) return null;
+  if (!fromDay) st.savedId = id;
+  return id;
 }
-$("exdetails").addEventListener("toggle", () => {
-  const body = $("excluded"); if (!$("exdetails").open || body.childElementCount) return;
-  body.append(...DATA.excluded.map(([sku, d, r]) => trow([sku, d, r], ["mono", "desc", ""])));
-});
-
-function copy(text, msgId, okText) {
-  const fallback = () => showMsg(msgId, "info", "Copie automatique refusée : ouvre le bloc ci-dessous, sélectionne le texte et fais Ctrl+C.");
-  try { navigator.clipboard.writeText(text).then(() => showMsg(msgId, "ok", okText), fallback); } catch (e) { fallback(); }
+function renderExport() {
+  const out = [el("h1", "", "Export")];
+  if (!st.order) return [...out, el("div", "msg info", "Calcule d'abord une commande."), el("button", { class: "btn", onclick: () => go(PAGES[1]) }, "Aller à la commande boutique")];
+  const ls = lines(), s = summarize(ls), now = new Date(), name = ltName(st.order.boutique, now);
+  out.push(el("p", "", el("b", "", btqLabel(st.order.boutique)), " · livraison ", el("b", "", fdate(st.order.delivery)), " · " + fmt(s.ordered) + " lignes · " + fmt(s.units) + " unités · " + fmt1(s.palTotal) + " palettes"));
+  out.push(el("p", "", "Fichier LT : ", el("span", "mono", name), " · généré le " + pad(now.getDate()) + "/" + pad(now.getMonth() + 1) + "/" + now.getFullYear() + " à " + pad(now.getHours()) + ":" + pad(now.getMinutes())));
+  const unseen = ls.filter(x => x.s !== "O" && !st.seen.has(x.m.sku));
+  if (unseen.length) out.push(el("div", "msg warn", unseen.length + " ligne(s) REVIEW ou BLOCKED pas encore marquée(s) « Vu »."));
+  const na = needAuthor(); if (na) out.push(na);
+  const box = el("div");
+  if (st.xmsg) box.append(st.xmsg);
+  out.push(el("div", "row",
+    el("button", { class: "btn primary", disabled: !st.author, onclick: async () => {
+      const text = ltText(ls); if (!text) return box.replaceChildren(el("div", "msg info", "Aucune ligne à commander : pas de fichier LT."));
+      if (await offer(name, text, box, "Fichier « " + name + " » téléchargé (" + s.ordered + " lignes).")) saveRun(ls, name);
+    } }, "Fichier LT (SKU;QTY)"),
+    el("button", { class: "btn", disabled: !st.author, onclick: () => offer("Recap " + name, recapText(ls, s), box, "Récapitulatif téléchargé.") }, "Récapitulatif boutique"),
+    el("button", { class: "btn", disabled: true, title: "Disponible dans l'outil installé" }, "Export Excel détaillé"),
+    el("button", { class: "btn", id: "save_run", disabled: !st.author, onclick: () => { const id = saveRun(ls); st.xmsg = id ? el("div", "msg ok", "Commande n° " + id + " enregistrée (6. Historique).") : el("div", "msg err", "Ton navigateur bloque l'enregistrement local."); render(); } }, "Enregistrer sans exporter")));
+  out.push(box);
+  out.push(el("p", "small muted", "Importe le fichier LT dans Nessoft à la main : l'outil n'y écrit jamais. L'export Excel détaillé est disponible dans l'outil installé."));
+  out.push(el("details", "", el("summary", "", "Contenu du fichier LT"), el("pre", { class: "mono card", style: "max-height:240px;overflow:auto" }, ltText(ls) || "(aucune ligne)")));
+  return out;
 }
-function saveRun(ltFile) {
-  const author = $("author").value.trim();
-  if (!author) { showMsg("smsg", "err", "Indique ton nom dans l'onglet 1. Paramètres pour enregistrer."); return null; }
-  const runs = store.get("spc_runs", []);
-  const lines = allLines(), s = summary(lines);
-  if (st.savedId) {
-    const r = runs.find(x => x.id === st.savedId);
-    if (r && ltFile) { r.lt = ltFile; store.set("spc_runs", runs); }
-    return st.savedId;
-  }
-  const id = (runs.reduce((m, r) => Math.max(m, r.id), 0) || 0) + 1;
-  const qty = {}; lines.forEach((r, i) => { if (r.qty > 0) qty[L[i].sku] = r.qty; });
-  runs.unshift({ id, created: new Date().toISOString().slice(0, 16).replace("T", " "), author, delivery: st.run.delivery,
-    cover: M.covers[st.run.cover], coffee: st.run.coffee >= 0 ? M.covers[st.run.coffee] : null, mode: st.run.mode, variant: st.run.variant,
-    lines: s.ordered, units: s.total, pallets: +s.palTotal.toFixed(2), qty, overrides: Object.entries(st.overrides).map(([sku, o]) => ({ sku, ...o })), lt: ltFile || "" });
-  if (!store.set("spc_runs", runs)) { showMsg("smsg", "err", "Ton navigateur bloque l'enregistrement local (navigation privée ?)."); return null; }
-  st.savedId = id; return id;
-}
-$("save").onclick = () => { const id = saveRun(); if (id) showMsg("smsg", "ok", "Run n° " + id + " enregistré (onglet 4. Historique)."); };
-$("copylt").onclick = () => {
-  const name = ltName(), text = ltText(allLines());
-  copy(text + "\r\n", "smsg", "Fichier LT copié (" + text.split("\r\n").filter(Boolean).length + " lignes). Colle-le dans « " + name + " ».");
-  saveRun(name);
-};
-$("copyrecap").onclick = () => copy($("recap").textContent, "smsg", "Récapitulatif copié.");
-
-// Téléchargement de vrais fichiers (capacité « downloads » du viewer). Si elle n'est pas
-// disponible, on cache ces boutons et on propose la copie à la place.
 let downloads = null;
-function showCopyFallback() {
-  $("dllt").hidden = true; $("dlrecap").hidden = true; $("copylt").hidden = false; $("copyrecap").hidden = false;
-}
-(async () => {
-  for (let t = 0; t < 30 && !window.claude?.use; t++) await new Promise(r => setTimeout(r, 100));
-  try { downloads = window.claude?.use ? await window.claude.use("downloads") : null; } catch (e) { downloads = null; }
-  if (!downloads) showCopyFallback();
-})();
-async function offerFile(filename, text, okText) {
-  if (!downloads) { showCopyFallback(); return showMsg("smsg", "info", "Le téléchargement n'est pas disponible ici : utilise les boutons Copier."); }
-  try {
-    await downloads.save({ filename, data: text });
-    showMsg("smsg", "ok", okText);
-    return true;
-  } catch (e) {
-    const code = e && e.code;
-    if (code === "declined") showMsg("smsg", "info", "Téléchargement annulé.");
-    else if (code === "rate_limited") showMsg("smsg", "info", "Une demande de téléchargement est déjà ouverte : valide-la ou réessaie dans un instant.");
-    else { showCopyFallback(); showMsg("smsg", "err", "Téléchargement impossible ici : utilise les boutons Copier."); }
+(async () => { try { downloads = await window.claude?.use?.("downloads") ?? null; } catch (e) { downloads = null; } })();
+async function offer(filename, data, box, okText) {
+  if (!downloads) { box.replaceChildren(el("div", "msg info", "Le téléchargement n'est pas disponible dans cette vue.")); return false; }
+  try { await downloads.save({ filename, data }); box.replaceChildren(el("div", "msg ok", okText)); return true; }
+  catch (e) {
+    const c = e && e.code;
+    box.replaceChildren(el("div", "msg " + (c === "declined" ? "info" : "err"), c === "declined" ? "Téléchargement annulé." : c === "rate_limited" ? "Une demande de téléchargement est déjà ouverte : valide-la ou réessaie dans un instant." : "Téléchargement impossible dans cette vue."));
     return false;
   }
 }
-$("dllt").onclick = async () => {
-  const name = ltName(), text = ltText(allLines());
-  if (!text) return showMsg("smsg", "info", "Aucune ligne à commander : pas de fichier LT.");
-  const n = text.split("\r\n").length;
-  if (await offerFile(name, text + "\r\n", "Fichier « " + name + " » téléchargé (" + n + " lignes).")) saveRun(name);
-};
-$("dlrecap").onclick = () => offerFile("Recap " + ltName(), $("recap").textContent + "\r\n", "Récapitulatif téléchargé.");
-
-// ---------- 4. Historique ----------
-function renderHistory() {
-  const runs = store.get("spc_runs", []);
-  $("runs").replaceChildren(...(runs.length ? runs.map(r => trow([String(r.id), r.created, r.author, r.delivery, nf1.format(r.cover) + (r.coffee ? " / café " + nf1.format(r.coffee) : ""), r.mode === "safe" ? "Safe" : "Parité Excel", fmt(r.lines), fmt(r.units), r.lt || ""], ["", "", "", "", "n", "", "n", "n", "mono"]))
-    : [trow(["Aucun run enregistré pour l'instant."], ["muted"])]));
-  const sel = $("cmp"), keep = sel.value; sel.replaceChildren(new Option("Choisir un run…", ""));
-  runs.forEach(r => sel.append(new Option("n° " + r.id + " · " + r.created + " · " + r.author, r.id)));
-  sel.value = keep; renderCompare();
-}
-$("cmp").onchange = renderCompare;
-function renderCompare() {
-  const out = $("cmpout"); out.replaceChildren();
-  const id = +$("cmp").value; if (!id) return;
-  const r = store.get("spc_runs", []).find(x => x.id === id); if (!r) return;
-  if (!st.run) { out.append(el("div", "msg info", "Calcule une commande pour la comparer à ce run.")); return; }
-  const now = {}; allLines().forEach((x, i) => { if (x.qty > 0) now[L[i].sku] = x.qty; });
-  const skus = [...new Set([...Object.keys(r.qty), ...Object.keys(now)])].sort();
-  const diff = skus.map(s => [s, r.qty[s] || 0, now[s] || 0]).filter(([, a, b]) => a !== b);
-  out.append(el("h2", "sec", diff.length + " SKU dont la quantité change"));
-  const wrap = el("div", "tablewrap"), t = el("table"), head = el("thead"), hr = el("tr");
-  ["SKU", "Avant", "Maintenant", "Écart"].forEach((h, j) => hr.append(el("th", j ? "n" : "", h))); head.append(hr);
-  const body = el("tbody"); diff.forEach(([s, a, b]) => body.append(trow([s, fmt(a), fmt(b), (b - a > 0 ? "+" : "") + fmt(b - a)], ["mono", "n", "n", "n"])));
-  t.append(head, body); wrap.append(t); out.append(wrap);
-  if (r.overrides.length) {
-    out.append(el("h2", "sec", "Overrides de ce run"));
-    const w2 = el("div", "tablewrap"), t2 = el("table"), b2 = el("tbody");
-    r.overrides.forEach(o => b2.append(trow([o.sku, fmt(o.before) + " → " + fmt(o.after), (CAT_LABEL[o.cat] || "") + " : " + o.reason, o.author, o.ts.slice(0, 16).replace("T", " ")], ["mono", "n", "", "", ""])));
-    t2.append(b2); w2.append(t2); out.append(w2);
+// Zip sans compression (format « stored ») : un fichier LT par boutique.
+const CRC = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+function crc32(b) { let c = 0xFFFFFFFF; for (let i = 0; i < b.length; i++) c = CRC[(c ^ b[i]) & 0xFF] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; }
+function zipStore(files) {
+  const enc = new TextEncoder(), parts = [], central = []; let offset = 0;
+  const d = new Date(), time = (d.getHours() << 11) | (d.getMinutes() << 5) | (d.getSeconds() >> 1), date = ((d.getFullYear() - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate();
+  for (const [name, text] of files) {
+    const nb = enc.encode(name), data = enc.encode(text), crc = crc32(data);
+    const h = new DataView(new ArrayBuffer(30));
+    [[0, 0x04034b50, 4], [4, 20, 2], [6, 0x0800, 2], [8, 0, 2], [10, time, 2], [12, date, 2], [14, crc, 4], [18, data.length, 4], [22, data.length, 4], [26, nb.length, 2], [28, 0, 2]].forEach(([o, v, s]) => s === 4 ? h.setUint32(o, v, true) : h.setUint16(o, v, true));
+    const c = new DataView(new ArrayBuffer(46));
+    [[0, 0x02014b50, 4], [4, 20, 2], [6, 20, 2], [8, 0x0800, 2], [10, 0, 2], [12, time, 2], [14, date, 2], [16, crc, 4], [20, data.length, 4], [24, data.length, 4], [28, nb.length, 2], [30, 0, 2], [32, 0, 2], [34, 0, 2], [36, 0, 2], [38, 0, 4], [42, offset, 4]].forEach(([o, v, s]) => s === 4 ? c.setUint32(o, v, true) : c.setUint16(o, v, true));
+    parts.push(new Uint8Array(h.buffer), nb, data); central.push(new Uint8Array(c.buffer), nb);
+    offset += 30 + nb.length + data.length;
   }
+  const size = central.reduce((a, x) => a + x.length, 0), e = new DataView(new ArrayBuffer(22));
+  [[0, 0x06054b50, 4], [4, 0, 2], [6, 0, 2], [8, files.length, 2], [10, files.length, 2], [12, size, 4], [16, offset, 4], [20, 0, 2]].forEach(([o, v, s]) => s === 4 ? e.setUint32(o, v, true) : e.setUint16(o, v, true));
+  const all = [...parts, ...central, new Uint8Array(e.buffer)], out = new Uint8Array(all.reduce((a, x) => a + x.length, 0)); let p = 0;
+  for (const x of all) { out.set(x, p); p += x.length; }
+  return out;
 }
 
-// ---------- Qualité ----------
-$("quality").replaceChildren(...(DATA.quality.length ? DATA.quality.map(q => {
-  const tr = trow([q.fichier, "", q.code, q.message, q["lignes (exemples)"]], ["", "", "mono", "desc", "mono"]);
-  tr.children[1].append(el("span", "st " + (q.niveau === "ERROR" ? "B" : q.niveau === "WARNING" ? "R" : "O"), q.niveau)); return tr;
-}) : [trow(["Aucun problème détecté."], ["muted"])]));
-
-function renderAll() {
-  clearNeedRun();
-  if (st.tab === "valid" && !needRun("t-valid")) renderValid();
-  if (st.tab === "summary" && !needRun("t-summary")) renderSummary();
-  if (st.tab === "history") renderHistory();
-  renderPanel();
+// ---------- 5. Référentiels ----------
+function renderRefs() {
+  const out = [el("h1", "", "Référentiels")], owners = store.get("spc2_owners", {});
+  out.push(el("div", "tabs", DATA.refs.map((r, i) => el("button", { class: i === st.refTab ? "on" : "", onclick: () => { st.refTab = i; render(); } }, r.label, r.anomalies.length ? el("span", "cnt", String(r.anomalies.length)) : null))));
+  const r = DATA.refs[st.refTab];
+  const owner = el("input", { type: "text", id: "owner_" + r.key, value: owners[r.key] ?? r.owner, onchange: e => { owners[r.key] = e.target.value; store.set("spc2_owners", owners); } });
+  const when = r.updated ? fdate(r.updated.slice(0, 10)) + (r.updated.length > 11 ? " à " + r.updated.slice(11, 16) : "") : "—";
+  out.push(el("div", "row", { style: "align-items:end" }, el("label", { class: "f", style: "width:260px" }, "Propriétaire", owner),
+    el("p", { style: "margin:0 0 6px" }, "Mis à jour le ", el("b", "", when), r.by ? " par " + r.by : "", r.src ? " · source : " + r.src : "")));
+  out.push(r.anomalies.length ? el("details", { open: true, class: "card", style: "margin:12px 0;border-color:var(--review)" }, el("summary", "", el("b", "", r.anomalies.length + " anomalie(s)")), el("ul", "list", r.anomalies.map(a => el("li", "", a))))
+    : el("div", "msg ok", "Aucune anomalie."));
+  let rows = r.rows;
+  if (r.examples.length && st.examples) rows = r.examples;
+  if (r.examples.length) out.push(el("label", { style: "display:flex;gap:8px;align-items:center;margin:8px 0" }, el("input", { type: "checkbox", checked: st.examples, onchange: e => setExamples(e.target.checked) }), "Démo : utiliser les exemples d'allocation, lancement et stock cible"));
+  if (rows.length) {
+    const head = Object.keys(rows[0]);
+    out.push(el("p", "small muted", (r.count || rows.length) + " lignes" + (r.count > rows.length ? " · aperçu des " + rows.length + " premières" : "") + (r.key === "exclusions" ? " · démo : lecture seule (les calculs sont faits d'avance)" : "")));
+    out.push(tableOf(head, rows.map(x => head.map(h => x[h]))));
+  } else out.push(el("div", "msg info", "Aucun fichier."));
+  out.push(el("div", "row", { style: "margin-top:12px" },
+    el("div", { class: "drop", style: "flex:1 1 300px" }, "Importer (remplace le fichier actuel)", el("br"), el("span", "small", "Démo : import désactivé.")),
+    r.template ? el("button", { class: "btn", disabled: true, title: "Disponible dans l'outil installé" }, "Modèle vierge") : null));
+  return out;
 }
-$("foot").textContent = "Moteurs : " + Object.entries(M.rule_versions).map(([k, v]) => v).join(" · ") + " · aucune quantité n'est calculée par le navigateur ni par une IA.";
+
+// ---------- 6. Historique ----------
+function renderHistory() {
+  const out = [el("h1", "", "Historique")], runs = store.get("spc2_runs", []);
+  if (!runs.length) return [...out, el("div", "msg info", "Aucune commande enregistrée pour l'instant."), el("p", "small muted", "Dans cette démo, les commandes restent dans ton navigateur. Dans l'outil installé, elles vont dans la base locale.")];
+  out.push(tableOf(["N°", "Boutique", "Créé le", "Par", "Livraison", "Cover", "Mode", "Lignes", "Unités", "Fichier LT"],
+    runs.map(r => [String(r.id), r.boutique, r.created.slice(0, 16).replace("T", " "), r.author, fdate(r.delivery), fmt1(r.cover), MODE_LABEL[r.mode], fmt(r.lines), fmt(r.units), el("span", "mono", r.lt || "")]), [0, 5, 7, 8]));
+  out.push(el("h3", "", "Modifications des planners"));
+  const ovs = runs.flatMap(r => r.overrides.map(o => ({ ...o, boutique: r.boutique })));
+  if (!ovs.length) out.push(el("div", "msg info", "Aucune modification enregistrée."));
+  else {
+    const count = key => Object.entries(ovs.reduce((a, o) => { const k = key(o); a[k] = (a[k] || 0) + 1; return a; }, {})).sort((a, b) => b[1] - a[1]);
+    out.push(el("div", "two", tableOf(["Catégorie", "Modifications"], count(o => CAT[o.cat]).map(([k, v]) => [k, fmt(v)]), [1]),
+      tableOf(["SKU le plus modifié", "Fois"], count(o => o.sku).slice(0, 15).map(([k, v]) => [el("span", "mono", k), fmt(v)]), [1])));
+    out.push(el("details", { style: "margin-top:8px" }, el("summary", "", "Détail (" + ovs.length + ")"),
+      tableOf(["Boutique", "SKU", "Avant", "Après", "Catégorie", "Raison", "Par", "Quand"], ovs.map(o => [o.boutique, el("span", "mono", o.sku), fmt(o.before), fmt(o.final), CAT[o.cat], o.reason, o.author, o.ts.slice(0, 16).replace("T", " ")]), [2, 3])));
+  }
+  out.push(el("h3", "", "Comparer deux commandes"));
+  const lab = r => "n° " + r.id + " · " + r.boutique + " · " + r.created.slice(0, 16).replace("T", " ");
+  const a = el("select", { id: "cmp_a" }, runs.map(r => el("option", { value: r.id }, lab(r)))), b = el("select", { id: "cmp_b" }, runs.map(r => el("option", { value: r.id }, lab(r))));
+  a.value = String(st.cmpA ?? runs[Math.min(1, runs.length - 1)].id); b.value = String(st.cmpB ?? runs[0].id);
+  a.onchange = () => { st.cmpA = +a.value; render(); }; b.onchange = () => { st.cmpB = +b.value; render(); };
+  out.push(el("div", "two", el("label", "f", "Commande A", a), el("label", "f", "Commande B", b)));
+  const ra = runs.find(r => r.id === +a.value), rb = runs.find(r => r.id === +b.value);
+  if (ra && rb && ra.id !== rb.id) {
+    const skus = [...new Set([...Object.keys(ra.qty), ...Object.keys(rb.qty)])].sort();
+    const diff = skus.map(s => [s, ra.qty[s] || 0, rb.qty[s] || 0]).filter(([, x, y]) => x !== y);
+    out.push(el("p", "", el("b", "", diff.length + " SKU dont la quantité change")));
+    if (diff.length) out.push(tableOf(["SKU", "A", "B", "Écart"], diff.map(([s, x, y]) => [el("span", "mono", s), fmt(x), fmt(y), (y - x > 0 ? "+" : "") + fmt(y - x)]), [1, 2, 3]));
+  }
+  return out;
+}
+
+const SCREENS = { [PAGES[0]]: renderDepot, [PAGES[1]]: renderOrder, [PAGES[2]]: renderDay, [PAGES[3]]: renderExport, [PAGES[4]]: renderRefs, [PAGES[5]]: renderHistory };
+let rendering = false;
+function render() {
+  // Un champ retiré pendant le rendu peut déclencher « change » : on reporte ce rendu-là.
+  if (rendering) { queueMicrotask(render); return; }
+  rendering = true;
+  try { draw(); } finally { rendering = false; }
+}
+function draw() {
+  renderNav();
+  const main = $("main");
+  main.replaceChildren(...(SCREENS[st.page] || renderDepot)(), el("footer", "", "Moteurs : " + Object.values(M.rule_versions).join(" · ") + " · aucune quantité n'est calculée par le navigateur ni par une IA."));
+  renderDock(); renderWhy();
+}
+document.addEventListener("keydown", e => { if (e.key === "Escape" && st.why) { st.why = null; renderWhy(); } });
+render();
 </script>
