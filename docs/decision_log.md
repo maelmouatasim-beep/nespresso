@@ -158,3 +158,12 @@ Format : contexte → décision → conséquence.
 - Limite de Streamlit : une grille modifiable ne sait pas réagir au clic sur une ligne. Une petite case 🔍 en première colonne ouvre le panneau « Pourquoi » à droite (la version web, elle, ouvre le panneau au clic sur la ligne).
 - « Accepter toutes les lignes OK » marque les lignes OK comme validées (« ✓ » dans le Statut) ; une ligne REVIEW se valide depuis son panneau « Pourquoi ».
 
+## D-026 — Dépôt des vrais exports Power BI (2026-10-07)
+
+- Vérifié sur les deux exports réels du planner (non versionnés) : les colonnes de Stock Movements diffèrent des données de test (« Product Nr », « Stock Mvt Date », « Mvt Code », « Quantity (Sum) »…). Elles sont ajoutées aux noms acceptés ; les anciens restent valables.
+- **Signe des quantités** : l'export ne contient que les sorties, en négatif (filtre « Quantity (Sum) ≤ 0 »). Les données de test et le calculateur les ont en positif. Règle : toutes négatives → comptées en ventes positives (information affichée) ; toutes positives → gardées ; signes mélangés → fichier refusé avec la raison (on ne peut pas savoir ce qui est une vente). Aucun écart de parité : la quantité vendue est la même.
+- **Doublons d'un même SKU au même emplacement** (cas réel : «  473ECO/B » avec un espace et « 473ECO/B ») : si une seule ligne a du stock, elle est gardée avec un avertissement ; sinon le fichier est bloqué (Q-026).
+- **Une seule zone de dépôt** : les deux exports s'appellent « data - … » ; l'outil les reconnaît par leurs colonnes et les range dans la bonne case. Un fichier non reconnu est refusé avec un message. En mode démo, le dépôt est désactivé.
+- **Vitesse** : lecture Excel avec `python-calamine` (≈ 1 s au lieu de ≈ 14 s pour 94 000 lignes), cache local du fichier lu (`data/depot/…/_cache_*.pkl`, jamais versionné) et données du jour partagées entre les écrans tant que les fichiers ne changent pas.
+- **Référentiels** : ils s'importent maintenant depuis l'écran (calculateur `.xlsm` → multiples, conversions, DC, portfolio, Schedule), sans ligne de commande. En attendant, un bouton permet de partir des référentiels de test (B80, 05-oct-2026).
+

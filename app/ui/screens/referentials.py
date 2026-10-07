@@ -199,8 +199,53 @@ def _referential_tab(ref: Referential) -> None:
                            file_name=ref.template, key=f"tpl_{ref.key}")  # fmt: skip
 
 
+def calculator_import_block(key: str) -> None:
+    """Importe multiples, conversions, DC, portfolio et Schedule depuis le calculateur."""
+    c1, c2 = st.columns([3, 1], vertical_alignment="bottom")
+    up = c1.file_uploader("Calculateur Excel (ex. « B80 105.xlsm »)", type=["xlsm", "xlsx"],
+                          key=f"calc_{key}_{ss.nonce}")  # fmt: skip
+    btq = c2.text_input("Boutique du calculateur", placeholder="ex. B80", key=f"calc_btq_{key}")
+    if up is not None and st.button("Importer les référentiels du calculateur", type="primary",
+                                    key=f"calc_btn_{key}"):  # fmt: skip
+        if not author():
+            st.error("Indique ton nom dans la barre de gauche.")
+            return
+        with st.spinner("Lecture du calculateur…"):
+            reports = workspace().import_calculator(up.name, up.getvalue(),
+                                                    btq.strip().upper(), author())  # fmt: skip
+        rows = [r for rep in reports for r in rep.as_rows() if r["niveau"] != "INFO"]
+        written = [r for rep in reports for r in rep.as_rows() if r["code"] == "WRITTEN"]
+        if written:
+            st.success(f"{len(written)} référentiel(s) importé(s).")
+        if rows:
+            st.dataframe(
+                pd.DataFrame(rows).drop(columns=["code"]), hide_index=True, width="stretch"
+            )
+        reset_all()
+
+
+def _use_test_referentials() -> None:
+    workspace().use_test_referentials(author() or "Planner")
+    reset_all()
+
+
+def bootstrap_block(key: str) -> None:
+    """Quand les référentiels manquent : importer le calculateur ou partir des données de test."""
+    st.markdown("**Importer les référentiels depuis le calculateur Excel**")
+    calculator_import_block(key)
+    st.markdown("**Ou démarrer avec les référentiels de test**")
+    st.caption("Multiples, conversions, DC et Schedule extraits du calculateur B80 le 05/10/2026, "
+               "et le portfolio de B80. À remplacer dès que possible par ton calculateur à jour.")  # fmt: skip
+    st.button("Utiliser les référentiels de test", key=f"test_refs_{key}",
+              on_click=_use_test_referentials)  # fmt: skip
+
+
 def render() -> None:
     st.header("Référentiels")
+    with st.expander(
+        "Importer depuis le calculateur Excel (.xlsm)", expanded=not workspace().has_masters()
+    ):
+        calculator_import_block("refs")
     tabs = st.tabs([r.label for r in REFERENTIALS])
     for tab, ref in zip(tabs, REFERENTIALS, strict=True):
         with tab:

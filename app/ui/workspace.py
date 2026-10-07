@@ -9,6 +9,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import pickle
 import shutil
 from dataclasses import dataclass, field
 from datetime import date, datetime
@@ -22,6 +23,7 @@ from app.ingestion.business_inputs import (
     read_rules,
     read_targets,
 )
+from app.ingestion.calculator import extract
 from app.ingestion.categories import categories_csv, read_categories
 from app.ingestion.depot import Extraction, detect_extraction_date
 from app.ingestion.exclusions import exclusions_csv, read_exclusions
@@ -63,6 +65,21 @@ REFERENTIALS = (
     Referential("rules", "Règles boutique", "business", "boutique_rules", "boutique_rules.xlsx"),
 )
 REF_BY_KEY = {r.key: r for r in REFERENTIALS}
+DEMO_MASTER_FILES = {
+    "multiples": "master_multiples.csv",
+    "conversions": "master_sku_conversions.csv",
+    "dc_mapping": "master_dc_mapping.csv",
+    "schedule": "master_schedule.csv",
+    "portfolio": "master_boutique_portfolio_B80.csv",
+}
+# Onglet du calculateur → référentiel (pour la date de mise à jour)
+CALCULATOR_SHEET_KEYS = {
+    "multiple list": "multiples", "multiples": "multiples",
+    "sku conversion": "conversions", "conversion": "conversions",
+    "dc mapping": "dc_mapping", "dc": "dc_mapping",
+    "boutique portfolio": "portfolio", "portfolio": "portfolio",
+    "schedule": "schedule",
+}  # fmt: skip
 BUSINESS_READERS = {
     "allocations": read_allocations,
     "launches": read_launches,
@@ -226,6 +243,31 @@ class Workspace:
             targets=items["targets"], rules=items["rules"],
         ), reports  # fmt: skip
 
+    def import_calculator(
+        self, filename: str, data: bytes, boutique: str | None, author: str
+    ) -> list[ValidationReport]:
+        """Extrait multiples, conversions, DC, portfolio et Schedule du calculateur Excel."""
+        tmp_dir = self.root / "_tmp"
+        tmp_dir.mkdir(parents=True, exist_ok=True)
+        tmp = tmp_dir / Path(filename).name
+        tmp.write_bytes(data)
+        try:
+            reports = extract(tmp, self.masters_dir, boutique or None)
+        finally:
+            tmp.unlink(missing_ok=True)
+        for rep in reports:
+            key = CALCULATOR_SHEET_KEYS.get(rep.source.split(" / ")[-1].strip().lower())
+            if key and not rep.has_errors:
+                self._touch(key, author, Path(filename).name)
+        return reports
+
+    def use_test_referentials(self, author: str) -> None:
+        """Point de départ : référentiels des données de test (B80, 05-oct-2026)."""
+        self.masters_dir.mkdir(parents=True, exist_ok=True)
+        for key, name in DEMO_MASTER_FILES.items():
+            shutil.copy(DEMO_SOURCE / name, self.masters_dir / name)
+            self._touch(key, author, "référentiels de test (B80, 05-oct-2026)")
+
     def has_masters(self) -> bool:
         needed = ("multiples", "conversions", "dc_mapping")
         return all(self.ref_files(REF_BY_KEY[k]) for k in needed)
@@ -238,6 +280,8 @@ class Workspace:
         folder = self.depot_dir / today.isoformat()
         folder.mkdir(parents=True, exist_ok=True)
         for old in folder.glob(f"{kind}__*"):
+            old.unlink()
+        for old in folder.glob(f"_cache_{kind}__*"):
             old.unlink()
         path = folder / f"{kind}__{Path(filename).name}"
         path.write_bytes(data)
@@ -294,8 +338,8 @@ class Workspace:
                              "conversions et boutiques/DC")  # fmt: skip
         stock_path, stock_info = depot[STOCK]
         moves_path, moves_info = depot[MOVES]
-        stock, r1 = read_stock_situation(stock_path, stock_info["original_name"])
-        moves, r2 = read_movements(moves_path, moves_info["original_name"])
+        stock, r1 = _cached(stock_path, read_stock_situation, stock_info["original_name"])
+        moves, r2 = _cached(moves_path, read_movements, moves_info["original_name"])
         r1.source = f"Stock Situation ({stock_info['original_name']})"
         r2.source = f"Stock Movements ({moves_info['original_name']})"
         masters = load_masters_dir(self.masters_dir)
@@ -326,6 +370,34 @@ class Workspace:
         )
 
 
+def _cached(path: Path, reader, original_name: str):  # noqa: ANN001, ANN202
+    """Lecture d'un export, mise en cache à côté du fichier (données locales, jamais versionnées).
+
+    Un export Power BI de ~90 000 lignes prend plusieurs secondes à lire : on ne le relit
+    pas à chaque ouverture tant que le fichier n'a pas changé. Le cache garde des valeurs
+    brutes déjà validées ; les objets sont reconstruits sans revalidation (rapide).
+    """
+    digest = file_hash(path.read_bytes())[:16]
+    cache = path.parent / f"_cache_{path.stem}_{digest}.pkl"
+    if cache.exists():
+        try:
+            with cache.open("rb") as fh:
+                model, fields, rows, report = pickle.load(fh)  # noqa: S301 - écrit par l'outil
+            return [model.model_construct(**dict(zip(fields, r, strict=True))) for r in rows], report
+        except (OSError, pickle.UnpicklingError, EOFError, AttributeError, ValueError, TypeError):
+            pass
+    items, report = reader(path, original_name)
+    for old in path.parent.glob(f"_cache_{path.stem}_*.pkl"):
+        old.unlink(missing_ok=True)
+    if items:
+        model = type(items[0])
+        fields = tuple(model.model_fields)
+        rows = [tuple(getattr(x, f) for f in fields) for x in items]
+        with cache.open("wb") as fh:
+            pickle.dump((model, fields, rows, report), fh)
+    return items, report
+
+
 def data_dir() -> Path:
     """Dossier des données locales (variable COPILOT_DATA_DIR pour les tests)."""
     env = os.environ.get("COPILOT_DATA_DIR")
@@ -344,8 +416,7 @@ def demo_workspace(reset: bool = False) -> Workspace:
     if ws.has_masters() and ws.latest_depot():
         return ws
     ws.masters_dir.mkdir(parents=True, exist_ok=True)
-    for name in ("master_multiples.csv", "master_sku_conversions.csv", "master_dc_mapping.csv",
-                 "master_schedule.csv", "master_boutique_portfolio_B80.csv"):  # fmt: skip
+    for name in DEMO_MASTER_FILES.values():
         shutil.copy(DEMO_SOURCE / name, ws.masters_dir / name)
     for ref in REFERENTIALS:
         if ref.kind != "exclusions":

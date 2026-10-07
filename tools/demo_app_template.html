@@ -287,7 +287,7 @@ function renderDepot() {
     const d = DATA.depot.find(x => x.kind === kind);
     cards.append(el("div", "card",
       el("h3", { style: "margin-top:0" }, d ? d.label : kind),
-      el("div", "drop", "Glisse ici l'export Power BI (.csv ou .xlsx)", el("br"), el("span", "small", "Démo : le fichier de test est déjà déposé.")),
+      el("div", "drop", "Fichier de test déjà déposé", el("br"), el("span", "small", "Version web : pas de dépôt ici. Tes vrais exports se déposent dans l'outil installé sur ton poste.")),
       d ? el("div", { style: "margin-top:10px" },
         el("div", "", el("span", "st " + freshCls(d.level), d.fresh)),
         el("div", "small", el("span", "mono", d.name), " · extrait le ", el("b", "", fdate(d.day)), " (" + d.how + ")")) : el("div", "msg info", "Aucun fichier déposé.")));

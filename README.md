@@ -28,9 +28,12 @@ streamlit run app/ui/main.py
 Le navigateur s'ouvre sur l'outil. Dans la barre de gauche : tape ton nom, choisis « Mes données »
 (ou « Démo B80 » pour essayer), puis suis les écrans dans l'ordre :
 
-1. **Dépôt du jour** : dépose les deux exports Power BI du matin (Stock Situation et Stock Movements).
-   L'outil lit la date d'extraction et affiche sa fraîcheur (vert = aujourd'hui, orange = hier,
-   rouge = plus vieux), puis les contrôles qualité. Clique sur « Prêt ».
+1. **Dépôt du jour** : choisis « Mes données », puis glisse les deux exports Power BI du matin
+   (Stock Situation et Stock Movements) dans la zone de dépôt, ensemble ou l'un après l'autre.
+   L'outil reconnaît chaque fichier par ses colonnes, lit la date d'extraction et affiche sa
+   fraîcheur (vert = aujourd'hui, orange = hier, rouge = plus vieux), puis les contrôles qualité.
+   La première fois, importe les référentiels depuis ton calculateur Excel (`.xlsm`) ou pars des
+   référentiels de test. Clique sur « Prêt ».
    L'outil ne se connecte jamais à Power BI : c'est toi qui déposes les fichiers.
 2. **Commande boutique** : boutique (recherche par code ou nom), date de livraison, cover, cover café
    (facultatif), jours d'historique, mode, puis « Calculer ». Toutes les lignes sont dans une seule

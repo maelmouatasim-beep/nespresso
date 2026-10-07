@@ -7,38 +7,46 @@ from datetime import date
 import pandas as pd
 import streamlit as st
 
-from app.ingestion.depot import freshness
+from app.ingestion.depot import detect_kind, freshness
 from app.ui.common import (
     FRESH_ICON,
     ORDER,
-    REFS,
     day_data,
     fmt_date,
     fmt_int,
     go,
+    is_demo,
     reset_all,
     run_date,
     ss,
     workspace,
 )
+from app.ui.screens.referentials import bootstrap_block
 from app.ui.workspace import DEPOT_LABELS, MOVES, STOCK, detect
 
 
-def _deposit(kind: str, upload) -> None:
-    data = upload.getvalue()
-    extraction = detect(upload.name, data)
-    workspace().save_depot(kind, upload.name, data, extraction, date.today())
-    reset_all()
+def _deposit_files(uploads: list) -> list[str]:  # noqa: ANN001
+    """Range chaque fichier dans la bonne case selon ses colonnes. Retourne les erreurs."""
+    errors, done = [], {}
+    for up in uploads:
+        data = up.getvalue()
+        kind = detect_kind(up.name, data)
+        if kind is None:
+            errors.append(f"« {up.name} » : ni un Stock Situation ni un Stock Movements "
+                          "(colonnes non reconnues).")  # fmt: skip
+            continue
+        if kind in done:
+            errors.append(f"« {up.name} » et « {done[kind]} » sont tous les deux des "
+                          f"{DEPOT_LABELS[kind]} : le dernier est gardé.")  # fmt: skip
+        workspace().save_depot(kind, up.name, data, detect(up.name, data), date.today())
+        done[kind] = up.name
+    if done:
+        reset_all()
+    return errors
 
 
 def _file_card(kind: str, info: dict | None) -> None:
-    label = DEPOT_LABELS[kind]
-    st.markdown(f"#### {label}")
-    up = st.file_uploader(f"Déposer l'export {label}", type=["csv", "xlsx"], key=f"up_{kind}_{ss.nonce}",
-                          label_visibility="collapsed")  # fmt: skip
-    if up is not None:
-        _deposit(kind, up)
-        st.rerun()
+    st.markdown(f"#### {DEPOT_LABELS[kind]}")
     if info is None:
         st.info("Aucun fichier déposé.")
         return
@@ -61,6 +69,21 @@ def _file_card(kind: str, info: dict | None) -> None:
 def render() -> None:
     st.header("Dépôt du jour")
     ws = workspace()
+    if is_demo():
+        st.info("Démo B80 : les fichiers de test sont déjà déposés. Pour déposer tes exports, "
+                "choisis « Mes données » dans la barre de gauche.")  # fmt: skip
+    uploads = st.file_uploader(
+        "Dépose ici les deux exports Power BI (Stock Situation et Stock Movements)",
+        type=["xlsx", "csv"], accept_multiple_files=True, key=f"depot_{ss.nonce}",
+        disabled=is_demo(),
+    )  # fmt: skip
+    if uploads:
+        with st.spinner("Lecture des fichiers…"):
+            ss.depot_errors = _deposit_files(uploads)
+        ss.nonce += 1
+        st.rerun()
+    for err in ss.pop("depot_errors", []):
+        st.error(err)
     depot = ws.latest_depot()
     c1, c2 = st.columns(2)
     with c1:
@@ -70,8 +93,9 @@ def render() -> None:
 
     st.divider()
     if not ws.has_masters():
-        st.warning("Référentiels manquants : multiples, conversions et boutiques/DC.")
-        st.button("Ouvrir les référentiels", on_click=go, args=(REFS,))
+        st.warning("Il manque les référentiels (multiples, conversions, boutiques et DC) "
+                   "pour calculer les commandes.")  # fmt: skip
+        bootstrap_block("depot")
         return
     if STOCK not in depot or MOVES not in depot:
         return

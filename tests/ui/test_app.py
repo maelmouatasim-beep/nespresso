@@ -119,3 +119,22 @@ def test_accept_all_ok_marks_ok_lines(app: AppTest) -> None:
     df = grid(app)
     assert df[df["Statut"].str.contains("OK")]["Statut"].str.endswith("✓").all()
     assert not df[df["Statut"].str.contains("REVIEW")]["Statut"].str.endswith("✓").any()
+
+
+def test_my_data_depot_offers_referentials_and_uploader(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("COPILOT_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("COPILOT_DB", str(tmp_path / "test.db"))
+    at = AppTest.from_file(APP, default_timeout=90)
+    at.run()  # « Mes données » par défaut, rien de déposé
+    assert not at.exception
+    assert any("Il manque les référentiels" in w.value for w in at.warning)
+    at.text_input(key="author").input("Planner Test").run()
+    at.button(key="test_refs_depot").click().run()
+    assert not at.exception
+    from app.ui.workspace import real_workspace
+
+    assert real_workspace().has_masters()
+
+
+def test_demo_depot_upload_is_disabled(app: AppTest) -> None:
+    assert any("Démo B80" in i.value for i in app.info)

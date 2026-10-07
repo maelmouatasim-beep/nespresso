@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
+from pathlib import Path
 
 import pandas as pd
 import streamlit as st
@@ -95,11 +96,27 @@ def reset_all() -> None:
     ss.day, ss.day_error, ss.day_outcomes = None, None, None
 
 
+@st.cache_resource(max_entries=4, show_spinner="Lecture des exports du jour…")
+def _load_day(root: str, signature: str) -> DayData:
+    """Partagé entre les onglets et les sessions tant que les fichiers ne changent pas."""
+    del signature  # sert seulement de clé de cache
+    return Workspace(Path(root)).load_day()
+
+
+def _signature(ws: Workspace) -> str:
+    """Empreinte des fichiers utilisés : un dépôt ou un référentiel modifié la change."""
+    files = [p for _, (p, _) in sorted(ws.latest_depot().items())]
+    if ws.masters_dir.exists():
+        files += sorted(ws.masters_dir.iterdir())
+    return "|".join(f"{p.name}:{p.stat().st_mtime_ns}:{p.stat().st_size}" for p in files)
+
+
 def day_data() -> DayData | None:
-    """Données du jour (chargées une fois par session, ou après un nouveau dépôt)."""
+    """Données du jour (chargées une fois, ou après un nouveau dépôt / référentiel)."""
     if ss.day is None and ss.day_error is None:
+        ws = workspace()
         try:
-            ss.day = workspace().load_day()
+            ss.day = _load_day(str(ws.root), _signature(ws))
         except (ValueError, OSError) as exc:
             ss.day_error = str(exc)
     return ss.day
