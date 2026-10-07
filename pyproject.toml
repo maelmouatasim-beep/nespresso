@@ -39,7 +39,7 @@ select = ["E", "F", "I", "B", "UP", "SIM"]
 
 [tool.ruff.lint.per-file-ignores]
 # Mise en page de l'interface : lignes longues tolérées.
-"app/ui/main.py" = ["E501"]
+"app/ui/**/*.py" = ["E501"]
 
 [tool.mypy]
 python_version = "3.12"

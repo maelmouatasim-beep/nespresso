@@ -44,6 +44,16 @@ TEMPLATES = {
             "Ne s'applique pas aux allocations ni aux lancements.",
         ],
     ),
+    "exclusions.xlsx": (
+        ["sku", "boutiques", "reason", "author", "updated_on"],
+        [
+            "SKU à ne jamais envoyer (ex. SKU e-commerce non vendu en boutique).",
+            "boutiques : ALL pour toutes, sinon codes séparés par ; (ex. B80;B1).",
+            "reason : pourquoi ce SKU est exclu. author : qui l'a décidé.",
+            "updated_on : date de la décision (AAAA-MM-JJ).",
+            "L'exclusion apparaît dans le « Pourquoi » de la ligne (quantité 0, BLOCKED).",
+        ],
+    ),
     "boutique_rules.xlsx": (
         ["boutique", "rule", "sku", "value", "comment"],
         [

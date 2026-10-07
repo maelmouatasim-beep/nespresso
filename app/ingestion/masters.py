@@ -43,6 +43,7 @@ class Masters:
     sources: dict[str, str] = field(default_factory=dict)
     schedule: list[ScheduleSlot] = field(default_factory=list)
     schedule_issues: list[str] = field(default_factory=list)
+    boutique_names: dict[str, str] = field(default_factory=dict)
 
 
 def load_schedule(path: Path) -> tuple[list[ScheduleSlot], list[str]]:
@@ -71,6 +72,29 @@ def load_schedule(path: Path) -> tuple[list[ScheduleSlot], list[str]]:
     return slots, issues
 
 
+def load_boutique_names(path: Path) -> dict[str, str]:
+    """Nom de chaque boutique (colonne boutique_name du Schedule, si présente)."""
+    df = pd.read_csv(path, dtype=str, keep_default_na=False)
+    if "boutique_name" not in df.columns:
+        return {}
+    names: dict[str, str] = {}
+    for b, n in zip(df["boutique"], df["boutique_name"], strict=True):
+        if b.strip() and n.strip() and b.strip() not in names:
+            names[b.strip()] = n.strip()
+    return names
+
+
+def all_boutiques(masters: Masters, stock: Iterable[StockSnapshotLine]) -> list[str]:
+    """TOUTES les boutiques connues (DC Mapping, Schedule, Stock Situation hors DC).
+
+    Le Schedule ne filtre jamais cette liste (décision A2).
+    """
+    dcs = set(masters.dc_mapping.values())
+    found = set(masters.dc_mapping) | {s.boutique for s in masters.schedule}
+    found |= {line.location for line in stock if line.location not in dcs}
+    return sorted(found, key=lambda b: (len(b), b))
+
+
 def load_masters_dir(directory: Path) -> Masters:
     """Lit master_multiples.csv, master_sku_conversions.csv, master_dc_mapping.csv et
     les master_boutique_portfolio*.csv d'un dossier."""
@@ -91,11 +115,14 @@ def load_masters_dir(directory: Path) -> Masters:
             portfolio.setdefault(b, {})[sku] = flag
     schedule: list[ScheduleSlot] = []
     schedule_issues: list[str] = []
+    names: dict[str, str] = {}
     if (directory / "master_schedule.csv").exists():
         schedule, schedule_issues = load_schedule(directory / "master_schedule.csv")
+        names = load_boutique_names(directory / "master_schedule.csv")
     return Masters(
         schedule=schedule,
         schedule_issues=schedule_issues,
+        boutique_names=names,
         products=products,
         product_list_anomalies=anomalies,
         conversions=load_conversions(files["conversions"]),

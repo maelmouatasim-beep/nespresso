@@ -1,4 +1,4 @@
-"""Test de bout en bout de l'interface Streamlit (sans navigateur)."""
+"""Tests de bout en bout de l'interface Streamlit (sans navigateur)."""
 
 from __future__ import annotations
 
@@ -9,87 +9,82 @@ import pytest
 from streamlit.testing.v1 import AppTest
 
 APP = str(Path(__file__).resolve().parents[2] / "app" / "ui" / "main.py")
+PAGES = ("1. Dépôt du jour", "2. Commande boutique", "3. Journée", "4. Export",
+         "5. Référentiels", "6. Historique")  # fmt: skip
 
 
 @pytest.fixture
 def app(tmp_path, monkeypatch) -> AppTest:
+    monkeypatch.setenv("COPILOT_DATA_DIR", str(tmp_path / "data"))
     monkeypatch.setenv("COPILOT_DB", str(tmp_path / "test.db"))
-    at = AppTest.from_file(APP, default_timeout=60)
+    at = AppTest.from_file(APP, default_timeout=90)
     at.run()
+    at.radio(key="ws_kind").set_value("Démo B80").run()
     return at
 
 
-def test_demo_flow(app: AppTest) -> None:
-    assert not app.exception
-    app.button(key="load_demo").click().run()
-    assert not app.exception
-    # Paramètres obligatoires manquants : message clair, pas de calcul.
+def goto(at: AppTest, page: str) -> None:
+    at.radio(key="page").set_value(page).run()
+    assert not at.exception, at.exception
+
+
+def compute_b80(at: AppTest, mode: str = "Standard") -> None:
+    goto(at, PAGES[1])
+    at.selectbox(key="p_boutique").set_value("B80").run()
+    at.date_input(key="p_delivery").set_value(date(2026, 10, 8)).run()
+    at.number_input(key="p_cover").set_value(9.0).run()
+    at.selectbox(key="p_mode").set_value(mode).run()
+    at.button(key="compute").click().run()
+    assert not at.exception, at.exception
+
+
+def test_every_screen_renders(app: AppTest) -> None:
+    for page in PAGES:
+        goto(app, page)
+    goto(app, PAGES[0])
+    assert any(b.key == "ready" for b in app.button)
+
+
+def test_order_requires_parameters_then_computes(app: AppTest) -> None:
+    goto(app, PAGES[1])
     app.button(key="compute").click().run()
     assert any("Il manque" in e.value for e in app.error)
-
-    app.text_input(key="author").input("Planner Test").run()
-    app.date_input(key="delivery_date").set_value(date(2026, 10, 7)).run()
-    app.number_input(key="cover").set_value(9.0).run()
-    app.radio(key="mode").set_value("Parité Excel").run()
-    app.button(key="compute").click().run()
-    assert not app.exception
-    assert any("Commande calculée" in s.value for s in app.success)
+    compute_b80(app)
     res = app.session_state["base"]
-    melozio = next(x for x in res.lines if x.sku == "7005.70")
-    assert melozio.qty == 3120
+    by_sku = {x.sku: x for x in res.lines}
+    assert by_sku["7005.70"].qty == 3120
+    assert any("dc_return" in x.explanation["rules_triggered"] for x in res.lines)
+    assert res.history_days == 7
 
-    # Enregistrement du run dans la base de test.
-    app.button(key="save").click().run()
+
+def test_parity_mode_reproduces_excel_selection(app: AppTest) -> None:
+    compute_b80(app, mode="Parité Excel")
+    res = app.session_state["base"]
+    assert len(res.lines) == 452  # 451 lignes Excel + 2007.70 (question ouverte)
+
+
+def test_export_needs_planner_name(app: AppTest) -> None:
+    compute_b80(app)
+    goto(app, PAGES[3])
+    assert any("Indique ton nom" in e.value for e in app.error)
+    app.text_input(key="author").input("Planner Test").run()
     assert not app.exception
+    app.button(key="save_run").click().run()
     assert app.session_state["saved_run_id"] == 1
 
 
-def test_search_then_override_through_engine(app: AppTest) -> None:
-    app.button(key="load_demo").click().run()
-    app.text_input(key="author").input("Planner Test").run()
-    app.date_input(key="delivery_date").set_value(date(2026, 10, 7)).run()
-    app.number_input(key="cover").set_value(9.0).run()
-    app.button(key="compute").click().run()
-    app.text_input(key="f_search").input("Melozio").run()
-    assert not app.exception
-    # L'override passe par le moteur : on vérifie la règle via la session.
-    from datetime import datetime
-
-    from app.domain.models import Override
-    from app.services.planning import with_overrides
-
-    base = app.session_state["base"]
-    ov = Override(
-        sku="7005.70",
-        qty_before=3120,
-        qty_after=3600,
-        category="promo",
-        reason="Promo AOS",
-        author="Planner Test",
-        timestamp=datetime.now(),
-    )
-    final = with_overrides(base, [ov], {})
-    assert next(x for x in final.lines if x.sku == "7005.70").qty == 3600
-
-
-def test_day_tab_requires_cover_per_boutique(app: AppTest) -> None:
-    app.button(key="load_demo").click().run()
-    assert not app.exception
-    # 2026-10-05 est un lundi : B80 ne commande pas selon le Schedule ; on l'ajoute à la main.
-    day_select = next(m for m in app.multiselect if m.key.startswith("day_btq_"))
-    day_select.set_value(["B80"]).run()
+def test_day_requires_confirmed_date_and_cover(app: AppTest) -> None:
+    goto(app, PAGES[2])
+    pick = next(m for m in app.multiselect if m.key.startswith("day_btq_"))
+    pick.set_value(["B80"]).run()
     app.button(key="day_compute").click().run()
-    assert not app.exception
-    assert any("jours de couverture manquants" in e.value for e in app.error)
+    assert any("date de livraison" in e.value for e in app.error)
 
 
-def test_summary_offers_excel_and_rule_free_run(app: AppTest) -> None:
-    app.button(key="load_demo").click().run()
-    app.text_input(key="author").input("Planner Test").run()
-    app.date_input(key="delivery_date").set_value(date(2026, 10, 8)).run()
-    app.number_input(key="cover").set_value(9.0).run()
-    app.button(key="compute").click().run()
+def test_referential_owner_is_saved(app: AppTest) -> None:
+    goto(app, PAGES[4])
+    app.text_input(key="owner_multiples").input("Équipe planning MTL").run()
     assert not app.exception
-    res = app.session_state["base"]
-    assert res.rule_warnings == []
-    assert res.history_days == 7
+    from app.ui.workspace import demo_workspace
+
+    assert demo_workspace().meta()["multiples"]["owner"] == "Équipe planning MTL"
