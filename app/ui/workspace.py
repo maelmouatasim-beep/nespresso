@@ -15,12 +15,14 @@ from datetime import date, datetime
 from pathlib import Path
 
 from app.domain.models import Exclusion, StockMovement, StockSnapshotLine
+from app.engines.categories import DEFAULT_CATEGORY_MAP
 from app.ingestion.business_inputs import (
     read_allocations,
     read_launches,
     read_rules,
     read_targets,
 )
+from app.ingestion.categories import categories_csv, read_categories
 from app.ingestion.depot import Extraction, detect_extraction_date
 from app.ingestion.exclusions import exclusions_csv, read_exclusions
 from app.ingestion.masters import Masters, load_masters_dir
@@ -42,7 +44,7 @@ DEPOT_LABELS = {STOCK: "Stock Situation", MOVES: "Stock Movements"}
 class Referential:
     key: str
     label: str
-    kind: str  # master | portfolio | exclusions | business
+    kind: str  # master | portfolio | exclusions | categories | business
     filename: str  # nom du fichier (sans extension pour les modèles métier)
     template: str | None = None  # modèle vierge dans templates/
 
@@ -54,6 +56,7 @@ REFERENTIALS = (
     Referential("dc_mapping", "Boutiques et DC", "master", "master_dc_mapping.csv"),
     Referential("schedule", "Schedule", "master", "master_schedule.csv"),
     Referential("exclusions", "Exclusions", "exclusions", "exclusions.csv", "exclusions.xlsx"),
+    Referential("categories", "Catégories", "categories", "categories.csv", "categories.xlsx"),
     Referential("allocations", "Allocations", "business", "allocations", "allocations.xlsx"),
     Referential("launches", "Lancements", "business", "launches", "launches.xlsx"),
     Referential("targets", "Stocks cibles", "business", "target_stock", "target_stock.xlsx"),
@@ -77,6 +80,7 @@ class DayData:
     masters: Masters
     business: BusinessInputs
     exclusions: list[Exclusion]
+    categories: dict[str, str] = field(default_factory=lambda: dict(DEFAULT_CATEGORY_MAP))
     reports: list[ValidationReport] = field(default_factory=list)
     source_hashes: dict[str, str] = field(default_factory=dict)
     extraction: dict[str, Extraction] = field(default_factory=dict)
@@ -159,6 +163,12 @@ class Workspace:
                 raise ValueError("; ".join(i.message for i in report.issues if i.level == "error"))
             self.save_exclusions(exclusions, author)
             return self.masters_dir / ref.filename
+        elif ref.kind == "categories":
+            mapping, report = read_categories(io.BytesIO(data), filename)
+            if report.has_errors:
+                raise ValueError("; ".join(i.message for i in report.issues if i.level == "error"))
+            self.save_categories(mapping, author)
+            return self.masters_dir / ref.filename
         else:
             if suffix != ".csv":
                 raise ValueError("Format accepté : .csv (produit par l'extraction du calculateur)")
@@ -178,6 +188,27 @@ class Workspace:
         if not path.exists():
             return [], ValidationReport(source="Exclusions")
         return read_exclusions(path, path.name)
+
+    def save_categories(self, mapping: dict[str, str], author: str) -> None:
+        self.masters_dir.mkdir(parents=True, exist_ok=True)
+        path = self.masters_dir / REF_BY_KEY["categories"].filename
+        path.write_text(categories_csv(mapping), encoding="utf-8")
+        self._touch("categories", author, path.name)
+
+    def load_categories(self) -> tuple[dict[str, str], ValidationReport]:
+        """Table type produit → catégorie ; valeurs du planner si aucun fichier."""
+        path = self.masters_dir / REF_BY_KEY["categories"].filename
+        if not path.exists():
+            return dict(DEFAULT_CATEGORY_MAP), ValidationReport(source="Catégories")
+        mapping, report = read_categories(path, path.name)
+        if report.has_errors:
+            # Affichage seulement : on garde le classement par défaut, signalé, sans bloquer.
+            fallback = ValidationReport(source=f"Catégories ({path.name})")
+            details = "; ".join(i.message for i in report.issues if i.level == "error")
+            fallback.add("warning", "CATEGORIES_INVALID",
+                         f"Fichier invalide, classement par défaut utilisé : {details}")  # fmt: skip
+            return dict(DEFAULT_CATEGORY_MAP), fallback
+        return mapping, report
 
     def load_business(self) -> tuple[BusinessInputs, list[ValidationReport]]:
         items: dict[str, tuple] = {}
@@ -270,6 +301,7 @@ class Workspace:
         masters = load_masters_dir(self.masters_dir)
         business, business_reports = self.load_business()
         exclusions, excl_report = self.load_exclusions()
+        categories, cat_report = self.load_categories()
         hashes = {
             "stock_situation": file_hash(stock_path.read_bytes()),
             "stock_movements": file_hash(moves_path.read_bytes()),
@@ -287,7 +319,8 @@ class Workspace:
             masters=masters,
             business=business,
             exclusions=exclusions,
-            reports=[r1, r2, *business_reports, excl_report],
+            categories=categories,
+            reports=[r1, r2, *business_reports, excl_report, cat_report],
             source_hashes=hashes,
             extraction={STOCK: extraction(stock_info), MOVES: extraction(moves_info)},
         )

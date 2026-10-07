@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from collections import Counter
+from collections.abc import Mapping
 
 from app.domain.models import COFFEE_TYPE, Exclusion
+from app.engines.categories import normalize_type
 from app.engines.conversion import ConversionError, build_conversion_index
 from app.engines.portfolio import numeric_key
 from app.ingestion.masters import Masters
@@ -64,3 +66,14 @@ def dc_mapping_anomalies(masters: Masters) -> list[str]:
 def exclusions_anomalies(exclusions: list[Exclusion], masters: Masters) -> list[str]:
     unknown = [e.sku for e in exclusions if e.sku not in masters.products]
     return [f"SKU absent de la Multiple list : {unknown}"] if unknown else []
+
+
+def categories_anomalies(mapping: Mapping[str, str], masters: Masters) -> list[str]:
+    """Types produit de la Multiple list absents de la table (donc classés « Autres »)."""
+    counts = Counter(normalize_type(p.product_type) for p in masters.products.values())
+    missing = sorted(t for t in counts if t and t not in mapping)
+    if not missing:
+        return []
+    detail = ", ".join(f"{t} ({counts[t]})" for t in missing[:15])
+    more = f" et {len(missing) - 15} autre(s)" if len(missing) > 15 else ""
+    return [f"{len(missing)} type(s) produit sans catégorie, classés « Autres » : {detail}{more}"]

@@ -5,6 +5,7 @@ python tools/make_templates.py
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 from openpyxl import Workbook
@@ -12,6 +13,9 @@ from openpyxl.styles import Font, PatternFill
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "templates"
+sys.path.insert(0, str(ROOT))
+
+from app.engines.categories import CATEGORIES, DEFAULT_CATEGORY_MAP  # noqa: E402
 
 TEMPLATES = {
     "allocations.xlsx": (
@@ -54,6 +58,16 @@ TEMPLATES = {
             "L'exclusion apparaît dans le « Pourquoi » de la ligne (quantité 0, BLOCKED).",
         ],
     ),
+    "categories.xlsx": (
+        ["product_type", "categorie"],
+        [
+            "Classement des types produit dans le filtre « Catégorie » de la commande.",
+            "categorie = Cafés, Machines, Accessoires, Consommables & sacs ou Autres.",
+            "Un type absent de la table est classé « Autres ».",
+            "Affichage seulement : la catégorie ne change aucune quantité.",
+            "Le modèle est prérempli avec le classement validé par le planner.",
+        ],
+    ),
     "boutique_rules.xlsx": (
         ["boutique", "rule", "sku", "value", "comment"],
         [
@@ -70,6 +84,13 @@ TEMPLATES = {
 }
 
 
+PREFILLED = {
+    "categories.xlsx": sorted(
+        DEFAULT_CATEGORY_MAP.items(), key=lambda kv: (CATEGORIES.index(kv[1]), kv[0])
+    ),
+}
+
+
 def main() -> None:
     OUT.mkdir(exist_ok=True)
     for name, (headers, notes) in TEMPLATES.items():
@@ -80,6 +101,8 @@ def main() -> None:
         for cell in ws[1]:
             cell.font = Font(bold=True)
             cell.fill = PatternFill("solid", fgColor="EFE6DC")
+        for row in PREFILLED.get(name, []):
+            ws.append(list(row))
         sku_cols = [chr(65 + i) for i, h in enumerate(headers) if h in ("boutique", "sku")]
         for col in sku_cols:
             for row in range(2, 501):
