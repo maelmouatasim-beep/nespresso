@@ -1,0 +1,13 @@
+{
+  "boutique": "B80",
+  "dc": "CY1",
+  "run_date": "2026-10-05",
+  "cover_days": 9,
+  "coffee_cover_days": null,
+  "sales_history_days": 7,
+  "sales_days_until_delivery": 6,
+  "hardcoded_zero_skus": [
+    "7010.70"
+  ],
+  "note": "Valeurs lues dans B80 105.xlsm, onglet Stock Cover Final, cellules S3:S8"
+}

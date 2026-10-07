@@ -1,0 +1,10 @@
+[browser]
+gatherUsageStats = false
+
+[server]
+# Outil local : n'écoute que sur ce poste.
+address = "localhost"
+maxUploadSize = 200
+
+[theme]
+primaryColor = "#6f4524"

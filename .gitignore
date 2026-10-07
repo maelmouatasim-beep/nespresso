@@ -1,0 +1,23 @@
+# Données réelles : JAMAIS dans le dépôt (CLAUDE.md, règle 8)
+data/
+*.xlsx
+*.xlsm
+*.xls
+*.csv
+!tests/fixtures/**/*.csv
+.env
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Aperçus générés (contiennent des données)
+preview/
+
+# Modèles vierges (sans données) : versionnés
+!templates/*.xlsx
