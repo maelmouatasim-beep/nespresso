@@ -1,36 +1,25 @@
 <meta charset="utf-8">
 <title>Supply Planning Copilot</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
 <style>
-/* Poste de travail : barre latérale fixe (6 écrans dans l'ordre du planner), contenu à droite,
-   panneau « Pourquoi » qui glisse depuis la droite, dock « Modifications à justifier » en bas. */
+/* Charte visuelle (docs/charte_visuelle.md) : thème CLAIR uniquement, inspiré de Nespresso.
+   Barre latérale espresso, contenu crème, cartes blanches, accent doré. Pas de mode sombre.
+   Contrastes vérifiés (texte ≥ 4,5:1) : l'or sert aux fonds et filets ; en texte, teinte foncée. */
 :root {
-  --bg: #f4f3f1; --surface: #ffffff; --surface-2: #eeece8; --text: #1f1b17; --muted: #6b645c;
-  --border: #dedad3; --accent: #6b4226; --accent-fg: #ffffff; --accent-soft: #efe4da;
-  --ok: #24693a; --ok-bg: #e2f1e6; --review: #9a5a00; --review-bg: #fdecd0;
-  --blocked: #a52a2a; --blocked-bg: #f9e0e0; --mod: #1f5fbf; --mod-bg: #e3edfc;
-  --side: #2a211b; --side-fg: #efe7df; --side-muted: #b3a597; --side-on: #4a392d;
-  --font: "Source Sans 3", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-}
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --bg: #171412; --surface: #211d1a; --surface-2: #2b2622; --text: #f1ece6; --muted: #a79f95;
-    --border: #3b352f; --accent: #e0a878; --accent-fg: #1d1712; --accent-soft: #3a2b20;
-    --ok: #8fd4a1; --ok-bg: #1d3324; --review: #f3c26a; --review-bg: #3b2e15;
-    --blocked: #f39c9c; --blocked-bg: #3e1f1f; --mod: #8fb6f5; --mod-bg: #1c2a40;
-    --side: #0f0d0b; --side-fg: #efe7df; --side-muted: #9c8f82; --side-on: #2f261f;
-    color-scheme: dark;
-  }
-}
-:root[data-theme="dark"] {
-  --bg: #171412; --surface: #211d1a; --surface-2: #2b2622; --text: #f1ece6; --muted: #a79f95;
-  --border: #3b352f; --accent: #e0a878; --accent-fg: #1d1712; --accent-soft: #3a2b20;
-  --ok: #8fd4a1; --ok-bg: #1d3324; --review: #f3c26a; --review-bg: #3b2e15;
-  --blocked: #f39c9c; --blocked-bg: #3e1f1f; --mod: #8fb6f5; --mod-bg: #1c2a40;
-  --side: #0f0d0b; --side-fg: #efe7df; --side-muted: #9c8f82; --side-on: #2f261f;
-  color-scheme: dark;
+  color-scheme: light;
+  --bg: #FAF7F2; --surface: #FFFFFF; --surface-2: #F3EDE4; --text: #2B1D14; --muted: #6B5B4E;
+  --border: #E8E1D8; --zebra: #FBF8F3; --hover: #F6EEDF;
+  --espresso: #3D2B1F; --gold: #B08D57; --gold-ink: #8A6A3A; --gold-soft: #F3E9D8; --gold-hover: #C29F69;
+  --accent: var(--gold); --accent-fg: #2B1D14; --accent-soft: var(--gold-soft);
+  --ok: #2A7449; --ok-dot: #2E7D4F; --ok-bg: #E6F2EA;
+  --review: #94600F; --review-dot: #B7791F; --review-bg: #FFF4DF;
+  --blocked: #B23A3A; --blocked-dot: #B23A3A; --blocked-bg: #FBE9E7;
+  --mod: #2F5F9E; --mod-dot: #2F5F9E; --mod-bg: #E8F0FA;
+  --side: var(--espresso); --side-fg: #FAF7F2; --side-muted: #D8C9B4; --side-on: #4A3628;
+  --shadow: 0 1px 3px rgba(43, 29, 20, .06), 0 1px 2px rgba(43, 29, 20, .04);
+  --font: "Inter", "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.45 var(--font); }
@@ -170,11 +159,57 @@ footer { color: var(--muted); font-size: 12.5px; margin-top: 28px; }
   #dock .pl { grid-template-columns: minmax(0, 1fr); }
 }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+
+/* --- Charte visuelle : finitions (thème clair, Nespresso) --- */
+body { font-size: 14.5px; }
+h1 { font-weight: 600; letter-spacing: -.01em; }
+h2.fam, h3 { color: var(--gold-ink); font-weight: 600; }
+.side .brand { font-size: 17px; font-weight: 700; } .side .brand b { color: var(--gold); font-weight: 700; }
+.side nav button.on { box-shadow: inset 3px 0 0 var(--gold); }
+.card, .tile, .tablewrap { box-shadow: var(--shadow); }
+.tile { padding: 14px 16px; }
+.tile .k { font-weight: 500; font-size: 12.5px; }
+.tile .v { font-size: 28px; font-weight: 600; letter-spacing: -.01em; }
+.tile.O, .tile.R, .tile.B { box-shadow: var(--shadow); }
+.tile.O .k, .tile.R .k, .tile.B .k { font-weight: 600; }
+.tile.O .k { color: var(--ok); } .tile.R .k { color: var(--review); } .tile.B .k { color: var(--blocked); }
+.tile.O .k::before, .tile.R .k::before, .tile.B .k::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: 0; }
+.tile.O .k::before { background: var(--ok-dot); } .tile.R .k::before { background: var(--review-dot); } .tile.B .k::before { background: var(--blocked-dot); }
+.btn { border-radius: 10px; }
+.btn:hover { border-color: var(--gold); color: var(--gold-ink); background: var(--surface); }
+.btn.primary:hover { background: var(--gold-hover); border-color: var(--gold-hover); color: var(--accent-fg); }
+.btn.link { color: var(--gold-ink); }
+.btn svg, .ic { width: 16px; height: 16px; vertical-align: -3px; margin-right: 6px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.gear .btn svg { margin-right: 0; }
+th { background: var(--espresso); color: #FAF7F2; }
+table.order th:nth-child(1), table.order th:nth-child(2) { background: var(--espresso); }
+th.sortable:hover { color: #FFFFFF; } th.sortable.on { color: #E2C99F; }
+td { padding-top: 4px; padding-bottom: 4px; }
+tbody tr:nth-child(even) td { background: var(--zebra); }
+table.order tbody tr:nth-child(even) td:nth-child(1), table.order tbody tr:nth-child(even) td:nth-child(2) { background: var(--zebra); }
+table.order tbody tr:hover td, tbody tr:hover td { background: var(--hover); }
+table.order tr.mod td { background: var(--mod-bg); }
+table.order tr.sel td { box-shadow: inset 0 2px 0 var(--gold), inset 0 -2px 0 var(--gold); }
+.st { font-weight: 600; padding: 2px 9px 2px 8px; }
+.st::before { content: ""; display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 5px; vertical-align: 1px; background: currentColor; }
+.st.O::before, .st.G::before { background: var(--ok-dot); } .st.R::before, .st.Y::before { background: var(--review-dot); }
+.st.B::before, .st.X::before { background: var(--blocked-dot); } .st.M::before { background: var(--mod-dot); }
+.seg { border-radius: 10px; box-shadow: var(--shadow); }
+.seg button:hover { background: var(--hover); }
+.seg button.on { background: var(--gold-soft); color: var(--text); font-weight: 600; box-shadow: inset 0 0 0 1px var(--gold); }
+.seg button.on b { opacity: .8; }
+.chip.on { background: var(--gold-soft); color: var(--text); border-color: var(--gold); }
+.tabs button.on { border-bottom-color: var(--gold); }
+.drop.live { border-color: var(--gold); background: var(--gold-soft); }
+#why { box-shadow: -8px 0 30px rgba(43, 29, 20, .12); }
+#dock { border-top-color: var(--mod); }
+select, input[type=text], input[type=search], input[type=date], input[type=number] { border-radius: 8px; }
+input:focus, select:focus { outline: none; border-color: var(--gold); box-shadow: 0 0 0 3px var(--gold-soft); }
 </style>
 
 <div class="app">
   <aside class="side">
-    <div class="brand">Supply Planning Copilot<small>Boutique Planning · Nespresso Canada</small></div>
+    <div class="brand">Supply Planning <b>Copilot</b><small>Boutique Planning · Nespresso Canada</small></div>
     <label>Planner<input type="text" id="author" placeholder="Ton nom" autocomplete="name"></label>
     <div class="srcsw" id="source" role="group" aria-label="Données"></div>
     <nav id="nav"></nav>
@@ -219,6 +254,15 @@ const fdate = s => { if (!s) return "—"; const d = parseIso(s); return pad(d.g
 const frday = s => { const d = parseIso(s); return FR_DAYS[d.getDay()] + " " + pad(d.getDate()) + "/" + pad(d.getMonth() + 1); };
 const btqLabel = b => names()[b] ? b + " — " + names()[b] : b;
 const $ = id => document.getElementById(id);
+// Icônes fines (trait 1,8 px), cohérentes partout.
+const ICONS = {
+  tune: '<path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/>',
+  check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
+  checks: '<path d="M2 12.5l4.5 4.5L16 7.5M11 16l1 1 9.5-9.5"/>',
+  undo: '<path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 010 12h-3"/>',
+  upload: '<path d="M12 16V4M7 9l5-5 5 5"/><path d="M4 16v3a1 1 0 001 1h14a1 1 0 001-1v-3"/>',
+};
+function ic(name) { const s = document.createElementNS("http://www.w3.org/2000/svg", "svg"); s.setAttribute("viewBox", "0 0 24 24"); s.setAttribute("aria-hidden", "true"); s.innerHTML = ICONS[name]; return s; }
 const isAttrs = x => x && typeof x === "object" && !(x instanceof Node) && !Array.isArray(x);
 function el(tag, attrs, ...kids) {
   const e = document.createElement(tag);
@@ -301,7 +345,7 @@ function renderNav() {
     const days = DATA.depot.map(d => d.day).filter(Boolean).sort(), worst = DATA.depot.find(d => d.day === days[0]);
     if (worst) fresh = [freshCls(worst.level), worst.fresh];
   }
-  $("sidefresh").replaceChildren(fresh ? el("span", "", el("span", "st " + fresh[0], "●"), " ", fresh[1]) : "Aucun export déposé");
+  $("sidefresh").replaceChildren(fresh ? el("span", "st " + fresh[0], fresh[1]) : "Aucun export déposé");
 }
 function setSource(v) {
   if (st.source === v) return;
@@ -520,7 +564,7 @@ function paramsRow() {
   const cover = coverSelect("p_cover", f.cover); cover.onchange = e => { f.cover = e.target.value; };
   const coffee = coverSelect("p_coffee", f.coffee, true); coffee.onchange = e => { f.coffee = e.target.value; }; coffee.title = "Facultatif : cover propre aux cafés (type C)";
   const mode = el("select", { id: "p_mode", onchange: e => { f.mode = e.target.value; } }, Object.entries(MODES).map(([k, v]) => el("option", { value: v }, k))); mode.value = f.mode;
-  const gear = el("div", "gear", el("button", { class: "btn", title: "Options avancées", "aria-expanded": String(st.gear), onclick: () => { st.gear = !st.gear; render(); } }, "⚙"));
+  const gear = el("div", "gear", el("button", { class: "btn", title: "Options avancées", "aria-expanded": String(st.gear), onclick: () => { st.gear = !st.gear; render(); } }, ic("tune")));
   if (st.gear) gear.append(el("div", "pop",
     el("label", "f", "Semaines de secours (SKU dormants)", el("input", { type: "number", value: 4, disabled: true, title: "Démo : 4 semaines" })),
     el("div", "f", "Codes de mouvement comptés", el("span", "small", { style: "font-weight:400" }, M.codes.join(", ") || "—"), el("span", { class: "small muted", style: "font-weight:400" }, "Tous inclus (ventes et déstockages).")),
@@ -557,7 +601,7 @@ function matches(x) {
 const COLS = [
   ["Statut", 112, 0, x => statusKey(x)], ["SKU", 96, 0, x => x.m.sku], ["Description", 210, 0, x => x.m.desc],
   ["Catégorie", 130, 0, x => categoryOf(x.m)], ["Expected", 86, 1, x => x.m.exp], ["Ventes", 68, 1, x => x.m.sales],
-  ["Couv. act.", 72, 1, x => x.m.cur], ["Proposée", 78, 1, (x, b) => b[x.m.sku]], ["Qty finale ✎", 92, 1, x => x.qty],
+  ["Couv. act.", 72, 1, x => x.m.cur], ["Proposée", 78, 1, (x, b) => b[x.m.sku]], ["Qty finale", 92, 1, x => x.qty],
   ["Couv. après", 80, 1, x => postCover(x.m, x.qty)], ["Multiple", 68, 1, x => x.multiple], ["Stock DC", 80, 1, x => x.m.dc],
   ["Source", 92, 0, x => SRC[x.source]], ["Raisons", 300, 0, x => x.reasons.join(" | ")]];
 function defaultCmp(baseQty) { return (a, b) => ((a.s === "O") - (b.s === "O")) || (baseQty[b.m.sku] - baseQty[a.m.sku]) || a.m.sku.localeCompare(b.m.sku); }
@@ -627,7 +671,7 @@ function renderOrder() {
     segmented("Statut", STATUS_FILTERS, st.f.status, bySt, c => { st.f.status = c; render(); }),
     el("label", "chk", el("input", { type: "checkbox", id: "f_qty", checked: st.f.qty, onchange: e => { st.f.qty = e.target.checked; render(); } }), "Qty > 0 seulement"),
     el("div", "grow", search),
-    el("button", { class: "btn", id: "accept_ok", onclick: () => { ls.forEach(x => { if (x.s === "O" && !x.ov) st.seen.add(x.m.sku); }); render(); } }, "✓ Accepter toutes les lignes OK")));
+    el("button", { class: "btn", id: "accept_ok", onclick: () => { ls.forEach(x => { if (x.s === "O" && !x.ov) st.seen.add(x.m.sku); }); render(); } }, ic("checks"), "Accepter toutes les lignes OK")));
   const shown = sortRows(ls.filter(matches), baseQty);
   out.push(shown.length ? orderTable(shown, baseQty) : el("div", "msg info", "Aucune ligne pour ces filtres."));
   out.push(el("div", "row", { style: "justify-content:space-between;margin-top:8px" },
@@ -716,7 +760,7 @@ function renderWhy() {
       x.qty > 0 && m.dc !== null && m.dc < x.qty ? el("span", "", " · ", el("span", "st R", "DC insuffisant")) : null),
     x.reasons.length ? el("div", "", el("h3", "", "Raisons et alertes"), el("ul", "list", x.reasons.map(r => el("li", "", r)))) : null,
     el("p", "small muted", "Excel (cover 9 j) : " + (m.xl === null || m.xl === undefined ? "SKU absent de la feuille" : fmt(m.xl) + (m.xlf ? " (formule)" : " (saisie manuelle dans Excel)"))),
-    el("button", { class: "btn", style: "width:100%;margin-top:6px", onclick: () => { st.seen.has(m.sku) ? st.seen.delete(m.sku) : st.seen.add(m.sku); render(); } }, st.seen.has(m.sku) ? "Retirer la validation" : "✓ Marquer comme vérifiée"),
+    el("button", { class: "btn", style: "width:100%;margin-top:6px", onclick: () => { st.seen.has(m.sku) ? st.seen.delete(m.sku) : st.seen.add(m.sku); render(); } }, st.seen.has(m.sku) ? ic("undo") : ic("check"), st.seen.has(m.sku) ? "Retirer la validation" : "Marquer comme vérifiée"),
     el("h3", "", "Modifier la quantité"),
     el("div", "form3", el("label", "f", "Qty finale", qty), el("label", "f", "Catégorie", cat), el("label", "f wide", "Raison", reason)),
     el("div", "row", { style: "margin-top:10px" }, el("button", { class: "btn primary", id: "dlg_save", onclick: () => {

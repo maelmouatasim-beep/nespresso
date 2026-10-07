@@ -6,9 +6,55 @@ gatherUsageStats = false
 address = "localhost"
 maxUploadSize = 200
 
-[theme]
-primaryColor = "#6f4524"
-
 [client]
 # Pas de bouton « Deploy » ni de menu développeur : outil de travail, pas de jargon.
 toolbarMode = "minimal"
+
+# Charte visuelle (thème CLAIR uniquement, inspiré de Nespresso). Voir docs/charte_visuelle.md.
+[theme]
+base = "light"
+primaryColor = "#B08D57"            # accent doré : boutons principaux, sélection
+backgroundColor = "#FAF7F2"         # fond crème très clair
+secondaryBackgroundColor = "#F3EDE4"
+textColor = "#2B1D14"               # brun foncé
+borderColor = "#E8E1D8"             # gris chaud
+showWidgetBorder = true
+baseRadius = "10px"
+buttonRadius = "10px"
+font = "Inter, Segoe UI, system-ui, sans-serif"
+headingFontWeights = 600
+metricValueFontWeight = 600
+baseFontSize = 15
+linkColor = "#8A6A3A"
+dataframeHeaderBackgroundColor = "#3D2B1F"
+dataframeHeaderTextColor = "#FAF7F2"
+dataframeBorderColor = "#E8E1D8"
+# Statuts (texte foncé lisible sur fond clair, contraste ≥ 4,5:1)
+greenColor = "#2E7D4F"
+greenTextColor = "#2A7449"
+greenBackgroundColor = "#E6F2EA"
+orangeColor = "#B7791F"
+orangeTextColor = "#94600F"
+orangeBackgroundColor = "#FFF4DF"
+yellowColor = "#B7791F"
+yellowTextColor = "#94600F"
+yellowBackgroundColor = "#FFF4DF"
+redColor = "#B23A3A"
+redTextColor = "#B23A3A"
+redBackgroundColor = "#FBE9E7"
+blueColor = "#2F5F9E"
+blueTextColor = "#2F5F9E"
+blueBackgroundColor = "#E8F0FA"
+grayTextColor = "#6B5B4E"
+
+[theme.sidebar]
+backgroundColor = "#3D2B1F"         # brun espresso
+secondaryBackgroundColor = "#4A3628"
+textColor = "#FAF7F2"
+borderColor = "#5A4434"
+primaryColor = "#B08D57"
+# Statuts dans la barre latérale (fond espresso) : teintes claires, contraste ≥ 4,5:1
+greenTextColor = "#A7D8B5"
+orangeTextColor = "#F2C47A"
+redTextColor = "#F0A3A3"
+grayTextColor = "#D8C9B4"

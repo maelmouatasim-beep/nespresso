@@ -31,8 +31,18 @@ DEPOT, ORDER, DAY, EXPORT, REFS, HISTORY = PAGES
 
 MODES = {"Standard": ForecastMode.STANDARD, "Parité Excel": ForecastMode.EXCEL_PARITY}
 MODE_LABEL = {v.value: k for k, v in MODES.items()} | {"safe": "Standard"}
-STATUS_ICON = {"OK": "🟢 OK", "REVIEW": "🟠 REVIEW", "BLOCKED": "🔴 BLOCKED"}
-MODIFIED = "🔵 Modifié"
+# Statuts : pastille + texte. Couleurs de la charte (docs/charte_visuelle.md), contraste ≥ 4,5:1.
+STATUS_ICON = {"OK": "● OK", "REVIEW": "● REVIEW", "BLOCKED": "● BLOCKED"}  # grille
+MODIFIED = "● Modifié"
+STATUS_MD = {"OK": ":green[● OK]", "REVIEW": ":orange[● REVIEW]", "BLOCKED": ":red[● BLOCKED]"}
+MODIFIED_MD = ":blue[● Modifié]"
+STATUS_COLORS = {  # texte, fond
+    "OK": ("#2A7449", "#E6F2EA"),
+    "REVIEW": ("#94600F", "#FFF4DF"),
+    "BLOCKED": ("#B23A3A", "#FBE9E7"),
+    "Modifié": ("#2F5F9E", "#E8F0FA"),
+}
+ZEBRA = "#FBF8F3"  # lignes alternées très légères
 SOURCE_LABEL = {
     "forecast": "Prévision",
     "allocation": "Allocation",
@@ -43,7 +53,12 @@ SOURCE_LABEL = {
     "override": "Modifié",
 }
 CATEGORY_BY_LABEL = {label: cat for cat, label in OVERRIDE_CATEGORY_LABELS.items()}
-FRESH_ICON = {"green": "🟢", "orange": "🟠", "red": "🔴", "unknown": "⚪"}
+FRESH_ICON = {
+    "green": ":green[:material/check_circle:]",
+    "orange": ":orange[:material/schedule:]",
+    "red": ":red[:material/error:]",
+    "unknown": ":gray[:material/help:]",
+}
 
 ss = st.session_state
 
@@ -200,7 +215,7 @@ def order_frame(
         after = (inp["expected_total"] + x.qty) / sales * days if sales else None
         rows.append(
             {
-                "🔍": x.sku == ss.get("why_sku"),
+                "Détail": x.sku == ss.get("why_sku"),
                 "Statut": status_cell(x),
                 "SKU": x.sku,
                 "Description": x.description or "",
@@ -221,17 +236,17 @@ def order_frame(
 
 
 ORDER_COLUMNS = [
-    "🔍", "Statut", "SKU", "Description", "Catégorie", "Expected", "Ventes", "Couv. actuelle",
+    "Détail", "Statut", "SKU", "Description", "Catégorie", "Expected", "Ventes", "Couv. actuelle",
     "Qty proposée", "Qty finale", "Couv. après", "Multiple", "Stock DC", "Source", "Raisons",
 ]  # fmt: skip
 
 _INT = {"format": "localized"}
 ORDER_COLUMN_CONFIG = {
-    "🔍": st.column_config.CheckboxColumn(
-        "🔍", width=40, help="Pourquoi cette quantité ?", pinned=True
+    "Détail": st.column_config.CheckboxColumn(
+        "Détail", width=72, help="Pourquoi cette quantité ?", pinned=True
     ),
-    "Statut": st.column_config.TextColumn(width=110, pinned=True),
-    "SKU": st.column_config.TextColumn(width=100, pinned=True),
+    "Statut": st.column_config.TextColumn(width=110),
+    "SKU": st.column_config.TextColumn(width=100),
     "Description": st.column_config.TextColumn(width=210),
     "Catégorie": st.column_config.TextColumn(width=120),
     "Expected": st.column_config.NumberColumn(width=80, **_INT),
@@ -239,7 +254,7 @@ ORDER_COLUMN_CONFIG = {
     "Couv. actuelle": st.column_config.NumberColumn("Couv. act.", width=75, format="%.1f"),
     "Qty proposée": st.column_config.NumberColumn("Proposée", width=80, **_INT),
     "Qty finale": st.column_config.NumberColumn(
-        "Qty finale ✎", width=90, min_value=0, step=1, **_INT
+        "Qty finale", width=90, min_value=0, step=1, help="Modifiable", **_INT
     ),
     "Couv. après": st.column_config.NumberColumn("Couv. après", width=80, format="%.1f"),
     "Multiple": st.column_config.NumberColumn(width=70, **_INT),
@@ -247,7 +262,22 @@ ORDER_COLUMN_CONFIG = {
     "Source": st.column_config.TextColumn(width=95),
     "Raisons": st.column_config.TextColumn(width=340),
 }
-EDITABLE_COLUMNS = ("🔍", "Qty finale")
+EDITABLE_COLUMNS = ("Détail", "Qty finale")
+
+
+def _status_style(value: str) -> str:
+    for key, (fg, bg) in STATUS_COLORS.items():
+        if key in value:
+            return f"color: {fg}; background-color: {bg}; font-weight: 600"
+    return ""
+
+
+def style_order_frame(df: pd.DataFrame):  # noqa: ANN201 - pandas Styler
+    """Lignes alternées très légères + pastilles de statut colorées."""
+    zebra = df.style.apply(
+        lambda row: [f"background-color: {ZEBRA}" if row.name % 2 else ""] * len(row), axis=1
+    )
+    return zebra.map(_status_style, subset=["Statut"])
 
 
 def default_order(

@@ -104,6 +104,10 @@ Décisions du planner (étape 2, 07-oct-2026) :
 - **Exports Power BI réels (vérifiés le 07-oct-2026)** : un seul onglet `Export`, toutes les boutiques et les DC, nom « data - AAAA-MM-JJT….xlsx ». Stock Movements : colonnes « Stock Movement Id, Stock, Product Nr, Product Type (Prod), Stock Mvt Date, Mvt Code, Quantity (Sum), Mvt Code Descr (Mvt Cd) », sorties **en négatif** → comptées en ventes positives. Les fichiers sont reconnus par leurs colonnes, pas par leur nom.
 - **Écran Commande = une seule grille, comme le calculateur Excel** : pas de blocs ni de sections repliées ; filtres Catégorie / Statut / Qty > 0 / recherche sans recalcul ; tri au clic sur chaque en-tête ; tri par défaut REVIEW et BLOCKED en haut puis Qty proposée décroissante ; panneau « Pourquoi » à droite, sans quitter la table.
 
+## Charte visuelle
+
+- Thème CLAIR uniquement (outil installé ET démo web), palette Nespresso : fond crème `#FAF7F2`, cartes blanches, texte `#2B1D14`, espresso `#3D2B1F` (barre latérale, en-têtes), accent doré `#B08D57` (boutons, survol), bordures `#E8E1D8`. Statuts pastille + texte : OK vert sauge, REVIEW ambre, BLOCKED rouge brique, Modifié bleu. Détails et contrastes vérifiés : `docs/charte_visuelle.md`.
+
 ## Périmètre des sources
 
 - Le calculateur `B80 105.xlsm` et le brief sont les deux sources de vérité.

@@ -158,8 +158,8 @@ def render() -> None:
         cols[2].write(fmt_int(r.summary.lines_ordered))
         cols[3].write(fmt_int(r.summary.units_total))
         cols[4].write(fmt_1(r.pallets.total_pallets))
-        cols[5].write(f"🟠 {r.summary.by_status['REVIEW']}")
-        cols[6].write(f"🔴 {r.summary.by_status['BLOCKED']}")
+        cols[5].markdown(f":orange[● {r.summary.by_status['REVIEW']}]")
+        cols[6].markdown(f":red[● {r.summary.by_status['BLOCKED']}]")
         cols[7].write(" | ".join(r.rule_warnings) or "—")
         cols[8].button("Ouvrir", key=f"open_{i}_{o.boutique}", on_click=open_result, args=(r,))
     ok = [o for o in outcomes if o.result is not None]

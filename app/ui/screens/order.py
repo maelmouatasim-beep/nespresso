@@ -22,9 +22,10 @@ from app.ui.common import (
     EXPORT,
     MODE_LABEL,
     MODES,
+    MODIFIED_MD,
     ORDER_COLUMN_CONFIG,
     SOURCE_LABEL,
-    STATUS_ICON,
+    STATUS_MD,
     author,
     boutique_label,
     category_of_line,
@@ -42,6 +43,7 @@ from app.ui.common import (
     reset_order,
     run_date,
     ss,
+    style_order_frame,
 )
 
 CATEGORY_FILTERS = ("Tous", *CATEGORIES)
@@ -92,7 +94,7 @@ def _params_row(data) -> None:  # noqa: ANN001
     history = cols[4].number_input("Historique (j)", min_value=1, max_value=56, value=7, step=1,
                                    key="p_hist")  # fmt: skip
     mode = cols[5].selectbox("Mode", list(MODES), key="p_mode")
-    with cols[6].popover("⚙️", help="Options avancées", width="stretch"):
+    with cols[6].popover(":material/tune:", help="Options avancées", width="stretch"):
         weeks = st.number_input("Semaines de secours (SKU dormants)", min_value=1, max_value=12,
                                 value=FALLBACK_WEEKS_DEFAULT, step=1, key="p_fallback")  # fmt: skip
         all_codes = sorted({m.movement_code for m in data.movements if m.location == boutique})
@@ -134,9 +136,9 @@ def _tiles(res) -> None:  # noqa: ANN001
     cols[1].metric("Palettes estimées", fmt_1(p.total_pallets))
     cols[1].caption(f"VL {fmt_1(p.pallets[VL])} · OL {fmt_1(p.pallets[OL])} · "
                     f"Mach. {fmt_1(p.pallets[MACHINES])} · Autres {fmt_1(p.pallets[OTHERS])}")  # fmt: skip
-    cols[2].metric("🟢 OK", fmt_int(s.by_status["OK"]))
-    cols[3].metric("🟠 REVIEW", fmt_int(s.by_status["REVIEW"]))
-    cols[4].metric("🔴 BLOCKED", fmt_int(s.by_status["BLOCKED"]))
+    cols[2].metric(STATUS_MD["OK"], fmt_int(s.by_status["OK"]))
+    cols[3].metric(STATUS_MD["REVIEW"], fmt_int(s.by_status["REVIEW"]))
+    cols[4].metric(STATUS_MD["BLOCKED"], fmt_int(s.by_status["BLOCKED"]))
 
 
 def _matches(x: RecommendationLine, cat: str, status: str, qty_only: bool, search: str,
@@ -164,16 +166,17 @@ def _filters(
         by_cat[category_of_line(x, mapping)] += 1
         by_status["Tous"] += 1
         by_status["Modifié" if x.sku in ss.overrides else x.status.value] += 1
-    c1, c2 = st.columns([4.2, 1], vertical_alignment="bottom")
+    c1, c2 = st.columns([5.2, 1], vertical_alignment="bottom")
     cat = c1.segmented_control("Catégorie", CATEGORY_FILTERS, default="Tous", key="f_cat",
                                format_func=lambda c: f"{c} ({by_cat[c]})") or "Tous"  # fmt: skip
     qty_only = c2.checkbox("Qty > 0 seulement", key="f_qty")
-    c3, c4, c5 = st.columns([3.3, 1.5, 1.2], vertical_alignment="bottom")
+    c3, c4, c5 = st.columns([4.4, 1.5, 1.9], vertical_alignment="bottom")
     status = c3.segmented_control("Statut", STATUS_FILTERS, default="Tous", key="f_status",
                                   format_func=lambda c: f"{c} ({by_status[c]})") or "Tous"  # fmt: skip
     search = c4.text_input("Recherche", placeholder="Rechercher un SKU ou une description",
                            key="f_search", label_visibility="collapsed").strip().lower()  # fmt: skip
-    if c5.button("✓ Accepter toutes les lignes OK", key="accept_ok", width="stretch"):
+    if c5.button("Accepter toutes les lignes OK", icon=":material/done_all:", key="accept_ok",
+                 width="stretch"):  # fmt: skip
         ss.seen |= {x.sku for x in lines if x.status is Status.OK and x.sku not in ss.overrides}
         ss.nonce += 1
         st.rerun()
@@ -181,8 +184,8 @@ def _filters(
 
 
 def _process_edits(edited: pd.DataFrame, lines: dict[str, RecommendationLine]) -> bool:
-    """Qty finale saisie → en attente de justification ; 🔍 → panneau. True = rerun."""
-    checked = [r["SKU"] for r in edited.to_dict("records") if r["🔍"]]
+    """Qty finale saisie → en attente de justification ; Détail → panneau. True = rerun."""
+    checked = [r["SKU"] for r in edited.to_dict("records") if r["Détail"]]
     new_why = next((s for s in checked if s != ss.why_sku), None)
     rerun = False
     if new_why:
@@ -274,8 +277,8 @@ def _why_panel(res, sku: str, mapping: dict[str, str]) -> None:  # noqa: ANN001
     t1.markdown(
         f"**Pourquoi cette quantité ?**  \n`{sku}` {line.description or 'sans description'}"
     )
-    t2.button("✕", key="why_close", on_click=_close_why, help="Fermer")
-    status = "🔵 Modifié" if sku in ss.overrides else STATUS_ICON[line.status.value]
+    t2.button("", icon=":material/close:", key="why_close", on_click=_close_why, help="Fermer")
+    status = MODIFIED_MD if sku in ss.overrides else STATUS_MD[line.status.value]
     st.caption(f"{status} · {category_of_line(line, mapping)} · source : "
                f"{SOURCE_LABEL[line.source.value]} · multiple {fmt_int(e['multiple'])}")  # fmt: skip
     st.markdown("\n".join(f"{i}. {step}" for i, step in enumerate(explain_steps(line), start=1)))
@@ -284,7 +287,8 @@ def _why_panel(res, sku: str, mapping: dict[str, str]) -> None:  # noqa: ANN001
                 f"stock projeté à la livraison : **{fmt_int(e['projected_stock_at_delivery'])}**")  # fmt: skip
     if line.reasons:
         st.markdown("\n".join(f"- {r}" for r in line.reasons))
-    st.button("Retirer la validation" if sku in ss.seen else "✓ Marquer comme vérifiée",
+    st.button("Retirer la validation" if sku in ss.seen else "Marquer comme vérifiée",
+              icon=":material/undo:" if sku in ss.seen else ":material/check:",
               key="why_seen", on_click=_toggle_seen, args=(sku,), width="stretch")  # fmt: skip
     st.markdown("**Modifier la quantité**")
     qty = st.number_input("Qty finale", min_value=0, step=int(e["multiple"] or 1),
@@ -342,17 +346,17 @@ def render() -> None:
     with table:
         df = order_frame(shown, base_qty, mapping)
         key = f"grid_{cat}_{status}_{qty_only}_{search}_{ss.nonce}"
-        edited = st.data_editor(df, key=key, hide_index=True, width="stretch", height=TABLE_HEIGHT, placeholder="—",
+        edited = st.data_editor(style_order_frame(df), key=key, hide_index=True, width="stretch", height=TABLE_HEIGHT, placeholder="—",
                                 column_config=ORDER_COLUMN_CONFIG,
                                 disabled=[c for c in df.columns if c not in EDITABLE_COLUMNS])  # fmt: skip
         seen = len([x for x in res.lines if x.sku in ss.seen])
         st.caption(f"{len(shown)} ligne(s) affichée(s) sur {len(res.lines)} · lignes validées : "
-                   f"{seen} / {len(res.lines)} · clic sur un en-tête pour trier · 🔍 pour le détail")  # fmt: skip
+                   f"{seen} / {len(res.lines)} · clic sur un en-tête pour trier · case Détail pour le « Pourquoi »")  # fmt: skip
     if _process_edits(edited, {x.sku: x for x in shown}):
         ss.nonce += 1
         st.rerun()
     if panel is not None:
-        with panel, st.container(border=True, height=TABLE_HEIGHT + 38):
+        with panel, st.container(border=True, height=TABLE_HEIGHT + 38, key="why_panel"):
             if ss.pending:
                 _justify_block(res)
             if ss.why_sku:

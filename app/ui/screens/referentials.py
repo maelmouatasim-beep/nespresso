@@ -170,7 +170,7 @@ def _referential_tab(ref: Referential) -> None:
     )
     issues = _anomalies(ref)
     if issues:
-        with st.expander(f"⚠️ {len(issues)} anomalie(s)", expanded=True):
+        with st.expander(f":orange[:material/warning:] {len(issues)} anomalie(s)", expanded=True):
             for i in issues:
                 st.markdown(f"- {i}")
     else:
