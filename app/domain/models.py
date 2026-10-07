@@ -31,7 +31,7 @@ class Status(StrEnum):
 
 class ForecastMode(StrEnum):
     EXCEL_PARITY = "excel_parity"
-    SAFE = "safe"
+    STANDARD = "standard"
 
 
 class Product(_Frozen):
@@ -42,6 +42,8 @@ class Product(_Frozen):
     product_type: str | None = None
     order_multiple: int | None = Field(default=None, ge=0)  # 0 existe dans la liste réelle
     units_per_pallet: float | None = None
+    # Autres multiples trouvés pour ce SKU (doublons de la Multiple list) : signalés.
+    alt_multiples: tuple[int, ...] = ()
 
 
 class StockSnapshotLine(_Frozen):
@@ -112,6 +114,8 @@ class QtySource(StrEnum):
     ALLOCATION = "allocation"
     LAUNCH = "launch"
     TARGET_STOCK = "target_stock"
+    DC_RETURN = "dc_return"  # SKU dormant revenu en stock au DC (historique de secours)
+    EXCLUSION = "exclusion"  # référentiel des exclusions
     OVERRIDE = "override"
 
 
@@ -280,3 +284,19 @@ class BoutiqueRule(_Frozen):
         if self.rule not in SKU_RULES and self.sku is not None:
             raise ValueError(f"La règle {self.rule.value} s'applique à toute la commande, sans SKU")
         return self
+
+
+class Exclusion(_Frozen):
+    """SKU à ne jamais envoyer (référentiel éditable, ex. SKU e-commerce).
+
+    `boutiques` vide = toutes les boutiques. Visible dans le « Pourquoi ».
+    """
+
+    sku: Sku
+    boutiques: tuple[str, ...] = ()
+    reason: str = Field(min_length=3)
+    author: str = Field(min_length=1)
+    updated_on: date
+
+    def applies_to(self, boutique: str) -> bool:
+        return not self.boutiques or boutique in self.boutiques

@@ -26,6 +26,7 @@ from app.engines.conversion import build_conversion_index
 from app.engines.export import lt_content, lt_filename, lt_lines, recap_csv
 from app.engines.overrides import OverrideError, apply_overrides
 from app.engines.pallets import MACHINES, OL, OTHERS, VL, estimate_pallets
+from app.engines.portfolio import PortfolioIndex
 from app.engines.sales import SalesSummary
 from app.engines.selection import select_order_skus
 from tests.unit.test_forecast import make_inputs, snap
@@ -80,13 +81,14 @@ def test_allocation_replaces_forecast_never_added() -> None:
     assert out[0].source is QtySource.ALLOCATION
 
 
-def test_allocation_wins_over_launch_and_flags_non_multiple() -> None:
+def test_allocation_wins_over_launch_and_is_rounded_to_multiple() -> None:
     launch = Launch(boutique="B80", sku="7005.70", launch_date=date(2026, 10, 20), qty=5000)
     out = apply_business_rules([line("7005.70", 0)], boutique="B80", run_date=RUN,
                                allocations=[alloc(total_qty=1000, wave_plan=(100,))],
                                launches=[launch])  # fmt: skip
-    assert out[0].qty == 1000
-    assert out[0].status is Status.REVIEW  # 1000 n'est pas multiple de 240
+    assert out[0].qty == 1200  # 1000 arrondi au multiple de 240 supérieur (décision A3)
+    assert out[0].explanation["business"]["allocation_due"] == 1000
+    assert any("Arrondi au multiple de 240 : 1000 → 1200" in r for r in out[0].reasons)
     assert any("Lancement ignoré" in r for r in out[0].reasons)
 
 
@@ -189,7 +191,7 @@ def test_selection_filter_out_rule() -> None:
     stock = {s.sku: s for s in [snap("A", 0), snap("B", 0), snap("C", 5), snap("D", 0)]}
     sales = SalesSummary(by_sku={"E": 3}, history_days=7, movement_codes=None)
     res = select_order_skus(
-        stock, sales, portfolio={"A": "Yes", "B": "No"},
+        stock, sales, portfolio=PortfolioIndex.build({"A": "Yes", "B": "No"}),
         conversions=build_conversion_index([]), forced_skus=["D"],
     )  # fmt: skip
     assert res.skus == ["B", "C", "D", "E"]
@@ -199,7 +201,7 @@ def test_selection_filter_out_rule() -> None:
 def test_selection_excludes_inactive_out_of_portfolio() -> None:
     stock = {"Z": snap("Z", 0)}
     sales = SalesSummary(by_sku={}, history_days=7, movement_codes=None)
-    res = select_order_skus(stock, sales, {}, build_conversion_index([]))
+    res = select_order_skus(stock, sales, PortfolioIndex.build({}), build_conversion_index([]))
     assert res.skus == [] and "Z" in res.excluded
 
 

@@ -121,7 +121,7 @@ def b80():
 def test_rules_reapplied_once_after_overrides(b80) -> None:
     data, inputs, dc, params = b80
     rule = BoutiqueRule(boutique="B80", rule="max_qty_sku", sku="7005.70", value=3000)
-    res = run_planning(inputs, params, ForecastMode.SAFE, dc=dc, portfolio=data.portfolio,
+    res = run_planning(inputs, params, ForecastMode.STANDARD, dc=dc, portfolio=data.portfolio,
                        business_inputs=BusinessInputs(rules=(rule,)))  # fmt: skip
     melo = next(x for x in res.lines if x.sku == "7005.70")
     assert melo.status is Status.REVIEW
@@ -146,7 +146,7 @@ def test_run_day_isolates_errors(b80) -> None:
         )  # fmt: skip
 
     other = params.model_copy(update={"boutique": "B1"})
-    out = run_day([params, other], ForecastMode.SAFE, build_inputs=build,
+    out = run_day([params, other], ForecastMode.STANDARD, build_inputs=build,
                   portfolio_by_boutique={"B80": data.portfolio})  # fmt: skip
     assert out[0].result is not None and out[0].error is None
     assert out[1].result is None and "B1" in (out[1].error or "")
@@ -160,7 +160,7 @@ def test_order_workbook_and_zip(b80) -> None:
     when = datetime(2026, 10, 5, 11, 51)
     ov = Override(sku="7005.70", qty_before=3120, qty_after=3600, category="promo",
                   reason="Promo AOS", author="A", timestamp=when)  # fmt: skip
-    res = run_planning(inputs, params, ForecastMode.SAFE, dc=dc, portfolio=data.portfolio,
+    res = run_planning(inputs, params, ForecastMode.STANDARD, dc=dc, portfolio=data.portfolio,
                        overrides=[ov])  # fmt: skip
     wb = load_workbook(io.BytesIO(order_workbook(res, author="A", overrides=[ov])))
     assert wb.sheetnames == ["Commande", "Paramètres", "Overrides", "Palettes", "Lignes exclues"]
@@ -197,7 +197,7 @@ def test_storage_migrates_old_overrides_table(tmp_path: Path, b80) -> None:
     data, inputs, dc, params = b80
     ov = Override(sku="7005.70", qty_before=3120, qty_after=3600, category="launch",
                   reason="Lancement", author="A", timestamp=datetime(2026, 10, 5))  # fmt: skip
-    res = run_planning(inputs, params, ForecastMode.SAFE, dc=dc, portfolio=data.portfolio,
+    res = run_planning(inputs, params, ForecastMode.STANDARD, dc=dc, portfolio=data.portfolio,
                        overrides=[ov])  # fmt: skip
     conn = db.connect(path)
     run_id = db.save_run(conn, res, author="A", sources={}, overrides=[ov])

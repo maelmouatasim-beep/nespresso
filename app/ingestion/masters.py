@@ -3,13 +3,14 @@ construction des entrées du moteur pour une boutique."""
 
 from __future__ import annotations
 
-from collections.abc import Collection, Iterable
+from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import pandas as pd
 
 from app.domain.models import (
+    Exclusion,
     Product,
     ScheduleSlot,
     SkuConversion,
@@ -18,7 +19,8 @@ from app.domain.models import (
 )
 from app.engines.conversion import build_conversion_index
 from app.engines.forecast import ForecastInputs
-from app.engines.sales import aggregate_sales
+from app.engines.portfolio import PortfolioIndex
+from app.engines.sales import aggregate_sales, fallback_history
 from app.engines.schedule import parse_weekday
 from app.ingestion.fixtures_loader import (
     DC_MAPPING_COLUMNS,
@@ -121,8 +123,16 @@ def build_inputs_for_boutique(
     *,
     included_movement_codes: Collection[str] | None = None,
     sources: dict[str, str] | None = None,
+    history_days: int = 7,
+    fallback_weeks: int = 4,
+    portfolio: Mapping[str, str] | None = None,
+    exclusions: Sequence[Exclusion] = (),
 ) -> tuple[ForecastInputs, str]:
-    """Assemble les entrées du moteur pour une boutique. Retourne (entrées, DC)."""
+    """Assemble les entrées du moteur pour une boutique. Retourne (entrées, DC).
+
+    `history_days` : fenêtre de ventes de la formule (les N derniers jours de l'export).
+    `fallback_weeks` : semaines de l'historique de secours (SKU dormants seulement).
+    """
     dc = dc_mapping.get(boutique)
     if dc is None:
         raise SchemaError(f"Boutique {boutique} absente de DC Mapping")
@@ -140,10 +150,13 @@ def build_inputs_for_boutique(
         ForecastInputs(
             boutique_stock=boutique_stock,
             dc_stock=dc_stock,
-            sales=aggregate_sales(btq_moves, included_movement_codes),
+            sales=aggregate_sales(btq_moves, included_movement_codes, history_days),
             products=products,
             conversions=build_conversion_index(conversions),
             sources=sources or {},
+            portfolio=PortfolioIndex.build(portfolio or {}),
+            exclusions=tuple(exclusions),
+            fallback=fallback_history(btq_moves, fallback_weeks, included_movement_codes),
         ),
         dc,
     )

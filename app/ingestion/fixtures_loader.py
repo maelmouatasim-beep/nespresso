@@ -18,7 +18,8 @@ import pandas as pd
 from app.domain.models import Product, SkuConversion, StockMovement, StockSnapshotLine
 from app.engines.conversion import build_conversion_index
 from app.engines.forecast import ForecastInputs
-from app.engines.sales import aggregate_sales
+from app.engines.portfolio import PortfolioIndex
+from app.engines.sales import aggregate_sales, fallback_history
 
 
 class SchemaError(ValueError):
@@ -140,6 +141,11 @@ def load_multiples(path: Path) -> tuple[dict[str, Product], list[str]]:
         sku = r["sku"].strip()
         if sku in products:
             anomalies.append(sku)
+            other = _int_multiple(r["order_multiple"].strip(), path)
+            first = products[sku]
+            if other is not None and other != first.order_multiple and r in clean:
+                alts = tuple(sorted({*first.alt_multiples, other}))
+                products[sku] = first.model_copy(update={"alt_multiples": alts})
             continue
         pallet = r["units_per_pallet"].strip()
         products[sku] = Product(
@@ -206,13 +212,14 @@ def build_forecast_inputs(
     dc_stock = {line.sku: line for line in data.stock_situation if line.location == dc}
     if not dc_stock:
         raise SchemaError(f"Aucune ligne de stock pour le DC {dc} de la boutique {boutique}")
+    moves = [mv for mv in data.movements if mv.location == boutique]
     return ForecastInputs(
         boutique_stock=boutique_stock,
         dc_stock=dc_stock,
-        sales=aggregate_sales(
-            (mv for mv in data.movements if mv.location == boutique), included_movement_codes
-        ),
+        sales=aggregate_sales(moves, included_movement_codes),
         products=data.products,
         conversions=build_conversion_index(data.conversions),
         sources=data.sources,
+        portfolio=PortfolioIndex.build(data.portfolio),
+        fallback=fallback_history(moves, 4, included_movement_codes),
     )

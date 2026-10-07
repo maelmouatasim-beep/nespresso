@@ -213,7 +213,7 @@ def b80_run():
 
 def test_run_planning_end_to_end(b80_run) -> None:
     inputs, dc, params, portfolio = b80_run
-    res = run_planning(inputs, params, ForecastMode.SAFE, dc=dc, portfolio=portfolio)
+    res = run_planning(inputs, params, ForecastMode.STANDARD, dc=dc, portfolio=portfolio)
     by_sku = {x.sku: x for x in res.lines}
     assert by_sku["7005.70"].qty == 3120
     assert "2007.70" in by_sku  # Q-002 : retenu par la règle (40 ventes)
