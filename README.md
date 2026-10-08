@@ -39,8 +39,8 @@ Le navigateur s'ouvre sur l'outil. Dans la barre de gauche : tape ton nom, chois
    (facultatif), jours d'historique, mode, puis « Calculer ». Toutes les lignes sont dans une seule
    grille, comme dans le calculateur Excel : filtres Catégorie et Statut, « Qty > 0 seulement »,
    recherche, tri au clic sur un en-tête. Coche 🔍 sur une ligne pour voir « Pourquoi cette quantité ? »
-   à droite. Tape la « Qty finale » directement dans la cellule : une catégorie et une raison sont
-   demandées.
+   à droite. Tape la « Qty finale » directement dans la cellule : la modification compte tout de suite
+   (catégorie et raison facultatives, à ajouter dans le panneau « Pourquoi »).
 3. **Journée** : plusieurs boutiques d'un coup (présélection du Schedule, modifiable), un cover par
    boutique, puis le zip des fichiers LT.
 4. **Export** : fichier LT pour Nessoft, récapitulatif boutique, export Excel détaillé.

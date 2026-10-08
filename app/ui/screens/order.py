@@ -26,7 +26,6 @@ from app.ui.common import (
     ORDER_COLUMN_CONFIG,
     SOURCE_LABEL,
     STATUS_MD,
-    author,
     boutique_label,
     category_of_line,
     current,
@@ -183,8 +182,14 @@ def _filters(
     return cat, status, qty_only, search
 
 
-def _process_edits(edited: pd.DataFrame, lines: dict[str, RecommendationLine]) -> bool:
-    """Qty finale saisie → en attente de justification ; Détail → panneau. True = rerun."""
+def _process_edits(
+    edited: pd.DataFrame, lines: dict[str, RecommendationLine], base_qty: dict[str, int]
+) -> bool:
+    """Qty finale saisie → modification appliquée tout de suite ; Détail → panneau.
+
+    Catégorie et raison sont facultatives (D-028) : elles se complètent dans le panneau
+    « Pourquoi ». Auteur et heure sont toujours enregistrés. True = rerun.
+    """
     checked = [r["SKU"] for r in edited.to_dict("records") if r["Détail"]]
     new_why = next((s for s in checked if s != ss.why_sku), None)
     rerun = False
@@ -192,16 +197,21 @@ def _process_edits(edited: pd.DataFrame, lines: dict[str, RecommendationLine]) -
         ss.why_sku, rerun = new_why, True
     elif ss.why_sku in lines and ss.why_sku not in checked:
         ss.why_sku, rerun = None, True
+    new, changed = dict(ss.overrides), False
     for row in edited.to_dict("records"):
         sku, qty = row["SKU"], row["Qty finale"]
-        if pd.isna(qty):
+        if pd.isna(qty) or int(qty) == lines[sku].qty:
             continue
-        if int(qty) != lines[sku].qty:
-            rerun |= ss.pending.get(sku) != int(qty)
-            ss.pending[sku] = int(qty)
-        elif sku in ss.pending:
-            ss.pending.pop(sku)
-            rerun = True
+        changed = True
+        if int(qty) == base_qty[sku]:
+            new.pop(sku, None)
+        else:
+            old = ss.overrides.get(sku)
+            new[sku] = make_override(sku, base_qty[sku], int(qty)).model_copy(
+                update={"category": old.category, "reason": old.reason} if old else {}
+            )
+    if changed:
+        _apply_overrides(new)
     return rerun
 
 
@@ -215,46 +225,6 @@ def _apply_overrides(new: dict) -> None:
     ss.overrides, ss.saved_run_id = new, None
     ss.nonce += 1
     st.rerun()
-
-
-def _justify_block(res) -> None:  # noqa: ANN001
-    base_qty = {x.sku: x.qty for x in res.base_lines}
-    lines = {x.sku: x for x in res.lines}
-    st.markdown(f"**Modifications à justifier ({len(ss.pending)})**")
-    cats = list(CATEGORY_BY_LABEL)
-    for sku, qty in ss.pending.items():
-        st.markdown(f"`{sku}` {lines[sku].description or ''} · "
-                    f"{fmt_int(lines[sku].qty)} → **{fmt_int(qty)}**")  # fmt: skip
-        c = st.columns([1, 1.4])
-        c[0].selectbox("Catégorie", cats, index=None, key=f"cat_{sku}", placeholder="Catégorie",
-                       label_visibility="collapsed")  # fmt: skip
-        c[1].text_input(
-            "Raison", key=f"reason_{sku}", placeholder="Raison", label_visibility="collapsed"
-        )
-    b1, b2 = st.columns(2)
-    if b1.button("Valider", type="primary", key="validate_pending", width="stretch"):
-        if not author():
-            st.error("Indique ton nom dans la barre de gauche.")
-            return
-        errors, new = [], dict(ss.overrides)
-        for sku, qty in ss.pending.items():
-            cat, reason = ss.get(f"cat_{sku}"), (ss.get(f"reason_{sku}") or "").strip()
-            if qty == base_qty[sku]:
-                new.pop(sku, None)
-                continue
-            if not cat or len(reason) < 3:
-                errors.append(sku)
-                continue
-            new[sku] = make_override(sku, base_qty[sku], qty, cat, reason)
-        if errors:
-            st.error("Catégorie et raison obligatoires pour : " + ", ".join(errors))
-            return
-        ss.pending = {}
-        _apply_overrides(new)
-    if b2.button("Annuler", key="cancel_pending", width="stretch"):
-        ss.pending = {}
-        ss.nonce += 1
-        st.rerun()
 
 
 def _close_why() -> None:
@@ -293,24 +263,22 @@ def _why_panel(res, sku: str, mapping: dict[str, str]) -> None:  # noqa: ANN001
     st.markdown("**Modifier la quantité**")
     qty = st.number_input("Qty finale", min_value=0, step=int(e["multiple"] or 1),
                           value=int(line.qty), key=f"dlg_qty_{sku}")  # fmt: skip
-    cat = st.selectbox("Catégorie", list(CATEGORY_BY_LABEL), index=None, key=f"dlg_cat_{sku}",
-                       placeholder="Choisir")  # fmt: skip
-    reason = st.text_input("Raison", key=f"dlg_reason_{sku}")
+    old = ss.overrides.get(sku)
+    labels = list(CATEGORY_BY_LABEL)
+    current_label = next(
+        (lab for lab, c in CATEGORY_BY_LABEL.items() if old and c == old.category), None
+    )
+    cat = st.selectbox("Catégorie (facultatif)", labels, key=f"dlg_cat_{sku}", placeholder="—",
+                       index=labels.index(current_label) if current_label else None)  # fmt: skip
+    reason = st.text_input("Raison (facultatif)", value=old.reason if old else "",
+                           key=f"dlg_reason_{sku}")  # fmt: skip
     if st.button("Enregistrer", type="primary", key="dlg_save", width="stretch"):
-        if not author():
-            st.error("Indique ton nom dans la barre de gauche.")
-        elif qty == base_qty[sku]:
-            new = dict(ss.overrides)
+        new = dict(ss.overrides)
+        if qty == base_qty[sku]:
             new.pop(sku, None)
-            ss.pending.pop(sku, None)
-            _apply_overrides(new)
-        elif not cat or len(reason.strip()) < 3:
-            st.error("Catégorie et raison obligatoires.")
         else:
-            new = dict(ss.overrides)
-            new[sku] = make_override(sku, base_qty[sku], int(qty), cat, reason.strip())
-            ss.pending.pop(sku, None)
-            _apply_overrides(new)
+            new[sku] = make_override(sku, base_qty[sku], int(qty), cat, reason)
+        _apply_overrides(new)
 
 
 def render() -> None:
@@ -341,7 +309,7 @@ def render() -> None:
     shown = default_order(
         [x for x in res.lines if _matches(x, cat, status, qty_only, search, mapping)], base_qty
     )
-    side = bool(ss.why_sku or ss.pending)
+    side = bool(ss.why_sku)
     table, panel = st.columns([2.8, 1.2]) if side else (st.container(), None)
     with table:
         df = order_frame(shown, base_qty, mapping)
@@ -352,16 +320,10 @@ def render() -> None:
         seen = len([x for x in res.lines if x.sku in ss.seen])
         st.caption(f"{len(shown)} ligne(s) affichée(s) sur {len(res.lines)} · lignes validées : "
                    f"{seen} / {len(res.lines)} · clic sur un en-tête pour trier · case Détail pour le « Pourquoi »")  # fmt: skip
-    if _process_edits(edited, {x.sku: x for x in shown}):
+    if _process_edits(edited, {x.sku: x for x in shown}, base_qty):
         ss.nonce += 1
         st.rerun()
     if panel is not None:
         with panel, st.container(border=True, height=TABLE_HEIGHT + 38, key="why_panel"):
-            if ss.pending:
-                _justify_block(res)
-            if ss.why_sku:
-                if ss.pending:
-                    st.divider()
-                _why_panel(res, ss.why_sku, mapping)
-    if not ss.pending:
-        st.button("Continuer vers l'export", on_click=go, args=(EXPORT,), key="to_export")
+            _why_panel(res, ss.why_sku, mapping)
+    st.button("Continuer vers l'export", on_click=go, args=(EXPORT,), key="to_export")

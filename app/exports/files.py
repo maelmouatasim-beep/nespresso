@@ -138,7 +138,7 @@ def order_workbook(
                 o.sku,
                 o.qty_before,
                 o.qty_after,
-                OVERRIDE_CATEGORY_LABELS[OverrideCategory(o.category)],
+                OVERRIDE_CATEGORY_LABELS[OverrideCategory(o.category)] if o.category else "",
                 o.reason,
                 o.author,
                 o.timestamp.isoformat(timespec="minutes"),

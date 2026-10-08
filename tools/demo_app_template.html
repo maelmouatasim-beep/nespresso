@@ -143,20 +143,16 @@ ol.steps li { font-variant-numeric: tabular-nums; }
 ol.steps li.tot { font-weight: 700; }
 .form3 { display: grid; grid-template-columns: 100px 1fr; gap: 8px; }
 .form3 .wide { grid-column: 1 / -1; }
-#dock { position: fixed; left: 228px; right: 0; bottom: 0; background: var(--surface); border-top: 2px solid var(--mod); padding: 10px 24px calc(10px + env(safe-area-inset-bottom, 0px)); box-shadow: 0 -10px 30px rgba(0,0,0,.12); z-index: 15; max-height: 45vh; overflow-y: auto; }
-#dock .pl { display: grid; grid-template-columns: minmax(180px, 2.2fr) minmax(150px, 1.2fr) minmax(200px, 3fr); gap: 8px; align-items: center; padding: 4px 0; border-bottom: 1px solid var(--border); }
 footer { color: var(--muted); font-size: 12.5px; margin-top: 28px; }
 @media (max-width: 1100px) {  .tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 @media (max-width: 860px) {
   .app { grid-template-columns: minmax(0, 1fr); }
   aside.side { position: static; height: auto; }
   .side nav { flex-direction: row; flex-wrap: wrap; }
-  #dock { left: 0; padding-inline: 16px; }
   main { padding-inline: 16px; }
   .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .params > .bt { flex: 1 1 100%; }
   .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  #dock .pl { grid-template-columns: minmax(0, 1fr); }
 }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 
@@ -202,7 +198,6 @@ table.order tr.sel td { box-shadow: inset 0 2px 0 var(--gold), inset 0 -2px 0 va
 .tabs button.on { border-bottom-color: var(--gold); }
 .drop.live { border-color: var(--gold); background: var(--gold-soft); }
 #why { box-shadow: -8px 0 30px rgba(43, 29, 20, .12); }
-#dock { border-top-color: var(--mod); }
 select, input[type=text], input[type=search], input[type=date], input[type=number] { border-radius: 8px; }
 input:focus, select:focus { outline: none; border-color: var(--gold); box-shadow: 0 0 0 3px var(--gold-soft); }
 </style>
@@ -219,7 +214,6 @@ input:focus, select:focus { outline: none; border-color: var(--gold); box-shadow
   <main id="main"></main>
 </div>
 <aside id="why" hidden aria-live="polite"></aside>
-<div id="dock" hidden></div>
 
 <script>
 const DATA = /*__DATA__*/null;
@@ -281,7 +275,7 @@ const store = { get(k, d) { try { const v = localStorage.getItem(k); return v ? 
 const st = {
   page: store.get("spc2_page", PAGES[0]), author: store.get("spc_author", ""), examples: store.get("spc2_examples", true),
   form: { boutique: "", delivery: "", cover: "", coffee: "", mode: "standard" }, order: null, err: "",
-  overrides: {}, pending: {}, seen: new Set(), f: { cat: "Tous", status: "Tous", qty: false }, sort: null, q: "", why: null, gear: false, savedId: null, xmsg: null,
+  overrides: {}, seen: new Set(), f: { cat: "Tous", status: "Tous", qty: false }, sort: null, q: "", why: null, gear: false, savedId: null, xmsg: null,
   day: null, refTab: 0, source: "demo", busy: "", depotErr: [],
 };
 
@@ -308,7 +302,8 @@ function baseLine(j) {
 function finalLine(j) {
   const b = baseLine(j), ov = st.overrides[b.m.sku];
   if (!ov) return b;
-  const reasons = [...b.reasons, "Modifié par " + ov.author + " : " + ov.before + " → " + ov.final + " (" + CAT[ov.cat] + " : " + ov.reason + ")"];
+  const why = [ov.cat ? CAT[ov.cat] : "", ov.reason].filter(Boolean).join(" : ");
+  const reasons = [...b.reasons, "Modifié par " + ov.author + " : " + ov.before + " → " + ov.final + (why ? " (" + why + ")" : "")];
   if (ov.final !== ov.after) reasons.push("Saisie " + ov.after + " arrondie au multiple de " + (b.multiple || 1) + " : " + ov.final);
   let s = b.s;
   if (b.s === "B" && ov.after > 0) { s = "R"; reasons.push("Override sur une ligne bloquée : à vérifier"); }
@@ -349,7 +344,7 @@ function renderNav() {
 }
 function setSource(v) {
   if (st.source === v) return;
-  st.source = v; st.order = null; st.form.boutique = ""; st.form.delivery = ""; st.err = ""; st.overrides = {}; st.pending = {}; st.seen = new Set(); st.why = null; st.day = null;
+  st.source = v; st.order = null; st.form.boutique = ""; st.form.delivery = ""; st.err = ""; st.overrides = {}; st.seen = new Set(); st.why = null; st.day = null;
   if (v === "live" && !(LIVE.files.stock_situation && LIVE.files.stock_movements)) st.page = PAGES[0];
   render();
 }
@@ -458,7 +453,7 @@ async function computeLive(f) {
   const out = livePlan(f);
   st.busy = "";
   if (out.error) { st.err = out.error; return render(); }
-  st.order = { ...f, live: out, run_date: RUN() }; st.overrides = {}; st.pending = {}; st.seen = new Set(); st.savedId = null; st.why = null; st.xmsg = null;
+  st.order = { ...f, live: out, run_date: RUN() }; st.overrides = {}; st.seen = new Set(); st.savedId = null; st.why = null; st.xmsg = null;
   render();
 }
 
@@ -555,7 +550,7 @@ function compute() {
   if (f.delivery < RUN()) { st.err = "La date de livraison doit être le " + fdate(RUN()) + " ou après."; return render(); }
   if (DS().live) return computeLive(f);
   if (f.boutique !== M.boutique) { st.err = "Calcul impossible : Aucune ligne de Stock Situation pour la boutique " + f.boutique + ". (Démo : seules les données de B80 sont fournies. Pour tes boutiques, dépose tes exports avec « Mes fichiers ».)"; return render(); }
-  st.order = { ...f, run_date: RUN() }; st.overrides = {}; st.pending = {}; st.seen = new Set(); st.savedId = null; st.why = null; st.xmsg = null;
+  st.order = { ...f, run_date: RUN() }; st.overrides = {}; st.seen = new Set(); st.savedId = null; st.why = null; st.xmsg = null;
   render();
 }
 function paramsRow() {
@@ -587,7 +582,7 @@ function paramsRow() {
   if (st.err) out.push(el("div", "msg err", st.err));
   return out;
 }
-function setExamples(on) { st.examples = on; store.set("spc2_examples", on); st.overrides = {}; st.pending = {}; st.savedId = null; render(); }
+function setExamples(on) { st.examples = on; store.set("spc2_examples", on); st.overrides = {}; st.savedId = null; render(); }
 function categoryOf(m) { return categories()[(m.type || "").trim().toUpperCase()] || "Autres"; }
 function statusKey(x) { return x.ov ? "Modifié" : STATUS[x.s]; }
 function matches(x) {
@@ -630,13 +625,13 @@ function orderTable(rows, baseQty) {
   const t = el("table", "order", el("colgroup", "", COLS.map(c => el("col", { style: "width:" + c[1] + "px" }))), el("thead", "", head));
   const body = el("tbody");
   for (const x of rows) {
-    const m = x.m, sku = m.sku, pend = sku in st.pending;
-    const tr = el("tr", (x.ov ? "mod" : "") + (pend ? " pend" : "") + (st.why === sku ? " sel" : ""));
+    const m = x.m, sku = m.sku;
+    const tr = el("tr", (x.ov ? "mod" : "") + (st.why === sku ? " sel" : ""));
     tr.onclick = e => { if (e.target.closest("input")) return; openWhy(sku); };
     const seen = st.seen.has(sku) ? " ✓" : "";
     const stCell = x.ov ? el("span", "st M", "Modifié" + seen) : el("span", "st " + x.s, STATUS[x.s] + seen);
-    const qi = el("input", { type: "number", min: 0, step: x.multiple || 1, value: pend ? st.pending[sku] : x.qty, "aria-label": "Qty finale " + sku });
-    qi.onchange = () => { const v = Math.round(Number(qi.value)); if (!Number.isFinite(v) || v < 0) { qi.value = x.qty; return; } if (v !== x.qty) st.pending[sku] = v; else delete st.pending[sku]; renderDock(); tr.classList.toggle("pend", sku in st.pending); };
+    const qi = el("input", { type: "number", min: 0, step: x.multiple || 1, value: x.qty, "aria-label": "Qty finale " + sku });
+    qi.onchange = () => { const v = Math.round(Number(qi.value)); if (!Number.isFinite(v) || v < 0) { qi.value = x.qty; return; } if (v !== x.qty) { applyOverride(sku, v); render(); } };
     const reasons = x.reasons.join(" | ");
     tr.append(el("td", "", stCell), el("td", "mono", sku), el("td", { title: m.desc }, m.desc || "—"), el("td", "", categoryOf(m)),
       el("td", "n", fmt(m.exp)), el("td", "n", fmt(m.sales)), el("td", "n", fmt1(m.cur)), el("td", "n", fmt(baseQty[sku])),
@@ -681,39 +676,17 @@ function renderOrder() {
 }
 
 // ---------- Modifications ----------
-function catSelect(id, value) { const s = el("select", { id }); s.append(new Option("Choisir", "")); M.categories.forEach(([v, t]) => s.append(new Option(t, v))); s.value = value || ""; return s; }
+function catSelect(id, value) { const s = el("select", { id }); s.append(new Option("—", "")); M.categories.forEach(([v, t]) => s.append(new Option(t, v))); s.value = value || ""; return s; }
+// Modification du planner : appliquée tout de suite. Auteur et heure toujours gardés ;
+// catégorie et raison facultatives (D-028). Arrondi au multiple comme le moteur.
 function applyOverride(sku, qty, cat, reason) {
-  const j = indexOfSku(sku), b = baseLine(j);
-  if (qty === b.qty) { delete st.overrides[sku]; return null; }
-  if (!cat || reason.trim().length < 3) return sku;
-  st.overrides[sku] = { before: b.qty, after: qty, final: roundToMultiple(qty, b.multiple), cat, reason: reason.trim(), author: st.author, ts: new Date().toISOString() };
-  st.savedId = null; return null;
+  const j = indexOfSku(sku), b = baseLine(j), old = st.overrides[sku];
+  st.savedId = null;
+  if (qty === b.qty) { delete st.overrides[sku]; return; }
+  st.overrides[sku] = { before: b.qty, after: qty, final: roundToMultiple(qty, b.multiple),
+    cat: cat ?? (old ? old.cat : ""), reason: (reason ?? (old ? old.reason : "")).trim(),
+    author: st.author || "Planner non renseigné", ts: new Date().toISOString() };
 }
-function renderDock() {
-  const d = $("dock"), skus = Object.keys(st.pending);
-  d.hidden = !(st.page === PAGES[1] && st.order && skus.length);
-  if (d.hidden) { d.replaceChildren(); return; }
-  const keep = {}; d.querySelectorAll("[data-k]").forEach(x => { keep[x.dataset.k] = x.value; });
-  const msg = el("div");
-  d.replaceChildren(el("h3", { style: "margin:0 0 6px" }, "Modifications à justifier (" + skus.length + ")"),
-    ...skus.map(sku => {
-      const m = baseLine(indexOfSku(sku)).m, cs = catSelect("cat_" + sku, keep["c" + sku]), ri = el("input", { type: "text", id: "reason_" + sku, placeholder: "Raison", value: keep["r" + sku] || "" });
-      cs.dataset.k = "c" + sku; ri.dataset.k = "r" + sku;
-      const cur = finalLine(indexOfSku(sku)).qty;
-      return el("div", "pl", el("div", "", el("b", "mono", sku), " " + (m.desc || "") , el("br"), el("span", "small", fmt(cur) + " → "), el("b", "", fmt(st.pending[sku]))), cs, ri);
-    }),
-    el("div", "row", { style: "margin-top:8px" },
-      el("button", { class: "btn primary", onclick: () => {
-        if (!st.author) { msg.replaceChildren(el("div", "msg err", "Indique ton nom dans la barre de gauche.")); return; }
-        const bad = [];
-        for (const sku of skus) { const r = applyOverride(sku, st.pending[sku], $("cat_" + sku).value, $("reason_" + sku).value); if (r) bad.push(r); }
-        if (bad.length) { for (const sku of skus) if (!bad.includes(sku)) delete st.pending[sku]; render(); $("dockmsg")?.replaceChildren(el("div", "msg err", "Catégorie et raison obligatoires pour : " + bad.join(", "))); return; }
-        st.pending = {}; render();
-      } }, "Valider les modifications"),
-      el("button", { class: "btn", onclick: () => { st.pending = {}; render(); } }, "Annuler")),
-    el("div", { id: "dockmsg" }, msg));
-}
-
 // ---------- Panneau « Pourquoi » ----------
 function openWhy(sku) { st.why = sku; render(); }
 function steps(x) {
@@ -762,13 +735,11 @@ function renderWhy() {
     el("p", "small muted", "Excel (cover 9 j) : " + (m.xl === null || m.xl === undefined ? "SKU absent de la feuille" : fmt(m.xl) + (m.xlf ? " (formule)" : " (saisie manuelle dans Excel)"))),
     el("button", { class: "btn", style: "width:100%;margin-top:6px", onclick: () => { st.seen.has(m.sku) ? st.seen.delete(m.sku) : st.seen.add(m.sku); render(); } }, st.seen.has(m.sku) ? ic("undo") : ic("check"), st.seen.has(m.sku) ? "Retirer la validation" : "Marquer comme vérifiée"),
     el("h3", "", "Modifier la quantité"),
-    el("div", "form3", el("label", "f", "Qty finale", qty), el("label", "f", "Catégorie", cat), el("label", "f wide", "Raison", reason)),
+    el("div", "form3", el("label", "f", "Qty finale", qty), el("label", "f", "Catégorie (facultatif)", cat), el("label", "f wide", "Raison (facultatif)", reason)),
     el("div", "row", { style: "margin-top:10px" }, el("button", { class: "btn primary", id: "dlg_save", onclick: () => {
-      if (!st.author) return msg.replaceChildren(el("div", "msg err", "Indique ton nom dans la barre de gauche."));
       const q = Math.round(Number(qty.value));
       if (!Number.isFinite(q) || q < 0) return msg.replaceChildren(el("div", "msg err", "Quantité entière ≥ 0 attendue."));
-      if (applyOverride(m.sku, q, cat.value, reason.value)) return msg.replaceChildren(el("div", "msg err", "Catégorie et raison obligatoires."));
-      delete st.pending[m.sku]; render(); renderWhy();
+      applyOverride(m.sku, q, cat.value, reason.value); render();
     } }, "Enregistrer"), b.qty !== x.qty ? el("button", { class: "btn", onclick: () => { delete st.overrides[m.sku]; render(); } }, "Revenir à " + fmt(b.qty)) : null),
     msg].filter(Boolean));
 }
@@ -827,7 +798,7 @@ function renderDay() {
       const saveOv = st.overrides; st.overrides = {}; const s = summarize(lines()); st.overrides = saveOv;
       const order = st.order;
       res.push([btqLabel(o.b), frday(o.r.delivery), fmt(s.ordered), fmt(s.units), fmt1(s.palTotal), el("span", "st R", String(s.by.R)), el("span", "st B", String(s.by.B)), V(order).warnings.join(" | ") || "—",
-        el("button", { class: "btn", onclick: () => { st.form = { ...order }; st.order = { ...order }; st.overrides = {}; st.pending = {}; st.seen = new Set(); st.savedId = null; go(PAGES[1]); } }, "Ouvrir")]);
+        el("button", { class: "btn", onclick: () => { st.form = { ...order }; st.order = { ...order }; st.overrides = {}; st.seen = new Set(); st.savedId = null; go(PAGES[1]); } }, "Ouvrir")]);
     }
     st.order = prev;
     out.push(el("h3", "", "Résultats"), tableOf(["Boutique", "Livraison", "Lignes", "Unités", "Palettes", "REVIEW", "BLOCKED", "Alertes", ""], res, [2, 3, 4]));
@@ -1034,7 +1005,7 @@ function draw() {
   const main = $("main"), g = $("grid"), keep = g ? [g.scrollTop, g.scrollLeft] : null;
   main.replaceChildren(...(SCREENS[st.page] || renderDepot)().filter(Boolean), el("footer", "", "Moteurs : " + Object.values(M.rule_versions).join(" · ") + " · les quantités viennent toujours du moteur Python, jamais d'une IA."));
   const g2 = $("grid"); if (g2 && keep) { g2.scrollTop = keep[0]; g2.scrollLeft = keep[1]; }
-  renderDock(); renderWhy();
+  renderWhy();
 }
 document.addEventListener("keydown", e => { if (e.key === "Escape" && st.why) { st.why = null; render(); } });
 render();

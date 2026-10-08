@@ -71,7 +71,6 @@ def init_state() -> None:
         "day_error": None,
         "base": None,  # PlanningResult avant modifications
         "overrides": {},  # sku -> Override
-        "pending": {},  # sku -> qty saisie, en attente de justification
         "seen": set(),  # SKU vérifiés par le planner
         "saved_run_id": None,
         "day_outcomes": None,
@@ -101,7 +100,7 @@ def run_date() -> date:
 
 
 def reset_order() -> None:
-    ss.base, ss.overrides, ss.pending, ss.seen = None, {}, {}, set()
+    ss.base, ss.overrides, ss.seen = None, {}, set()
     ss.saved_run_id, ss.why_sku = None, None
     ss.nonce += 1
 
@@ -183,14 +182,17 @@ def status_cell(line: RecommendationLine) -> str:
     return f"{label} ✓" if line.sku in ss.seen else label
 
 
-def make_override(sku: str, before: int, after: int, category_label: str, reason: str) -> Override:
+def make_override(
+    sku: str, before: int, after: int, category_label: str | None = None, reason: str = ""
+) -> Override:
+    """Modification du planner : auteur et heure toujours gardés, catégorie et raison facultatives."""
     return Override(
         sku=sku,
         qty_before=before,
         qty_after=after,
-        category=CATEGORY_BY_LABEL[category_label],
-        reason=reason,
-        author=author(),
+        category=CATEGORY_BY_LABEL[category_label] if category_label else None,
+        reason=reason.strip(),
+        author=author() or "Planner non renseigné",
         timestamp=datetime.now(),
     )
 
@@ -224,7 +226,7 @@ def order_frame(
                 "Ventes": num(sales),
                 "Couv. actuelle": num(_round1(e["current_cover_days"])),
                 "Qty proposée": base_qty.get(x.sku, x.qty),
-                "Qty finale": ss.pending.get(x.sku, x.qty),
+                "Qty finale": x.qty,
                 "Couv. après": num(_round1(after)),
                 "Multiple": num(e["multiple"]),
                 "Stock DC": num(inp["dc_available"]),

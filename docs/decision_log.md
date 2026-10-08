@@ -176,3 +176,10 @@ Format : contexte → décision → conséquence.
 - **Référentiels** : ceux des données de test (multiples, conversions, DC, Schedule du 05/10/2026, portfolio de B80). Le portfolio des autres boutiques n'est pas encore disponible dans la version web.
 - **Publication** : Pyodide et ses bibliothèques sont vérifiés par empreinte (`tools/fetch_pyodide.py`) ; les archives (.zip, .whl), refusées par la plateforme, sont publiées en base64 et décodées par la page.
 
+## D-028 — Modifications sans justification obligatoire (2026-10-08)
+
+- Décision du planner : une quantité modifiée compte tout de suite, sans bloc « Modifications à justifier ». La règle 6 de CLAUDE.md est modifiée en conséquence ; remplace D-006 (partie raison) et D-017.
+- Toujours gardés : la quantité d'avant, la quantité saisie (arrondie au multiple supérieur), l'auteur (nom du planner, sinon « Planner non renseigné ») et l'heure. La ligne passe en « Modifié » et la raison « Modifié par … : avant → après » reste visible.
+- Catégorie et raison deviennent facultatives : on peut les ajouter dans le panneau « Pourquoi ». L'Historique classe les modifications sans catégorie sous « Sans catégorie ».
+- Base locale : la contrainte « raison d'au moins 3 caractères » est retirée ; les bases existantes sont migrées automatiquement (table recréée, toutes les modifications passées gardées).
+

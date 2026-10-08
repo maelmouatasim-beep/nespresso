@@ -219,20 +219,22 @@ OVERRIDE_CATEGORY_LABELS = {
 
 
 class Override(_Frozen):
-    """Modification manuelle d'une quantité par un planner (règle 6)."""
+    """Modification manuelle d'une quantité par un planner (règle 6).
+
+    Auteur et horodatage sont toujours gardés. Catégorie et raison sont facultatives
+    (décision du planner du 08-oct-2026, D-028).
+    """
 
     sku: Sku
     qty_before: int = Field(ge=0)
     qty_after: int = Field(ge=0)
-    category: OverrideCategory
-    reason: str = Field(min_length=3)
+    category: OverrideCategory | None = None
+    reason: str = ""
     author: str = Field(min_length=1)
     timestamp: datetime
 
     @model_validator(mode="after")
     def _strip(self) -> Override:
-        if len(self.reason.strip()) < 3:
-            raise ValueError("Une raison est obligatoire pour modifier une quantité")
         if not self.author.strip():
             raise ValueError("L'auteur est obligatoire")
         return self

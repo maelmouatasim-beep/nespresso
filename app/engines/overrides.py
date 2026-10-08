@@ -52,10 +52,13 @@ def apply_overrides(
         multiple = multiple if multiple > 0 else 1
         final = ceiling_to_multiple(Fraction(ov.qty_after), multiple)
         status = line.status
-        label = OVERRIDE_CATEGORY_LABELS[ov.category]
+        why = " : ".join(
+            x for x in (OVERRIDE_CATEGORY_LABELS.get(ov.category) if ov.category else None,
+                        ov.reason.strip()) if x
+        )  # fmt: skip
         reasons = [
             *line.reasons,
-            f"Modifié par {ov.author} : {ov.qty_before} → {final} ({label} : {ov.reason.strip()})",
+            f"Modifié par {ov.author} : {ov.qty_before} → {final}" + (f" ({why})" if why else ""),
         ]
         if final != ov.qty_after:
             reasons.append(f"Saisie {ov.qty_after} arrondie au multiple de {multiple} : {final}")

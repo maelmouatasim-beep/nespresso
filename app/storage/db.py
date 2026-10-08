@@ -57,8 +57,8 @@ CREATE TABLE IF NOT EXISTS overrides (
     sku TEXT NOT NULL,
     qty_before INTEGER NOT NULL,
     qty_after INTEGER NOT NULL,
-    category TEXT NOT NULL DEFAULT 'other',
-    reason TEXT NOT NULL CHECK (length(trim(reason)) >= 3),
+    category TEXT,
+    reason TEXT NOT NULL DEFAULT '',
     author TEXT NOT NULL CHECK (length(trim(author)) >= 1),
     timestamp TEXT NOT NULL
 );
@@ -83,12 +83,29 @@ def connect(path: Path | None = None) -> sqlite3.Connection:
     return conn
 
 
+OVERRIDES_COLUMNS = "id, run_id, sku, qty_before, qty_after, category, reason, author, timestamp"
+
+
 def _migrate(conn: sqlite3.Connection) -> None:
-    """Met à jour une base créée par une version précédente (ajout de colonnes)."""
+    """Met à jour une base créée par une version précédente."""
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(overrides)")}
     if "category" not in cols:
         with conn:
             conn.execute("ALTER TABLE overrides ADD COLUMN category TEXT NOT NULL DEFAULT 'other'")
+    row = conn.execute("SELECT sql FROM sqlite_master WHERE name = 'overrides'").fetchone()
+    if row and "length(trim(reason))" in row["sql"]:
+        # D-028 : la raison et la catégorie deviennent facultatives. SQLite ne sait pas
+        # retirer une contrainte : on recrée la table en gardant toutes les lignes.
+        new_sql = SCHEMA[SCHEMA.index("CREATE TABLE IF NOT EXISTS overrides") :]
+        new_sql = new_sql[: new_sql.index(");") + 2].replace("overrides", "overrides_new", 1)
+        conn.execute("PRAGMA foreign_keys = OFF")
+        with conn:
+            conn.execute(new_sql)
+            conn.execute(f"INSERT INTO overrides_new ({OVERRIDES_COLUMNS}) "
+                         f"SELECT {OVERRIDES_COLUMNS} FROM overrides")  # fmt: skip
+            conn.execute("DROP TABLE overrides")
+            conn.execute("ALTER TABLE overrides_new RENAME TO overrides")
+        conn.execute("PRAGMA foreign_keys = ON")
 
 
 def _now() -> str:
@@ -168,7 +185,7 @@ def save_run(
                     o.sku,
                     o.qty_before,
                     o.qty_after,
-                    o.category.value,
+                    o.category.value if o.category else None,
                     o.reason.strip(),
                     o.author.strip(),
                     o.timestamp.isoformat(),

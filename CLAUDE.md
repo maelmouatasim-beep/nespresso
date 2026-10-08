@@ -14,7 +14,7 @@
 3. **Rien de silencieux.** Une donnée manquante ou ambiguë produit `REVIEW` ou `BLOCKED` avec une raison. Ne jamais remplacer silencieusement une valeur par 0 ou 1.
 4. Chaque quantité recommandée garde sa trace : sources, version de règle, paramètres et calcul intermédiaire.
 5. Une allocation officielle n'est jamais écrasée par la prévision.
-6. Un override du planner exige une raison, un auteur et un horodatage.
+6. Un override du planner garde toujours son auteur et son horodatage. La catégorie et la raison sont facultatives (décision du planner, 08-oct-2026, D-028).
 7. Aucune écriture dans Nessoft. L'outil produit uniquement un fichier d'export.
 8. **Données confidentielles.** Ne jamais committer de fichiers Excel réels, d'exports Power BI ni de données personnelles (noms, emails, contacts boutiques). `data/` est dans `.gitignore`. Seul `tests/fixtures/` (données de test approuvées) est versionné.
 9. Ne jamais supposer la structure d'un fichier. L'inspecter, puis valider le schéma à l'ingestion.

@@ -42,7 +42,7 @@ def render() -> None:
             st.info("Aucune modification enregistrée.")
         else:
             c1, c2 = st.columns(2)
-            by_cat = Counter(labels.get(o["category"], o["category"]) for o in stats)
+            by_cat = Counter(labels.get(o["category"], "Sans catégorie") for o in stats)
             c1.dataframe(pd.DataFrame(by_cat.most_common(), columns=["Catégorie", "Modifications"]),
                          hide_index=True, width="stretch")  # fmt: skip
             by_sku = Counter(o["sku"] for o in stats)
@@ -51,7 +51,7 @@ def render() -> None:
             with st.expander(f"Détail ({len(stats)})"):
                 st.dataframe(pd.DataFrame([{
                     "Boutique": o["boutique"], "SKU": o["sku"], "Avant": o["qty_before"],
-                    "Après": o["qty_after"], "Catégorie": labels.get(o["category"], o["category"]),
+                    "Après": o["qty_after"], "Catégorie": labels.get(o["category"], "Sans catégorie"),
                     "Raison": o["reason"], "Par": o["author"], "Quand": o["timestamp"][:16],
                 } for o in stats]), hide_index=True, width="stretch")  # fmt: skip
 
