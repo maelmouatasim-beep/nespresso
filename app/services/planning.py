@@ -25,6 +25,7 @@ from app.engines.anomalies import RunSummary, summarize
 from app.engines.forecast import ForecastInputs, compute_recommendations
 from app.engines.overrides import apply_overrides
 from app.engines.pallets import PalletEstimate, estimate_pallets
+from app.engines.portfolio import PortfolioIndex
 from app.engines.rules import check_boutique_rules
 
 RULE_VERSIONS = {
@@ -75,25 +76,33 @@ def run_planning(
     mode: ForecastMode,
     *,
     dc: str,
-    portfolio: Mapping[str, str],
+    portfolio: Mapping[str, str] | None = None,
     business_inputs: BusinessInputs | None = None,
     overrides: Iterable[Override] = (),
     skus: list[str] | None = None,
 ) -> PlanningResult:
     """Calcule la commande complète d'une boutique.
 
-    `skus` permet d'imposer la liste des lignes (ex. parité avec un golden) ; sinon la
-    règle « Filter out » choisit les lignes.
+    `skus` permet d'imposer la liste des lignes (ex. parité avec un golden). Sinon :
+    mode parité → règle Excel « Filter out » ; mode standard → tous les SKU actifs (A5).
+    `portfolio` (facultatif) remplace le portfolio déjà présent dans `inputs`.
     """
+    if portfolio is not None:
+        inputs = replace(inputs, portfolio=PortfolioIndex.build(portfolio))
     business_inputs = business_inputs or BusinessInputs()
     b = params.boutique
     forced = [
         x.sku for x in (*business_inputs.allocations, *business_inputs.launches) if x.boutique == b
     ]
     if skus is None:
-        sel = selection.select_order_skus(
-            inputs.boutique_stock, inputs.sales, portfolio, inputs.conversions, forced
-        )
+        if mode is ForecastMode.EXCEL_PARITY:
+            sel = selection.select_order_skus(
+                inputs.boutique_stock, inputs.sales, inputs.portfolio, inputs.conversions, forced
+            )
+        else:
+            sel = selection.select_active_skus(
+                inputs.boutique_stock, inputs.sales, inputs.portfolio, inputs.products, forced
+            )
         skus, excluded = sel.skus, sel.excluded
     else:
         skus = list(dict.fromkeys([*skus, *forced]))
@@ -153,7 +162,7 @@ def run_day(
     mode: ForecastMode,
     *,
     build_inputs: Callable[[str], tuple[ForecastInputs, str]],
-    portfolio_by_boutique: Mapping[str, Mapping[str, str]],
+    portfolio_by_boutique: Mapping[str, Mapping[str, str]] | None = None,
     business_inputs: BusinessInputs | None = None,
 ) -> list[DayOutcome]:
     """Calcule la commande de chaque boutique. Une erreur sur une boutique n'arrête pas
@@ -164,7 +173,11 @@ def run_day(
             inputs, dc = build_inputs(params.boutique)
             result = run_planning(
                 inputs, params, mode, dc=dc,
-                portfolio=portfolio_by_boutique.get(params.boutique, {}),
+                portfolio=(
+                    portfolio_by_boutique.get(params.boutique, {})
+                    if portfolio_by_boutique is not None
+                    else None
+                ),
                 business_inputs=business_inputs,
             )  # fmt: skip
             out.append(DayOutcome(params.boutique, result, inputs, None))

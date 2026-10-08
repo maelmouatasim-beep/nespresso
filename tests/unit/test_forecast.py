@@ -35,7 +35,7 @@ from app.engines.sales import aggregate_sales
 RUN = date(2026, 10, 5)
 DAYS = [RUN - timedelta(days=i) for i in range(1, 8)]  # 7 dates distinctes
 EXCEL = ForecastMode.EXCEL_PARITY
-SAFE = ForecastMode.SAFE
+SAFE = ForecastMode.STANDARD
 
 
 def params(cover: float = 7, coffee: float | None = None) -> PlanningParameters:
@@ -283,10 +283,10 @@ def test_without_coffee_cover_coffee_uses_cover_days() -> None:
 # --- Exceptions et conversions ---------------------------------------------------
 
 
-def test_hardcoded_7010_is_always_zero_and_blocked() -> None:
-    line = simple("7010.70", sales=10_000, expected=0)
-    assert line.qty == 0
-    assert line.status is Status.BLOCKED
+def test_7010_is_no_longer_hardcoded_in_engine() -> None:
+    # Décision A8 : l'exception vit dans le référentiel des exclusions, plus dans le moteur.
+    line = simple("7010.70", sales=700, expected=0, multiple=10)
+    assert line.qty == 700
 
 
 def _conversion_inputs(effective: date, new_sku: str = "7934.70") -> ForecastInputs:
