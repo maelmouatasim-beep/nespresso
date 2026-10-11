@@ -455,9 +455,11 @@ def _form(proto: SkuEvent | None, scope_default: EventScope, me: str) -> SkuEven
                                 "lancement)")  # fmt: skip
     if start:
         until = (
-            fmt_date(end) if end else ("la prochaine commande" if until_next else "nouvel ordre")
+            f"au **{fmt_date(end)}**"
+            if end
+            else ("jusqu'à la **prochaine commande**" if until_next else "jusqu'à **nouvel ordre**")
         )
-        st.caption(f"Actif du **{fmt_date(start - timedelta(days=int(lead)))}** au **{until}** "
+        st.caption(f"Actif du **{fmt_date(start - timedelta(days=int(lead)))}** {until} "
                    "(anticipation comprise)")  # fmt: skip
 
     effects = list(ALLOWED_EFFECTS[etype])
@@ -578,11 +580,15 @@ def _read_only(event: SkuEvent) -> None:
     lines = [
         f"SKU : {', '.join(event.sku_codes())}",
         f"Boutiques : {_targets_text(event)}",
-        f"Du {fmt_date(event.start)} au "
+        f"Du {fmt_date(event.start)} "
         + (
-            fmt_date(event.end)
+            f"au {fmt_date(event.end)}"
             if event.end
-            else ("prochaine commande" if event.until_next_order else "nouvel ordre")
+            else (
+                "jusqu'à la prochaine commande"
+                if event.until_next_order
+                else "jusqu'à nouvel ordre"
+            )
         ),  # fmt: skip
         f"Effet : {_effect_text(event)}",
     ]

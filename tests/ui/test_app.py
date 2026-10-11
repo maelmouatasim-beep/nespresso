@@ -196,7 +196,7 @@ def test_personal_event_applies_only_to_its_planner_until_taken_over(app: AppTes
     app.selectbox(key="author").set_value("Sami").run()
     compute_b80(app)
     lines = {x.sku: x for x in app.session_state["base"].lines}
-    assert lines["7005.70"].qty == 3120  # la demande de Camille ne s'applique pas à Sami
+    assert lines["7042.70"].qty == 1200  # la demande de Camille ne s'applique pas à Sami
     assert any("Demande B80" in i.value and "Camille" in i.value for i in app.info)
     # Lecture seule pour Sami, puis « Reprendre »
     goto(app, EVENTS)
@@ -208,8 +208,8 @@ def test_personal_event_applies_only_to_its_planner_until_taken_over(app: AppTes
     assert app.session_state["taken_over"] == {4}
     compute_b80(app)
     lines = {x.sku: x for x in app.session_state["base"].lines}
-    assert lines["7005.70"].qty == 3360  # 3120 + 240 demandés par la boutique
-    assert "○ Demande B80" in grid(app).set_index("SKU").loc["7005.70", "Événement"]
+    assert lines["7042.70"].qty == 1440  # 1200 + 240 demandés par la boutique
+    assert "○ Demande B80" in grid(app).set_index("SKU").loc["7042.70", "Événement"]
 
 
 def test_export_is_refused_until_the_gate_is_green(app: AppTest) -> None:

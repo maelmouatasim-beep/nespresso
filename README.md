@@ -25,7 +25,8 @@ pip install -e ".[dev]"
 streamlit run app/ui/main.py
 ```
 
-Le navigateur s'ouvre sur l'outil. Dans la barre de gauche : tape ton nom, choisis « Mes données »
+Le navigateur s'ouvre sur l'outil. Dans la barre de gauche : choisis ton prénom (« Ajouter un planner »
+la première fois, prénom seulement), choisis « Mes données »
 (ou « Démo B80 » pour essayer), puis suis les écrans dans l'ordre :
 
 1. **Dépôt du jour** : choisis « Mes données », puis glisse les deux exports Power BI du matin
@@ -40,15 +41,24 @@ Le navigateur s'ouvre sur l'outil. Dans la barre de gauche : tape ton nom, chois
    grille, comme dans le calculateur Excel : filtres Catégorie et Statut, « Qty > 0 seulement »,
    recherche, tri au clic sur un en-tête. Coche 🔍 sur une ligne pour voir « Pourquoi cette quantité ? »
    à droite. Tape la « Qty finale » directement dans la cellule : la modification compte tout de suite
-   (catégorie et raison facultatives, à ajouter dans le panneau « Pourquoi »).
+   (catégorie et raison facultatives, à ajouter dans le panneau « Pourquoi »). Les SKU concernés par
+   un événement ont une puce dans la colonne « Événement » (● équipe, ○ personnel) ; le bandeau
+   « Événements actifs » filtre la table d'un clic.
 3. **Journée** : plusieurs boutiques d'un coup (présélection du Schedule, modifiable), un cover par
-   boutique, puis le zip des fichiers LT.
+   boutique, le nombre de SKU flagués par des événements, puis le zip des fichiers LT.
 4. **Export** : fichier LT pour Nessoft, récapitulatif boutique, export Excel détaillé.
+   Avant le fichier LT, une vérification en 3 points (lignes bloquées par un événement, SKU flagués
+   non vus, lancements et demandes boutique à inclure) doit être verte ; chaque validation est tracée.
    L'outil n'écrit jamais dans Nessoft : tu importes le fichier toi-même.
-5. **Référentiels** : multiples, conversions, portfolio, boutiques/DC, Schedule, exclusions,
+5. **Événements SKU** : promotions, lancements, arrêts, interdictions, conversions, urgences,
+   demandes boutique et SKU à surveiller. Onglets « Équipe » et « Mes événements », table triable,
+   panneau à droite pour créer, modifier, dupliquer, terminer. « + Demande boutique » : formulaire
+   court (boutique, SKU, quantité, qui a demandé). Import / export Excel avec
+   `templates/evenements_sku.xlsx` (exemples fictifs à remplacer).
+6. **Référentiels** : multiples, conversions, portfolio, boutiques/DC, Schedule, exclusions,
    catégories (type produit → catégorie du filtre), allocations, lancements, stocks cibles, règles boutique. Propriétaire, date de mise à jour,
    anomalies, import depuis un modèle.
-6. **Historique** : commandes enregistrées, modifications par catégorie, SKU les plus modifiés,
+7. **Historique** : commandes enregistrées, modifications par catégorie, SKU les plus modifiés,
    comparaison de deux commandes.
 
 Les fichiers déposés et la base locale restent dans `data/` (jamais versionné).

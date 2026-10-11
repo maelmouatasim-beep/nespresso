@@ -14,6 +14,7 @@ import json
 from datetime import date
 from typing import Any
 
+from app.domain.events import SkuEvent
 from app.domain.models import (
     Allocation,
     Exclusion,
@@ -43,7 +44,7 @@ from app.ingestion.tables import (
     parse_table,
     read_raw,
 )
-from app.services.planning import BusinessInputs, run_planning
+from app.services.planning import BusinessInputs, EventContext, run_planning
 from app.web.serialize import Strings, line_meta, line_tuple
 
 _STATE: dict[str, Any] = {}
@@ -195,7 +196,14 @@ def plan(params_json: str) -> str:
     except ValueError as exc:  # données absentes pour cette boutique, paramètre invalide
         return json.dumps({"error": f"Calcul impossible : {exc}"})
     business = _STATE["examples"] if p.get("examples") else BusinessInputs()
-    res = run_planning(inputs, params, ForecastMode(p["mode"]), dc=dc, business_inputs=business)
+    # Événements SKU envoyés par la page : le moteur choisit lui-même ceux qui sont actifs
+    # (date de livraison, boutique, planner, « Reprendre »).
+    events = EventContext(
+        tuple(SkuEvent.model_validate(e) for e in p.get("events", [])),
+        str(p.get("planner") or ""), frozenset(int(i) for i in p.get("taken", [])),
+    )  # fmt: skip
+    res = run_planning(inputs, params, ForecastMode(p["mode"]), dc=dc, business_inputs=business,
+                       event_context=events)  # fmt: skip
     text = Strings()
     period = inputs.sales.period_start, inputs.sales.period_end
     return json.dumps({
@@ -205,5 +213,6 @@ def plan(params_json: str) -> str:
         "warnings": list(res.rule_warnings),
         "dc": dc,
         "history_days": res.history_days,
+        "events": [e.id for e in res.events],
         "period": [d.isoformat() for d in period] if all(period) else None,
     })  # fmt: skip

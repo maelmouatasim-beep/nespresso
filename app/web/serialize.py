@@ -13,6 +13,7 @@ from datetime import date
 from typing import Any
 
 from app.domain.models import COFFEE_TYPE, Product, RecommendationLine
+from app.engines.events import event_tags
 from app.engines.pallets import OTHERS, PER_PALLET, family
 
 
@@ -130,8 +131,10 @@ def line_tuple(line: RecommendationLine, text: Strings) -> list[Any]:
     conv = bool(e["inputs"]["sales_from_old_skus"]) or "old_sku_blocked" in rules \
         or any("onversion" in x for x in line.reasons)  # fmt: skip
     flags = (1 if conv else 0) | (2 if ("dc_return" in rules or "dc_out_of_stock" in rules) else 0)
+    events = [[t["id"], t["scope"][0], text.id(t["title"]), t["type"], t["effect"]]
+              for t in event_tags(line)]  # fmt: skip
     return [
         line.qty, r(e["raw_need"]), line.status.value[0], [text.id(x) for x in line.reasons],
         e["multiple"], text.id(e["multiple_source"]), line.source.value, line.forecast_qty,
-        text.id(fallback_step(e)), text.id(business_step(e)), flags,
+        text.id(fallback_step(e)), text.id(business_step(e)), flags, events,
     ]  # fmt: skip

@@ -18,7 +18,7 @@ import os
 import sys
 import tempfile
 import zipfile
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
 import pandas as pd
@@ -40,8 +40,14 @@ from app.engines.categories import CATEGORIES  # noqa: E402
 from app.engines.schedule import boutiques_ordering_on  # noqa: E402
 from app.ingestion import referential_checks as checks  # noqa: E402
 from app.ingestion.depot import freshness  # noqa: E402
+from app.ingestion.events import DEMO_PLANNERS, example_events  # noqa: E402
 from app.ingestion.masters import all_boutiques, build_inputs_for_boutique  # noqa: E402
-from app.services.planning import RULE_VERSIONS, BusinessInputs, run_planning  # noqa: E402
+from app.services.planning import (  # noqa: E402
+    RULE_VERSIONS,
+    BusinessInputs,
+    EventContext,
+    run_planning,
+)
 from app.ui.workspace import (  # noqa: E402
     DEMO_EXTRACTION,
     DEPOT_LABELS,
@@ -61,6 +67,18 @@ OUTPUT = ROOT / "preview" / "outil_B80.html"
 FIXTURES = ROOT / "tests" / "fixtures" / "b80_2026-10-05"
 COVERS = [x / 2 for x in range(2, 43)]  # 1 à 21 jours
 RUN_DATE = DEMO_EXTRACTION
+# Démo : les événements SKU sont évalués pour la livraison prévue de B80 (jeu. 08/10).
+DEMO_DELIVERY = date(2026, 10, 8)
+_CREATED = datetime(2026, 10, 5, 8, 30)
+DEMO_EVENTS = tuple(
+    e.model_copy(
+        update={"id": i, "created_by": "Démo", "created_at": _CREATED, "updated_at": _CREATED}
+    )
+    for i, e in enumerate(example_events(), 1)
+)
+# « team » : événements d'équipe seulement ; « all » : + la demande boutique personnelle
+# (appliquée quand le planner est Camille, ou après « Reprendre »).
+EVENT_VARIANTS = {"team": "", "all": "Camille"}
 BOUTIQUE = "B80"
 PREVIEW_ROWS = 150
 
@@ -156,18 +174,22 @@ def build() -> Path:  # noqa: PLR0915 - un seul script linéaire, plus simple à
     meta: list[dict] = []
     meta_idx: dict[str, int] = {}
     variants: dict[str, dict] = {}
-    for variant, business in (("none", BusinessInputs()), ("examples", EXAMPLES)):
+    combos = [(v, b, ev) for v, b in (("none", BusinessInputs()), ("examples", EXAMPLES))
+              for ev in EVENT_VARIANTS]  # fmt: skip
+    for variant, business, ev in combos:
+        context = EventContext(DEMO_EVENTS, EVENT_VARIANTS[ev])
         for mode in ForecastMode:
-            key = f"{mode.value}|{variant}"
+            key = f"{mode.value}|{variant}|{ev}"
             sel: list[int] = []
             per_line: list[list] = []
             warnings: list[str] = []
             for c_i, cover in enumerate(COVERS):
                 params = PlanningParameters(
-                    boutique=BOUTIQUE, run_date=RUN_DATE, delivery_date=RUN_DATE,
+                    boutique=BOUTIQUE, run_date=RUN_DATE, delivery_date=DEMO_DELIVERY,
                     cover_days=cover, coffee_cover_days=None,
                 )  # fmt: skip
-                res = run_planning(inputs, params, mode, dc=dc, business_inputs=business)
+                res = run_planning(inputs, params, mode, dc=dc, business_inputs=business,
+                                   event_context=context)  # fmt: skip
                 if c_i == 0:
                     warnings = list(res.rule_warnings)
                     for line in res.lines:
@@ -250,6 +272,9 @@ def build() -> Path:  # noqa: PLR0915 - un seul script linéaire, plus simple à
         "refs": refs,
         "category_map": dict(data.categories),
         "category_names": list(CATEGORIES),
+        "events": [e.model_dump(mode="json") for e in DEMO_EVENTS],
+        "planners": list(DEMO_PLANNERS),
+        "demo_delivery": DEMO_DELIVERY.isoformat(),
         "text": text.items,
         "lines": meta,
         "variants": variants,
