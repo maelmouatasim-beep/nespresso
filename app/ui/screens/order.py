@@ -46,6 +46,7 @@ from app.ui.common import (
     fr_day,
     go,
     make_override,
+    mark_events_viewed,
     order_frame,
     reset_order,
     run_date,
@@ -186,6 +187,9 @@ def _event_banner(res) -> str | int | None:  # noqa: ANN001
                     f"{len(res.events) - team} — clic sur un événement pour filtrer la table")  # fmt: skip
         choice = st.pills("Événements", list(labels), key="f_event", format_func=labels.get,
                           label_visibility="collapsed")  # fmt: skip
+        if choice is not None:
+            # Q-030 : « Marquer comme vus » n'est actif qu'après ce premier coup d'œil.
+            mark_events_viewed(res.params.boutique, res.params.delivery_date)
     else:
         choice = None
     if others:

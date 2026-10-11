@@ -212,12 +212,24 @@ def test_personal_event_applies_only_to_its_planner_until_taken_over(app: AppTes
     assert "○ Demande B80" in grid(app).set_index("SKU").loc["7042.70", "Événement"]
 
 
+def open_events_filter(at: AppTest) -> None:
+    """Clic sur « Tous » dans le bandeau Événements actifs de la commande."""
+    goto(at, PAGES[1])
+    next(b for b in at.button_group if b.key == "f_event").set_value("all").run()
+    assert not at.exception, at.exception
+
+
 def test_export_is_refused_until_the_gate_is_green(app: AppTest) -> None:
     app.selectbox(key="author").set_value("Camille").run()
     compute_b80(app)
     goto(app, PAGES[3])
     assert app.get("download_button")[0].proto.disabled  # garde-fou rouge
     app.button(key="order_gate_blocks").click().run()  # confirme le blocage de 7928.70
+    # Q-030 : « Marquer comme vus » inactif tant que le filtre « Événements » n'a pas été ouvert
+    assert app.button(key="order_gate_seen").disabled
+    open_events_filter(app)
+    goto(app, PAGES[3])
+    assert not app.button(key="order_gate_seen").disabled
     app.button(key="order_gate_seen").click().run()
     assert app.get("download_button")[0].proto.disabled  # reste : lancements / demandes
     next(c for c in app.checkbox if c.key.startswith("order_gate_include")).check().run()
@@ -275,6 +287,10 @@ def test_day_shows_events_and_gates_the_zip(app: AppTest) -> None:
     assert any(m.value == "● 5 · ○ 1" for m in app.markdown)  # SKU flagués équipe / personnel
     assert app.get("download_button")[0].proto.disabled
     app.button(key="day_gate_blocks").click().run()
+    assert app.button(key="day_gate_seen").disabled  # Q-030 : filtre Événements pas encore ouvert
+    app.button(key="open_0_B80").click().run()  # « Ouvrir » la boutique, puis son filtre
+    open_events_filter(app)
+    goto(app, PAGES[2])
     app.button(key="day_gate_seen").click().run()
     next(c for c in app.checkbox if c.key.startswith("day_gate_include")).check().run()
     assert not app.get("download_button")[0].proto.disabled

@@ -92,6 +92,7 @@ def init_state() -> None:
         "include_ok": False,  # lancements / demandes à inclure confirmés
         "requests_to_close": [],  # demandes boutique à terminer après l'export
         "day_checks": {},  # Journée : validations par boutique
+        "events_viewed": set(),  # (boutique, livraison) dont le filtre « Événements » a été ouvert
         "ev_edit": None,  # Événements : panneau ouvert (id, "new" ou "request")
         "ev_nonce": 0,
     }
@@ -114,6 +115,15 @@ def is_demo() -> bool:
 def run_date() -> date:
     """Jour du calcul : aujourd'hui (démo : jour des données de démonstration)."""
     return DEMO_EXTRACTION if is_demo() else date.today()
+
+
+def mark_events_viewed(boutique: str, delivery: date) -> None:
+    """Le planner a ouvert le filtre « Événements » de cette commande (Q-030)."""
+    ss.events_viewed = ss.events_viewed | {(boutique, delivery.isoformat())}
+
+
+def events_viewed(boutique: str, delivery: date) -> bool:
+    return (boutique, delivery.isoformat()) in ss.events_viewed
 
 
 def reset_order() -> None:

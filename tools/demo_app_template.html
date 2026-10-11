@@ -308,7 +308,7 @@ const st = {
   overrides: {}, seen: new Set(), f: { cat: "Tous", status: "Tous", qty: false }, sort: null, q: "", why: null, gear: false, savedId: null, xmsg: null,
   day: null, refTab: 0, source: "demo", busy: "", depotErr: [],
   // Événements : reprises (session seulement), demandes terminées, validations avant export.
-  taken: new Set(), evDone: store.get("spc2_ev_done", {}), confirmed: new Set(), includeOk: false,
+  taken: new Set(), evDone: store.get("spc2_ev_done", {}), confirmed: new Set(), includeOk: false, evViewed: new Set(),
   validations: store.get("spc2_validations", []), toClose: [], evTab: "team", evStatus: "Actifs", evQ: "", evTypes: new Set(), evPlanner: null, evSel: null,
 };
 st.f.ev = null;
@@ -398,7 +398,11 @@ function evCheck(baseRows, ovs, seen, confirmed, includeOk) {
   }
   return { blocked, unval, inc, ok: !blocked.length && !unval.length && (!inc.length || includeOk) };
 }
-function gateCard(c, includeOk, onBlocks, onSeen, onInclude) {
+// Q-030 : « Marquer comme vus » n'est actif qu'après un premier clic sur le filtre
+// « Événements » de la commande (boutique + livraison).
+const viewKey = (b, d) => b + "|" + d;
+function gateCard(c, includeOk, onBlocks, onSeen, onInclude, toOpen) {
+  toOpen = toOpen || [];
   const line = (ok, cls, title, detail, btn) => el("div", "g", el("div", "t", el("span", "ico " + (ok ? "ok" : cls), ok ? "✓" : (cls === "ko" ? "⦸" : "…")), el("b", "", title), detail ? el("small", "", detail) : null), btn);
   const incBox = el("input", { type: "checkbox", id: "gate_include", checked: includeOk, onchange: e => onInclude(e.target.checked) });
   return el("div", "gate",
@@ -406,7 +410,8 @@ function gateCard(c, includeOk, onBlocks, onSeen, onInclude) {
     line(!c.blocked.length, "ko", c.blocked.length + " ligne(s) BLOCKED par un événement", c.blocked.join(", "),
       c.blocked.length ? el("button", { class: "btn", id: "gate_blocks", title: "La quantité reste 0 (tracé). Pour envoyer quand même : modifier la ligne avec une raison.", onclick: onBlocks }, "Confirmer les blocages") : null),
     line(!c.unval.length, "todo", c.unval.length + " SKU flagué(s) par un événement non encore validé(s)", c.unval.join(", "),
-      c.unval.length ? el("button", { class: "btn", id: "gate_seen", onclick: onSeen }, ic("check"), "Marquer comme vus") : null),
+      c.unval.length ? el("button", { class: "btn", id: "gate_seen", disabled: toOpen.length > 0, title: "Actif une fois le filtre « Événements » de la commande ouvert au moins une fois.", onclick: onSeen }, ic("check"), "Marquer comme vus") : null),
+    c.unval.length && toOpen.length ? el("p", "small muted", "Ouvre d'abord le filtre « Événements » de la commande" + (toOpen.length > 1 || c.multi ? " (" + toOpen.join(", ") + ")" : "") + " (Commande boutique) pour activer « Marquer comme vus ».") : null,
     c.inc.length ? line(includeOk, "todo", "Lancements et demandes boutique à inclure", c.inc.join(", "), el("label", "chk", incBox, "J'ai vérifié : inclus"))
       : line(true, "", "Aucun lancement ni demande boutique à inclure", "", null),
     c.ok ? null : el("p", "small muted", "Le téléchargement est désactivé tant que ces points ne sont pas verts."));
@@ -782,7 +787,7 @@ function eventBanner(o, ls) {
   const ids = Object.keys(counts).map(Number), evs = ids.map(evById).filter(Boolean), out = [];
   if (evs.length) {
     const team = evs.filter(e => e.scope === "team").length, all = new Set(ls.filter(x => x.ev.length).map(x => x.m.sku));
-    const chip = (key, label) => el("button", { class: "chip" + (st.f.ev === key ? " on" : ""), onclick: () => { st.f.ev = st.f.ev === key ? null : key; render(); } }, label);
+    const chip = (key, label) => el("button", { class: "chip" + (st.f.ev === key ? " on" : ""), onclick: () => { st.f.ev = st.f.ev === key ? null : key; if (st.f.ev !== null) st.evViewed.add(viewKey(o.boutique, o.delivery)); render(); } }, label);
     out.push(el("div", "evbanner", el("span", "lab", el("b", "", "Événements actifs"), " · Équipe : " + team + " · Personnel : " + (evs.length - team)),
       chip("all", "Tous (" + all.size + " SKU)"), ...evs.map(e => chip(e.id, DOT[e.scope] + " " + e.title + " (" + counts[e.id].size + " SKU)"))));
     out.push(el("p", "small muted", { style: "margin:2px 0 0" }, "Clic sur un événement pour filtrer la table." + (o.live ? "" : " Démo : événements évalués pour une livraison le " + fdate(DATA.demo_delivery) + ".")));
@@ -920,7 +925,7 @@ function renderDay() {
       const saveOv = st.overrides; st.overrides = {}; const ls0 = lines(), s = summarize(ls0); st.overrides = saveOv;
       const order = st.order, base = ls0.map((_, j) => baseLine(j));
       const ck = d.checks[o.b] = d.checks[o.b] || { seen: new Set(), blocks: new Set(), include: false };
-      checks.push([o.b, evCheck(base, {}, ck.seen, ck.blocks, ck.include), ck]);
+      checks.push([o.b, evCheck(base, {}, ck.seen, ck.blocks, ck.include), ck, o.r.delivery]);
       const teamN = new Set(base.filter(x => x.ev.some(e => e.scope === "t")).map(x => x.m.sku)).size, persN = new Set(base.filter(x => x.ev.some(e => e.scope === "p")).map(x => x.m.sku)).size;
       res.push([btqLabel(o.b), frday(o.r.delivery), fmt(s.ordered), fmt(s.units), fmt1(s.palTotal), el("span", "st R", String(s.by.R)), el("span", "st B", String(s.by.B)),
         teamN || persN ? el("span", { title: "SKU flagués : ● équipe · ○ personnel" }, "● " + teamN + " · ○ " + persN) : "—", V(order).warnings.join(" | ") || "—",
@@ -932,11 +937,12 @@ function renderDay() {
     const pre = (b, list) => checks.length > 1 ? list.map(x => b + " " + x) : list;
     const all = { blocked: checks.flatMap(([b, c]) => pre(b, c.blocked)), unval: checks.flatMap(([b, c]) => pre(b, c.unval)), inc: checks.flatMap(([b, c]) => pre(b, c.inc)) };
     const incOk = checks.every(([, c, k]) => !c.inc.length || k.include);
-    all.ok = !all.blocked.length && !all.unval.length && (!all.inc.length || incOk);
+    all.ok = !all.blocked.length && !all.unval.length && (!all.inc.length || incOk); all.multi = checks.length > 1;
+    const toOpen = checks.filter(([b, c, , dl]) => c.unval.length && !st.evViewed.has(viewKey(b, dl))).map(([b]) => b);
     if (all.blocked.length || all.unval.length || all.inc.length) out.push(gateCard(all, incOk,
       () => { checks.forEach(([b, c, k]) => { if (c.blocked.length) { c.blocked.forEach(x => k.blocks.add(x)); logValidation("confirm_block", b, c.blocked); } }); render(); },
       () => { checks.forEach(([b, c, k]) => { if (c.unval.length) { c.unval.forEach(x => k.seen.add(x)); logValidation("seen", b, c.unval); } }); render(); },
-      on => { checks.forEach(([b, c, k]) => { if (c.inc.length) { k.include = on; logValidation("include", b, c.inc, on ? "coché" : "décoché"); } }); render(); }));
+      on => { checks.forEach(([b, c, k]) => { if (c.inc.length) { k.include = on; logValidation("include", b, c.inc, on ? "coché" : "décoché"); } }); render(); }, toOpen));
     if (okOnes.length) {
       const m2 = el("div");
       out.push(el("div", { style: "margin-top:10px" }, el("button", { class: "btn primary", id: "day_zip", disabled: !st.author || !all.ok, onclick: () => dayZip(okOnes, m2) }, okOnes.length === 1 ? "Télécharger le fichier LT (zip)" : "Télécharger les " + okOnes.length + " fichiers LT (zip)")), m2);
@@ -1002,7 +1008,8 @@ function renderExport() {
   if (chk.blocked.length || chk.unval.length || chk.inc.length) out.push(gateCard(chk, st.includeOk,
     () => { chk.blocked.forEach(k => st.confirmed.add(k)); logValidation("confirm_block", b0, chk.blocked); render(); },
     () => { chk.unval.forEach(k => st.seen.add(k)); logValidation("seen", b0, chk.unval); render(); },
-    on => { st.includeOk = on; logValidation("include", b0, chk.inc, on ? "coché" : "décoché"); render(); }));
+    on => { st.includeOk = on; logValidation("include", b0, chk.inc, on ? "coché" : "décoché"); render(); },
+    chk.unval.length && !st.evViewed.has(viewKey(b0, st.order.delivery)) ? [b0] : []));
   const box = el("div");
   if (st.xmsg) box.append(st.xmsg);
   const requests = [...new Set(base.flatMap(x => x.ev.filter(e => e.type === "store_request").map(e => e.id)))];

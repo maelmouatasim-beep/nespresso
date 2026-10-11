@@ -229,3 +229,11 @@ Format : contexte → décision → conséquence.
 - Chaque quantité ajoutée est arrondie au multiple supérieur séparément, puis les quantités arrondies sont additionnées : le total est la somme de ce que chaque événement aurait ajouté seul. Même quantité ajoutée par deux événements : comptée deux fois. Un SKU listé deux fois dans le même événement compte une fois.
 - Les autres conflits restent BLOCKED « Deux événements contradictoires » : deux quantités imposées différentes, une imposée + une ajoutée, et blocage contre quantité (le blocage gagne).
 - Version de règle : `events-1.1.0`.
+
+## D-035 — Garde-fou : « Marquer comme vus » après le filtre Événements ; « Reprendre » limité à la session (Q-030, Q-031) (2026-10-11)
+
+- Décision du planner : la validation globale en un clic est gardée (« Confirmer les blocages », « Marquer comme vus »), mais **« Marquer comme vus » n'est actif que si le planner a ouvert au moins une fois le filtre « Événements »** (bandeau « Événements actifs ») de la commande en cours. Une commande = boutique + date de livraison ; l'ouverture est retenue pour la session.
+- Tant que ce n'est pas fait, le bouton est grisé et une phrase dit quoi faire. Dans la Journée, la phrase nomme les boutiques à « Ouvrir » d'abord ; le bouton s'active quand toutes les boutiques avec des flags non vus ont été regardées.
+- « Confirmer les blocages » ne change pas. Valider une ligne à la fois (« Marquer comme vérifiée » dans « Pourquoi ») reste toujours possible.
+- Q-031 fermée : « Reprendre » un événement personnel reste limité à la session (D-032 inchangée).
+- Même règle dans la démo web.
