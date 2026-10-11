@@ -162,15 +162,18 @@ def ov(**kw) -> Override:
     return Override(**{**base, **kw})
 
 
-def test_override_requires_author_but_not_reason() -> None:
-    """D-028 : catégorie et raison facultatives, auteur et heure toujours gardés."""
-    bare = ov(reason="", category=None)
+def test_override_requires_author_and_category_but_not_reason() -> None:
+    """D-036 : catégorie obligatoire, raison libre facultative, auteur et heure gardés."""
+    bare = ov(reason="", category="store_request")
     out = apply_overrides([line("7005.70", 3120)], [bare])
     assert out[0].qty == 3600
-    assert out[0].reasons[-1] == "Modifié par Planner A : 3120 → 3600"
+    assert out[0].reasons[-1] == "Modifié par Planner A : 3120 → 3600 (Demande boutique)"
     assert out[0].explanation["override"]["author"] == "Planner A"
+    assert out[0].explanation["override"]["category"] == "store_request"
     with pytest.raises(ValidationError):
         ov(author="")
+    with pytest.raises(ValidationError):
+        ov(category=None)
 
 
 def test_override_applied_with_trace() -> None:

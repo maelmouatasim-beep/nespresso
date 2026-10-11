@@ -294,3 +294,33 @@ def test_day_shows_events_and_gates_the_zip(app: AppTest) -> None:
     app.button(key="day_gate_seen").click().run()
     next(c for c in app.checkbox if c.key.startswith("day_gate_include")).check().run()
     assert not app.get("download_button")[0].proto.disabled
+
+
+def test_quantity_change_waits_for_its_category(app: AppTest) -> None:
+    """D-036 : une quantité saisie sans catégorie reste « À catégoriser », non appliquée."""
+    app.selectbox(key="author").set_value("Camille").run()
+    compute_b80(app)
+    # Ce que produit la saisie de 3360 dans la cellule « Qty finale », catégorie vide.
+    app.session_state["pending_edits"] = {"7005.70": {"qty": 3360, "cat": None}}
+    app.run()
+    row = grid(app).set_index("SKU").loc["7005.70"]
+    assert (row["Statut"], row["Qty finale"]) == ("● À catégoriser", 3360)
+    assert "7005.70" not in app.session_state["overrides"]
+    assert any("sans catégorie" in w.value for w in app.warning)
+    goto(app, PAGES[3])
+    assert any("sans catégorie" in e.value for e in app.error)
+    assert app.get("download_button")[0].proto.disabled
+    # Panneau « Pourquoi » : Enregistrer sans catégorie est refusé, puis un clic sur « Promo ».
+    goto(app, PAGES[1])
+    app.session_state["why_sku"] = "7005.70"
+    app.run()
+    assert app.number_input(key="dlg_qty_7005.70").value == 3360
+    app.button(key="dlg_save").click().run()
+    assert any("obligatoire" in e.value for e in app.error)
+    app.selectbox(key="dlg_cat_7005.70").set_value("Promo").run()
+    app.button(key="dlg_save").click().run()
+    ov = app.session_state["overrides"]["7005.70"]
+    assert (ov.qty_after, ov.category.value, ov.reason, ov.author) == (3360, "promo", "", "Camille")
+    assert app.session_state["pending_edits"] == {}
+    row = grid(app).set_index("SKU").loc["7005.70"]
+    assert (row["Statut"], row["Catégorie modif."]) == ("● Modifié", "Promo")

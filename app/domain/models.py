@@ -205,16 +205,19 @@ class OverrideCategory(StrEnum):
     OVERSTOCK = "overstock"
     DC_STOCK = "dc_stock"
     DATA_ERROR = "data_error"
+    STORE_REQUEST = "store_request"
     OTHER = "other"
 
 
+# Libellés courts : la catégorie se choisit en un clic dans la ligne du tableau (D-036).
 OVERRIDE_CATEGORY_LABELS = {
-    OverrideCategory.PROMO: "Promo / événement",
+    OverrideCategory.PROMO: "Promo",
     OverrideCategory.LAUNCH: "Lancement",
-    OverrideCategory.STOCKOUT: "Rupture / ventes sous-estimées",
-    OverrideCategory.OVERSTOCK: "Surstock / place en boutique",
-    OverrideCategory.DC_STOCK: "Stock DC insuffisant",
+    OverrideCategory.STOCKOUT: "Rupture",
+    OverrideCategory.OVERSTOCK: "Surstock",
+    OverrideCategory.DC_STOCK: "Stock DC",
     OverrideCategory.DATA_ERROR: "Donnée erronée",
+    OverrideCategory.STORE_REQUEST: "Demande boutique",
     OverrideCategory.OTHER: "Autre",
 }
 
@@ -222,14 +225,14 @@ OVERRIDE_CATEGORY_LABELS = {
 class Override(_Frozen):
     """Modification manuelle d'une quantité par un planner (règle 6).
 
-    Auteur et horodatage sont toujours gardés. Catégorie et raison sont facultatives
-    (décision du planner du 08-oct-2026, D-028).
+    Auteur, horodatage et catégorie sont obligatoires ; la raison libre est facultative
+    (décision du planner du 11-oct-2026, D-036, qui révise D-028).
     """
 
     sku: Sku
     qty_before: int = Field(ge=0)
     qty_after: int = Field(ge=0)
-    category: OverrideCategory | None = None
+    category: OverrideCategory
     reason: str = ""
     author: str = Field(min_length=1)
     timestamp: datetime

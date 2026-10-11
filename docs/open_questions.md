@@ -25,7 +25,7 @@ correspondant est signalé (REVIEW / BLOCKED) ou documenté, jamais appliqué en
 | Q-018 | Noms exacts des onglets et en-têtes du calculateur `.xlsm` | Plusieurs noms acceptés ; `--inspect` pour les voir | Planner |
 | Q-019 | Mode par défaut dans l'interface : Standard (ex-« Safe », choix actuel) ou Parité Excel ? | Standard | Équipe planners |
 | Q-020 | Règles boutique : quels autres types faut-il (ex. « keep expected ~140K », « max 5 sacs S et M », « ajouter 4 caisses chaque lundi ») ? | 4 types : max_pallets, max_units, max_qty_sku, min_qty_sku ; signalement seulement | Planner |
-| Q-021 | Catégories d'override : la liste (promo, lancement, rupture, surstock, stock DC, donnée erronée, autre) convient-elle ? | Liste actuelle | Équipe planners |
+| Q-021 | ~~Catégories d'override : la liste (promo, lancement, rupture, surstock, stock DC, donnée erronée, autre) convient-elle ?~~ **Résolue (11-oct-2026, D-036)** : liste donnée par le planner, avec « demande boutique » en plus. | Catégorie obligatoire, un clic dans la ligne | — |
 | Q-022 | **Deux créneaux de livraison le même jour de commande (ouverte, A10)** : lequel retenir pour la date suggérée ? | Le premier du Schedule ; la date est toujours confirmée par le planner | Planner |
 | Q-023 | **`2007.70` absent d'Excel (ouverte, A10)** : VER-SBUX Blonde Espresso Roast a 40 ventes sur B80 mais n'est pas dans Stock Cover Final. Pourquoi ? | Présent dans notre sélection (452 lignes en Parité au lieu de 451), écart documenté (D-020) | Planner / analyse du .xlsm |
 | Q-024 | Historique de secours : 4 semaines par défaut, est-ce la bonne valeur ? Faut-il ignorer les semaines de promo ? | 4 semaines complètes avec ventes, réglable dans ⚙️ | Équipe planners |

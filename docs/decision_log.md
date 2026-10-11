@@ -176,7 +176,7 @@ Format : contexte → décision → conséquence.
 - **Référentiels** : ceux des données de test (multiples, conversions, DC, Schedule du 05/10/2026, portfolio de B80). Le portfolio des autres boutiques n'est pas encore disponible dans la version web.
 - **Publication** : Pyodide et ses bibliothèques sont vérifiés par empreinte (`tools/fetch_pyodide.py`) ; les archives (.zip, .whl), refusées par la plateforme, sont publiées en base64 et décodées par la page.
 
-## D-028 — Modifications sans justification obligatoire (2026-10-08)
+## D-028 — Modifications sans justification obligatoire (2026-10-08) — catégorie rétablie par D-036
 
 - Décision du planner : une quantité modifiée compte tout de suite, sans bloc « Modifications à justifier ». La règle 6 de CLAUDE.md est modifiée en conséquence ; remplace D-006 (partie raison) et D-017.
 - Toujours gardés : la quantité d'avant, la quantité saisie (arrondie au multiple supérieur), l'auteur (nom du planner, sinon « Planner non renseigné ») et l'heure. La ligne passe en « Modifié » et la raison « Modifié par … : avant → après » reste visible.
@@ -236,4 +236,15 @@ Format : contexte → décision → conséquence.
 - Tant que ce n'est pas fait, le bouton est grisé et une phrase dit quoi faire. Dans la Journée, la phrase nomme les boutiques à « Ouvrir » d'abord ; le bouton s'active quand toutes les boutiques avec des flags non vus ont été regardées.
 - « Confirmer les blocages » ne change pas. Valider une ligne à la fois (« Marquer comme vérifiée » dans « Pourquoi ») reste toujours possible.
 - Q-031 fermée : « Reprendre » un événement personnel reste limité à la session (D-032 inchangée).
+- Même règle dans la démo web.
+
+## D-036 — Catégorie de modification obligatoire, en un clic dans la ligne (révise D-028) (2026-10-11)
+
+- Décision du planner : toute modification de quantité exige une **catégorie**, choisie en un clic dans la ligne du tableau (colonne « Catégorie modif. »), parmi : Promo, Lancement, Rupture, Surstock, Stock DC, Donnée erronée, Demande boutique, Autre. « Demande boutique » est nouvelle. La raison libre reste facultative (panneau « Pourquoi »). Règle 6 de CLAUDE.md mise à jour.
+- Le modèle `Override` refuse une modification sans catégorie. Auteur et heure restent toujours gardés.
+- Une quantité tapée sans catégorie n'est **pas appliquée** : la ligne affiche la quantité saisie avec le statut « À catégoriser » et un bandeau compte les lignes en attente. L'export du fichier LT est bloqué tant qu'il en reste (rien de silencieux). La catégorie peut aussi être choisie avant la quantité.
+- Revenir à la quantité proposée retire la modification, sans catégorie à donner.
+- Lignes BLOCKED par un événement : une modification doit toujours avoir **une raison** pour lever le blocage (D-031 inchangée).
+- Base locale : la colonne `category` reste nullable pour garder les modifications passées enregistrées sans catégorie ; l'Historique les classe sous « Sans catégorie ». Pas de migration.
+- Libellés courts pour tenir dans la cellule (« Promo » au lieu de « Promo / événement », etc.) ; les valeurs stockées ne changent pas.
 - Même règle dans la démo web.

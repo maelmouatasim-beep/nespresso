@@ -299,7 +299,7 @@ def test_export_refused_until_blocked_lines_are_treated() -> None:
     assert check.blocked == ("7005.70",) and check.unvalidated == ("7921.70",)
     assert check.to_include == (("7921.70", "Advent"),) and not check.ok
     # override SANS raison : pas « justifié »
-    ov = Override(sku="7005.70", qty_before=0, qty_after=240, author="Camille",
+    ov = Override(sku="7005.70", qty_before=0, qty_after=240, category="other", author="Camille",
                   timestamp=datetime(2026, 10, 5, 9))  # fmt: skip
     check = export_check(res.base_lines, overrides={"7005.70": ov}, seen={"7921.70"},
                          confirmed_blocks=set(), include_confirmed=True)  # fmt: skip
