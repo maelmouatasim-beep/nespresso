@@ -197,7 +197,7 @@ Format : contexte → décision → conséquence.
 
 1. Problème de conversion (contradiction avec SKU Conversion, chaîne A → B → C) → BLOCKED.
 2. Bloquer l'envoi (Interdiction, Arrêt) → BLOCKED, quantité 0. Une interdiction gagne toujours : si un autre événement donnait une quantité, la raison « Le blocage prime sur … » est écrite.
-3. Quantité imposée ou ajoutée → REVIEW, source « Événement », arrondie au multiple supérieur. Deux quantités différentes sur le même SKU (deux imposées différentes, imposée + ajoutée, deux ajoutées) → BLOCKED « Deux événements contradictoires », quantité 0, à trancher par une modification. Deux quantités identiques : appliquée une fois.
+3. Quantité imposée ou ajoutée → REVIEW, source « Événement », arrondie au multiple supérieur. Deux quantités imposées différentes, ou une imposée + une ajoutée → BLOCKED « Deux événements contradictoires », quantité 0, à trancher par une modification. Deux quantités imposées identiques : appliquée une fois. Plusieurs quantités ajoutées : additionnées (remplacé par D-034).
 4. Flag → REVIEW, la quantité du moteur reste.
 - Une **allocation officielle n'est jamais écrasée** (règle 5) : la ligne garde l'allocation et passe en REVIEW avec la quantité que proposait l'événement.
 - Une ligne déjà **bloquée par le moteur** (exclusion, portfolio, ancien SKU) reste bloquée ; la demande de l'événement est écrite dans les raisons.
@@ -222,3 +222,10 @@ Format : contexte → décision → conséquence.
 
 - La démo web contient les 4 événements fictifs de B80 (promotion, lancement absent de la Stock Situation, arrêt, demande boutique personnelle de Camille). La page « Événements SKU » est en lecture seule (filtres, détail, « Reprendre », terminer une demande) : création, modification, duplication et import Excel sont dans l'outil installé.
 - Démo : la commande B80 est calculée d'avance avec les événements évalués pour la livraison du 08/10/2026 ; « Mes fichiers » envoie les événements au moteur Python du navigateur, qui choisit lui-même ceux actifs à la date saisie (mêmes quantités que l'outil installé, test `test_web_bridge.py`).
+
+## D-034 — Quantités ajoutées additionnées (Q-027) (2026-10-11)
+
+- Décision du planner : deux (ou plus) événements qui **ajoutent** une quantité au même SKU (ex. promo + demande boutique) s'additionnent. La ligne passe en REVIEW (plus de BLOCKED dans ce cas) et chaque événement est cité dans « Pourquoi », suivi du total (« 720 calculé + 240 + 240 = 1200 »).
+- Chaque quantité ajoutée est arrondie au multiple supérieur séparément, puis les quantités arrondies sont additionnées : le total est la somme de ce que chaque événement aurait ajouté seul. Même quantité ajoutée par deux événements : comptée deux fois. Un SKU listé deux fois dans le même événement compte une fois.
+- Les autres conflits restent BLOCKED « Deux événements contradictoires » : deux quantités imposées différentes, une imposée + une ajoutée, et blocage contre quantité (le blocage gagne).
+- Version de règle : `events-1.1.0`.
