@@ -58,7 +58,8 @@ def build_catalog(*sources: Iterable[tuple[str, str | None]]) -> dict[str, str]:
     out: dict[str, str] = {}
     for src in sources:
         for sku, desc in src:
-            out.setdefault(sku, desc or "")
+            if not out.get(sku):  # première description non vide
+                out[sku] = desc or ""
     return out
 
 

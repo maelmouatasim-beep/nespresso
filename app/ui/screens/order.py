@@ -182,9 +182,9 @@ def _event_banner(res) -> str | int | None:  # noqa: ANN001
         for e in res.events:
             n = len(counts.get(e.id, ()))
             labels[e.id or 0] = f"{EVENT_DOT[e.scope.value]} {e.title} ({n} SKU)"
-        c1, c2 = st.columns([1.6, 6], vertical_alignment="center")
-        c1.markdown(f"**Événements** · Équipe : {team} · Personnel : {len(res.events) - team}")
-        choice = c2.pills("Événements", list(labels), key="f_event", format_func=labels.get,
+        st.markdown(f"**Événements actifs** · Équipe : {team} · Personnel : "
+                    f"{len(res.events) - team} — clic sur un événement pour filtrer la table")  # fmt: skip
+        choice = st.pills("Événements", list(labels), key="f_event", format_func=labels.get,
                           label_visibility="collapsed")  # fmt: skip
     else:
         choice = None

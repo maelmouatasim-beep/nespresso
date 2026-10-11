@@ -220,28 +220,25 @@ def _visible(events: list[SkuEvent], tab: str) -> list[SkuEvent]:
     return [e for e in events if e.scope is EventScope.PERSONAL]
 
 
-def _filters(events: list[SkuEvent], tab: str, day: date, me: str,
-             boutiques: list[str]) -> list[SkuEvent]:  # fmt: skip
-    c1, c2 = st.columns([3.2, 2], vertical_alignment="bottom")
-    search = c1.text_input("Recherche", placeholder="Rechercher un titre, un SKU ou une boutique",
-                           key=f"evs_search_{tab}", label_visibility="collapsed")  # fmt: skip
+def _filters(events: list[SkuEvent], tab: str, day: date, me: str, boutiques: list[str],
+             search: str) -> list[SkuEvent]:  # fmt: skip
     by_status = {s: 0 for s in STATUS_FILTERS}
     for e in events:
         by_status[_status_group(display_status(e, day))] += 1
         by_status["Tous"] += 1
-    status = c2.segmented_control("Statut", STATUS_FILTERS, default="Actifs", key=f"evs_status_{tab}",
+    c1, c2, c3 = st.columns([3.6, 1.3, 1.3], vertical_alignment="bottom")
+    status = c1.segmented_control("Statut", STATUS_FILTERS, default="Actifs", key=f"evs_status_{tab}",
                                   format_func=lambda s: f"{s} ({by_status[s]})",
                                   label_visibility="collapsed") or "Tous"  # fmt: skip
-    c3, c4, c5 = st.columns([4.2, 1.4, 1.4], vertical_alignment="bottom")
-    types = [t for t in EventType if tab == MINE_TAB or t not in PERSONAL_ONLY]
-    chosen = c3.pills("Type", types, selection_mode="multi", key=f"evs_type_{tab}",
-                      format_func=lambda t: TYPE_LABELS[t], label_visibility="collapsed")  # fmt: skip
-    boutique = c4.selectbox("Boutique", boutiques, index=None, placeholder="Toutes les boutiques",
+    boutique = c2.selectbox("Boutique", boutiques, index=None, placeholder="Toutes les boutiques",
                             key=f"evs_btq_{tab}", label_visibility="collapsed")  # fmt: skip
     names = sorted({e.planner for e in events if e.planner} | ({me} if me else set()))
     default = names.index(me) if tab == MINE_TAB and me in names else None
-    planner = c5.selectbox("Planner", names, index=default, placeholder="Tous les planners",
+    planner = c3.selectbox("Planner", names, index=default, placeholder="Tous les planners",
                            key=f"evs_planner_{tab}", label_visibility="collapsed")  # fmt: skip
+    types = [t for t in EventType if tab == MINE_TAB or t not in PERSONAL_ONLY]
+    chosen = st.pills("Type", types, selection_mode="multi", key=f"evs_type_{tab}",
+                      format_func=lambda t: TYPE_LABELS[t], label_visibility="collapsed")  # fmt: skip
     needle = search.strip().lower()
     out = []
     for e in events:
@@ -437,7 +434,7 @@ def _form(proto: SkuEvent | None, scope_default: EventScope, me: str) -> SkuEven
     skus = _sku_block(proto, etype, _catalog())
     btqs, dc_codes = _targets_block(proto, etype, boutiques, dcs, names)
 
-    c1, c2, c3 = st.columns([1.2, 1.2, 0.9])
+    c1, c2, c3 = st.columns([1.1, 1.3, 1])
     start = c1.date_input("Début *", value=proto.start if proto else run_date(), key=_k("start"),
                           format="DD/MM/YYYY")  # fmt: skip
     until_next = False
@@ -451,7 +448,7 @@ def _form(proto: SkuEvent | None, scope_default: EventScope, me: str) -> SkuEven
                             value=proto.end if proto else None, key=_k(f"end_{etype}"),
                             format="DD/MM/YYYY")  # fmt: skip
     same_type = proto is not None and proto.type is etype
-    lead = c3.number_input("Anticipation (j)", min_value=0, max_value=120, step=1,
+    lead = c3.number_input("Anticip. (j)", min_value=0, max_value=120, step=1,
                            value=proto.lead_days if same_type else default_lead_days(etype),
                            key=_k(f"lead_{etype}"),
                            help="Le SKU est flagué X jours AVANT le début (7 par défaut pour un "
@@ -756,25 +753,29 @@ def render() -> None:
         return f"{t} ({n})"
 
     tab = st.segmented_control("Onglet", (TEAM_TAB, MINE_TAB), default=TEAM_TAB, key="ev_tab",
-                               format_func=tab_label, label_visibility="collapsed") or TEAM_TAB  # fmt: skip
-    b1, b2, _ = st.columns([1.4, 1.4, 4])
+                               format_func=tab_label, label_visibility="collapsed",
+                               on_change=_open, args=(None,)) or TEAM_TAB  # fmt: skip
+    b1, b2, b3 = st.columns([1.3, 1.3, 4], vertical_alignment="bottom")
     b1.button("Nouvel événement", icon=":material/add:", type="primary", key="ev_new",
               on_click=_open, args=("new",), width="stretch")  # fmt: skip
     if tab == MINE_TAB:
         b2.button("Demande boutique", icon=":material/storefront:", key="ev_request",
                   on_click=_open, args=("request",), width="stretch")  # fmt: skip
-        if not me:
-            st.info("Choisis ton prénom (Planner, barre de gauche) pour voir tes événements.")
+    search = b3.text_input("Recherche", placeholder="Rechercher un titre, un SKU ou une boutique",
+                           key=f"evs_search_{tab}", label_visibility="collapsed")  # fmt: skip
+    if tab == MINE_TAB and not me:
+        st.info("Choisis ton prénom (Planner, barre de gauche) pour voir tes événements.")
     data = day_data()
     boutiques = all_boutiques(data.masters, data.stock) if data else []
-    shown = _filters(_visible(events, tab), tab, day, me, boutiques)
+    shown = _filters(_visible(events, tab), tab, day, me, boutiques, search)
 
     side = ss.ev_edit is not None
     table, panel = st.columns([2.5, 1.5]) if side else (st.container(), None)
     with table:
         df = _frame(shown, day)
         edited = st.data_editor(_style(df), key=f"ev_grid_{tab}_{ss.ev_nonce}", hide_index=True,
-                                width="stretch", height=TABLE_HEIGHT, column_config=COLUMN_CONFIG,
+                                width="stretch", height=min(TABLE_HEIGHT, 35 * (len(df) + 1) + 4),
+                                column_config=COLUMN_CONFIG,
                                 disabled=[c for c in df.columns if c != "Ouvrir"])  # fmt: skip
         st.caption(f"{len(shown)} événement(s) · ● Équipe ○ Personnel · tri par date de fin · "
                    "clic sur un en-tête pour trier · case « Ouvrir » pour le panneau")  # fmt: skip

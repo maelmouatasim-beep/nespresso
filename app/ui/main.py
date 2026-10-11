@@ -72,6 +72,15 @@ st.markdown(
     button[data-variant="segmented_control"][aria-checked="true"] * {color: #2B1D14 !important;
         font-weight: 600;}
     button[data-variant="segmented_control"]:hover {border-color: #B08D57;}
+    /* Puces (filtres Type, événements) : sélection lisible (texte brun sur doré clair) */
+    button[data-variant="pills"][aria-pressed="true"],
+    button[data-variant="pills"][aria-checked="true"] {background: #F3E9D8 !important;
+        border-color: #B08D57 !important;}
+    button[data-variant="pills"][aria-pressed="true"], button[data-variant="pills"][aria-checked="true"],
+    button[data-variant="pills"][aria-pressed="true"] *, button[data-variant="pills"][aria-checked="true"] *
+        {color: #2B1D14 !important; font-weight: 600;}
+    button[data-variant="pills"]:hover {border-color: #B08D57;}
+    .st-key-ev_panel {background: #FFFFFF; box-shadow: 0 2px 8px rgba(43, 29, 20, 0.08);}
     /* Logo texte de la barre latérale */
     .spc-logo {font-weight: 700; font-size: 1.15rem; letter-spacing: 0.01em; color: #FAF7F2;
         line-height: 1.25; margin: -0.6rem 0 1rem;}
@@ -99,11 +108,10 @@ with st.sidebar:
     names = planners()
     if ss.author and ss.author not in names:
         names.append(ss.author)
-    c1, c2 = st.columns([4, 1], vertical_alignment="bottom")
-    c1.selectbox("Planner", names, key="author", index=None, placeholder="Choisis ton prénom",
+    st.selectbox("Planner", names, key="author", index=None, placeholder="Choisis ton prénom",
                  help="Sert à « Mes événements », aux événements personnels et à signer "
                       "les modifications et validations.")  # fmt: skip
-    with c2.popover(":material/person_add:", help="Ajouter un planner"):
+    with st.popover("Ajouter un planner", icon=":material/person_add:"):
         st.text_input("Prénom (pas d'email)", key="new_planner")
         st.button("Ajouter", key="add_planner", on_click=_add_planner)
         if ss.get("planner_error"):

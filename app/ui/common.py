@@ -325,7 +325,7 @@ ORDER_COLUMN_CONFIG = {
     "Description": st.column_config.TextColumn(width=210),
     "Catégorie": st.column_config.TextColumn(width=120),
     "Événement": st.column_config.TextColumn(
-        width=150, help="● événement d'équipe · ○ événement personnel"
+        width=180, help="● événement d'équipe · ○ événement personnel"
     ),
     "Expected": st.column_config.NumberColumn(width=80, **_INT),
     "Ventes": st.column_config.NumberColumn(width=70, **_INT),
