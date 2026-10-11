@@ -35,6 +35,26 @@ Modèle : `StockMovement`. 1 551 lignes, 7 dates (28-sept → 04-oct).
 | quantity | nombre | Quantité sortie (positive) |
 | movement_description | texte | |
 
+### Export Power BI brut (vérifié le 07-oct-2026 sur un vrai fichier)
+
+Fichier `.xlsx` nommé « data - AAAA-MM-JJThhmmss.mmm.xlsx », un onglet `Export`, toutes les
+boutiques et les DC, ~80 000 lignes sur 7 jours, ligne de pied « Applied filters: … » (retirée).
+L'outil reconnaît le fichier par ses colonnes, pas par son nom.
+
+| Colonne de l'export | Champ | Remarque |
+|---|---|---|
+| Stock Movement Id | movement_id | texte |
+| Stock | location | boutique ou DC |
+| Product Nr | sku | texte |
+| Product Type (Prod) | product_type | |
+| Stock Mvt Date | movement_date | date Excel |
+| Mvt Code | movement_code | texte (ex. « 2801 ») |
+| Quantity (Sum) | quantity | **négatif** : l'export ne garde que les sorties (filtre « ≤ 0 ») ; l'outil les compte en ventes positives (D-026) |
+| Mvt Code Descr (Mvt Cd) | movement_description | |
+
+L'export Stock Situation brut a les mêmes colonnes que le fichier de test ci-dessus (onglet
+`Export`, ~94 000 lignes, 42 emplacements dont les 4 DC, pied « No filters applied »).
+
 ## master_multiples.csv — onglet Multiple list
 
 Modèle : `Product`. Première ligne gagnante en cas de doublon (D-005).

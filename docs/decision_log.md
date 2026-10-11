@@ -112,3 +112,74 @@ Format : contexte → décision → conséquence.
 ## D-018 — Confidentialité de l'outil local (2026-10-06)
 
 - `.streamlit/config.toml` coupe la télémétrie de Streamlit (`gatherUsageStats = false`) et n'écoute que sur le poste (`localhost`), conformément à « aucune donnée envoyée à un service externe ».
+
+## D-019 — Dépôt du jour au lieu d'une connexion Power BI (2026-10-07)
+
+- Décision A1 du planner. L'écran « Dépôt du jour » reçoit les deux exports, détecte la date d'extraction (nom du fichier, puis propriétés du classeur ; sinon le planner la confirme) et affiche la fraîcheur (vert aujourd'hui, orange hier, rouge au-delà).
+- Les fichiers sont copiés dans `data/depot/<date>/` (non versionné). L'ancien module qui simulait une source « Power BI » a été supprimé.
+- Le bouton « Prêt » reste grisé tant qu'un contrôle qualité est bloquant.
+
+## D-020 — Sélection des lignes : deux règles selon le mode (2026-10-07)
+
+- **Parité Excel** : règle « Filter out » d'Excel, portfolio comparé en numérique puis en texte (A4). Sur B80 : les 451 lignes d'Excel + `2007.70` = 452 lignes. L'écart sur `2007.70` est documenté (Q-023) au lieu d'être forcé.
+- **Standard** : tous les SKU avec une activité (A5) : portfolio, Expected/Available/Incoming non nul, ou mouvement dans la fenêtre. Sur B80 : 460 lignes.
+- Remplace D-011. Le test de parité des quantités calcule toujours les SKU du golden (D-007, 416/416) ; la sélection est testée à part (`test_a4_b80_selection_matches_excel_451_lines`).
+
+## D-021 — Exclusions éditables, plus aucun SKU codé en dur (2026-10-07)
+
+- Décision A8. Remplace D-008. Une exclusion (SKU, boutiques ou toutes, raison, auteur, date) bloque la ligne dans les deux modes : `BLOCKED`, quantité 0, source « Exclusion », raison visible dans le « Pourquoi ».
+- La comparaison des SKU est numérique puis texte, comme le portfolio.
+- Conséquence parité : `7010.70` reste à 0 tant qu'il est dans le référentiel ; si on le retire, l'outil le calcule normalement (écart volontaire avec Excel).
+
+## D-022 — Multiples : arrondi partout, doublons signalés (2026-10-07)
+
+- Décision A3. Allocation, lancement, stock cible et override sont arrondis au multiple **supérieur**, avec une raison « Arrondi au multiple de M : x → y ». Une saisie du planner (override) est arrondie de la même façon.
+- Décision A9. Un SKU avec deux multiples passe en REVIEW. En mode Standard, si le multiple de la famille (240 VER / 800 ORI) est l'un des deux, il l'emporte (ex. `7922.70` → 800). En Parité Excel, la première ligne est gardée (comportement Excel).
+
+## D-023 — SKU dormants et historique de secours (2026-10-07)
+
+- Décisions A6 et A7. Une ligne sans ventes ni Expected mais avec du stock DC passe en REVIEW « Retour en stock DC » si elle est au portfolio ou a des ventes dans l'historique long.
+- Quantité suggérée (mode Standard) : cover × moyenne journalière des X dernières semaines **complètes** avec ventes (X = 4 par défaut), arrondie au multiple. En Parité Excel, la suggestion est affichée mais pas appliquée (Excel donne 0).
+- Sans historique suffisant (ex. démo B80 : 7 jours de mouvements), la ligne reste en REVIEW avec « Historique de secours insuffisant » et quantité 0 : le planner décide.
+
+## D-024 — Interface en 6 écrans (2026-10-07)
+
+- Ordre de la barre latérale : Dépôt du jour, Commande boutique, Journée, Export, Référentiels, Historique. Une tâche par écran.
+- Couleurs fixes : OK vert, REVIEW orange, BLOCKED rouge, modifié bleu. Nombres alignés à droite avec séparateur de milliers, couvertures à 1 décimale.
+- Une modification de quantité exige une catégorie et une raison ; le nom du planner est saisi une fois par session.
+- La version web de démonstration reprend les mêmes écrans ; ses quantités sont calculées d'avance par le moteur Python, la page n'en calcule aucune.
+
+## D-025 — Commande en une seule grille, catégories par type produit (2026-10-07)
+
+- Demande du planner : l'écran Commande boutique ressemble au calculateur Excel. Une seule table pleine largeur, en-tête figé, défilement interne ; plus de regroupement par famille ni de lignes repliées (remplace la partie « tableau groupé par famille » de D-024).
+- Filtres sans recalcul : Catégorie (Tous / Cafés / Machines / Accessoires / Consommables & sacs / Autres), Statut (Tous / OK / REVIEW / BLOCKED / Modifié), « Qty > 0 seulement », recherche SKU ou description. Le filtre Statut suit ce qui est affiché : une ligne modifiée n'apparaît que sous « Modifié ».
+- Tri au clic sur chaque en-tête ; tri par défaut : REVIEW et BLOCKED en haut, puis Qty proposée décroissante. Les nombres sont de vrais nombres dans la grille (tri correct), les cases vides affichent « — ».
+- La catégorie vient du type produit via un référentiel modifiable (`masters/categories.csv`, modèle `templates/categories.xlsx`) ; valeurs par défaut données par le planner. Un type inconnu va dans « Autres » et l'écran Référentiels liste ces types. Un fichier invalide est signalé et le classement par défaut est gardé (affichage seulement, ne bloque pas le calcul).
+- Limite de Streamlit : une grille modifiable ne sait pas réagir au clic sur une ligne. Une petite case 🔍 en première colonne ouvre le panneau « Pourquoi » à droite (la version web, elle, ouvre le panneau au clic sur la ligne).
+- « Accepter toutes les lignes OK » marque les lignes OK comme validées (« ✓ » dans le Statut) ; une ligne REVIEW se valide depuis son panneau « Pourquoi ».
+
+## D-026 — Dépôt des vrais exports Power BI (2026-10-07)
+
+- Vérifié sur les deux exports réels du planner (non versionnés) : les colonnes de Stock Movements diffèrent des données de test (« Product Nr », « Stock Mvt Date », « Mvt Code », « Quantity (Sum) »…). Elles sont ajoutées aux noms acceptés ; les anciens restent valables.
+- **Signe des quantités** : l'export ne contient que les sorties, en négatif (filtre « Quantity (Sum) ≤ 0 »). Les données de test et le calculateur les ont en positif. Règle : toutes négatives → comptées en ventes positives (information affichée) ; toutes positives → gardées ; signes mélangés → fichier refusé avec la raison (on ne peut pas savoir ce qui est une vente). Aucun écart de parité : la quantité vendue est la même.
+- **Doublons d'un même SKU au même emplacement** (cas réel : «  473ECO/B » avec un espace et « 473ECO/B ») : si une seule ligne a du stock, elle est gardée avec un avertissement ; sinon le fichier est bloqué (Q-026).
+- **Une seule zone de dépôt** : les deux exports s'appellent « data - … » ; l'outil les reconnaît par leurs colonnes et les range dans la bonne case. Un fichier non reconnu est refusé avec un message. En mode démo, le dépôt est désactivé.
+- **Vitesse** : lecture Excel avec `python-calamine` (≈ 1 s au lieu de ≈ 14 s pour 94 000 lignes), cache local du fichier lu (`data/depot/…/_cache_*.pkl`, jamais versionné) et données du jour partagées entre les écrans tant que les fichiers ne changent pas.
+- **Référentiels** : ils s'importent maintenant depuis l'écran (calculateur `.xlsm` → multiples, conversions, DC, portfolio, Schedule), sans ligne de commande. En attendant, un bouton permet de partir des référentiels de test (B80, 05-oct-2026).
+
+## D-027 — Version web : « Mes fichiers » calculés dans le navigateur (2026-10-07)
+
+- Demande du planner : déposer ses vrais exports dans la version web, sans installer l'outil.
+- **Même moteur, pas de copie** : la page charge Pyodide (Python compilé pour le navigateur) et le code `app/` du dépôt ; les quantités viennent de `run_planning`, comme dans l'outil installé. Aucun moteur réécrit en JavaScript. Testé : mêmes quantités que l'outil installé (B80 et B5 sur les exports réels, tests `test_web_bridge.py`).
+- **Confidentialité** : les fichiers sont lus et calculés dans le navigateur ; la page n'envoie rien (elle ne peut joindre que ses propres fichiers). Rien n'est gardé après la fermeture de la page.
+- **Lecture Excel** dans la page par SheetJS (cdnjs). Il perd le format date de certaines cellules des exports Power BI : les dates restées en numéros de série Excel (ex. 46295) sont converties si toutes sont plausibles, avec un message (`DATE_SERIAL`).
+- **Référentiels** : ceux des données de test (multiples, conversions, DC, Schedule du 05/10/2026, portfolio de B80). Le portfolio des autres boutiques n'est pas encore disponible dans la version web.
+- **Publication** : Pyodide et ses bibliothèques sont vérifiés par empreinte (`tools/fetch_pyodide.py`) ; les archives (.zip, .whl), refusées par la plateforme, sont publiées en base64 et décodées par la page.
+
+## D-028 — Modifications sans justification obligatoire (2026-10-08)
+
+- Décision du planner : une quantité modifiée compte tout de suite, sans bloc « Modifications à justifier ». La règle 6 de CLAUDE.md est modifiée en conséquence ; remplace D-006 (partie raison) et D-017.
+- Toujours gardés : la quantité d'avant, la quantité saisie (arrondie au multiple supérieur), l'auteur (nom du planner, sinon « Planner non renseigné ») et l'heure. La ligne passe en « Modifié » et la raison « Modifié par … : avant → après » reste visible.
+- Catégorie et raison deviennent facultatives : on peut les ajouter dans le panneau « Pourquoi ». L'Historique classe les modifications sans catégorie sous « Sans catégorie ».
+- Base locale : la contrainte « raison d'au moins 3 caractères » est retirée ; les bases existantes sont migrées automatiquement (table recréée, toutes les modifications passées gardées).
+

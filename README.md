@@ -25,24 +25,33 @@ pip install -e ".[dev]"
 streamlit run app/ui/main.py
 ```
 
-Le navigateur s'ouvre sur l'outil. Ensuite :
+Le navigateur s'ouvre sur l'outil. Dans la barre de gauche : tape ton nom, choisis « Mes données »
+(ou « Démo B80 » pour essayer), puis suis les écrans dans l'ordre :
 
-1. **Barre de gauche** : tape ton nom, puis « Charger la démo » (données de test B80) ou « Mes fichiers »
-   (exports Power BI + tables maîtres).
-2. **Onglet 1. Paramètres** : boutique, date de livraison, jours de couverture (et cover café si besoin),
-   mode, puis « Calculer la commande ».
-3. **Onglet 2. Validation** : filtre, vérifie les lignes REVIEW / BLOCKED, modifie une « Qty finale »
-   avec une raison, puis « Appliquer ». En bas : « Pourquoi cette quantité ? ».
-4. **Onglet 3. Résumé & export** : unités, palettes, signalements ; télécharge le fichier LT (Nessoft)
-   et le récapitulatif boutique. Le run est enregistré dans `data/copilot.db`.
-5. **Onglet Journée** : les boutiques qui commandent ce jour-là (d'après le Schedule) ; saisis le cover
-   de chacune, calcule tout, télécharge le zip des fichiers LT, ou ouvre une boutique pour la valider.
-6. **Onglet Historique & overrides** : runs passés, comparaison avec la commande en cours, et analyse
-   des modifications des planners (par catégorie, par SKU).
+1. **Dépôt du jour** : choisis « Mes données », puis glisse les deux exports Power BI du matin
+   (Stock Situation et Stock Movements) dans la zone de dépôt, ensemble ou l'un après l'autre.
+   L'outil reconnaît chaque fichier par ses colonnes, lit la date d'extraction et affiche sa
+   fraîcheur (vert = aujourd'hui, orange = hier, rouge = plus vieux), puis les contrôles qualité.
+   La première fois, importe les référentiels depuis ton calculateur Excel (`.xlsm`) ou pars des
+   référentiels de test. Clique sur « Prêt ».
+   L'outil ne se connecte jamais à Power BI : c'est toi qui déposes les fichiers.
+2. **Commande boutique** : boutique (recherche par code ou nom), date de livraison, cover, cover café
+   (facultatif), jours d'historique, mode, puis « Calculer ». Toutes les lignes sont dans une seule
+   grille, comme dans le calculateur Excel : filtres Catégorie et Statut, « Qty > 0 seulement »,
+   recherche, tri au clic sur un en-tête. Coche 🔍 sur une ligne pour voir « Pourquoi cette quantité ? »
+   à droite. Tape la « Qty finale » directement dans la cellule : la modification compte tout de suite
+   (catégorie et raison facultatives, à ajouter dans le panneau « Pourquoi »).
+3. **Journée** : plusieurs boutiques d'un coup (présélection du Schedule, modifiable), un cover par
+   boutique, puis le zip des fichiers LT.
+4. **Export** : fichier LT pour Nessoft, récapitulatif boutique, export Excel détaillé.
+   L'outil n'écrit jamais dans Nessoft : tu importes le fichier toi-même.
+5. **Référentiels** : multiples, conversions, portfolio, boutiques/DC, Schedule, exclusions,
+   catégories (type produit → catégorie du filtre), allocations, lancements, stocks cibles, règles boutique. Propriétaire, date de mise à jour,
+   anomalies, import depuis un modèle.
+6. **Historique** : commandes enregistrées, modifications par catégorie, SKU les plus modifiés,
+   comparaison de deux commandes.
 
-Chaque modification de quantité exige une **catégorie** (promo, lancement, rupture…), une **raison**
-et ton **nom**. Dans l'onglet 3, « Télécharger le détail (Excel) » donne toute la commande avec ses
-explications, les paramètres et les modifications.
+Les fichiers déposés et la base locale restent dans `data/` (jamais versionné).
 
 ### Préparer les vrais fichiers (en local, jamais dans le dépôt)
 
@@ -55,9 +64,6 @@ python tools/make_templates.py                                          # modèl
 Modèles à remplir (dossier `templates/`) : `allocations.xlsx`, `launches.xlsx`, `target_stock.xlsx`,
 `boutique_rules.xlsx` (règles tirées des notes de la Bible, validées par un humain : palettes max,
 quantité max / min par SKU…). Une règle ne change jamais une quantité : elle signale.
-
-```bash
-```
 
 ## Vérifier
 
@@ -88,5 +94,7 @@ python tools/build_preview.py   # écrit preview/apercu_B80.html, à ouvrir dans
 python tools/build_demo_app.py  # écrit preview/outil_B80.html : version web complète de la démo
 ```
 
-Les quantités de l'aperçu sont pré-calculées par le moteur Python ; la page ne fait que les afficher.
+Version web : « Démo B80 » montre des quantités pré-calculées ; « Mes fichiers » lit tes exports
+dans le navigateur et les calcule avec le même moteur Python (Pyodide), sans rien envoyer.
+Avant de générer la page la première fois : `python tools/fetch_pyodide.py`.
 Le dossier `preview/` n'est pas versionné.

@@ -1,5 +1,8 @@
 """Arbitrage entre prévision, allocations, lancements et stock cible. Fonctions pures.
 
+Toutes les quantités sont arrondies au multiple supérieur (décision A3), sauf le
+plafond du stock cible, arrondi au multiple inférieur pour ne pas dépasser le max.
+
 Hiérarchie appliquée (hypothèse documentée, open_questions Q-013) :
 1. Allocation officielle : REMPLACE la prévision (jamais écrasée par elle, règle 5).
 2. Lancement : avant la date de lancement, la quantité initiale remplace la prévision
@@ -26,7 +29,7 @@ from app.domain.models import (
 )
 from app.engines.forecast import ceiling_to_multiple
 
-RULE_VERSION = "business-1.0.0"
+RULE_VERSION = "business-2.0.0"
 
 
 class BusinessInputError(ValueError):
@@ -49,10 +52,6 @@ def allocation_due(alloc: Allocation) -> tuple[int, int]:
     cumulative = sum(alloc.wave_plan[: alloc.current_wave])
     planned = (alloc.total_qty * cumulative + 50) // 100
     return max(0, planned - alloc.already_sent), cumulative
-
-
-def _rank(status: Status) -> int:
-    return {Status.OK: 0, Status.REVIEW: 1, Status.BLOCKED: 2}[status]
 
 
 def _update(
@@ -113,18 +112,22 @@ def apply_business_rules(
             if line.status is Status.BLOCKED:
                 status = Status.REVIEW
                 reasons.append("Allocation sur un SKU bloqué par la prévision : à vérifier")
-            if due % multiple:
-                status = max(status, Status.REVIEW, key=_rank)
-                reasons.append(f"Allocation non multiple de {multiple}")
+            rounded = ceiling_to_multiple(Fraction(due), multiple)
+            if rounded != due:
+                reasons.append(f"Arrondi au multiple de {multiple} : {due} → {rounded}")
             if launch is not None:
                 reasons.append("Lancement ignoré : l'allocation officielle prime")
             line = _update(
                 line,
-                qty=due,
+                qty=rounded,
                 source=QtySource.ALLOCATION,
                 reasons=reasons,
                 status=status,
-                trace={"allocation": alloc.model_dump(mode="json"), "allocation_due": due},
+                trace={
+                    "allocation": alloc.model_dump(mode="json"),
+                    "allocation_due": due,
+                    "rounded_to_multiple": rounded,
+                },
             )
         elif launch is not None and run_date <= launch.launch_date:
             need = launch.qty - expected

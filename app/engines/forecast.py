@@ -1,10 +1,12 @@
 """Moteur de quantités « Suggested Qty ». Fonctions PURES : aucune I/O, aucun LLM.
 
 Deux modes :
+- `standard` (mode de travail) : un café sans multiple reçoit le multiple de sa famille
+  (VER- 240, ORI- 800) ; un SKU dormant revenu en stock au DC reçoit une quantité
+  suggérée sur l'historique de secours ; les exclusions du référentiel s'appliquent.
 - `excel_parity` : reproduit le calculateur Excel « B80 105.xlsm » (onglet Stock
-  Cover Final). Un multiple absent vaut 1, comme dans Excel.
-- `safe` : même calcul, mais un café sans multiple reçoit le multiple de sa
-  famille (VER-, ORI-) au lieu de 1.
+  Cover Final) pour comparer. Un multiple absent vaut 1, comme dans Excel, et les
+  suggestions « retour DC » restent à 0 (signalées, jamais appliquées).
 
 Dans les deux modes, toute donnée manquante ou suspecte est signalée (REVIEW ou
 BLOCKED + raison) : le mode ne change que la quantité, jamais la transparence.
@@ -15,27 +17,27 @@ dépende pas d'erreurs d'arrondi des nombres à virgule.
 from __future__ import annotations
 
 import math
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from fractions import Fraction
 from typing import Any
 
 from app.domain.models import (
     COFFEE_TYPE,
+    Exclusion,
     ForecastMode,
     PlanningParameters,
     Product,
+    QtySource,
     RecommendationLine,
     Status,
     StockSnapshotLine,
 )
 from app.engines.conversion import ConversionIndex
-from app.engines.sales import SalesSummary
+from app.engines.portfolio import EMPTY_PORTFOLIO, PortfolioIndex, numeric_key
+from app.engines.sales import FallbackHistory, SalesSummary
 
-RULE_VERSION = "forecast-1.0.0"
-
-# Exception codée en dur dans la formule Excel (raison inconnue, cf. open_questions).
-EXCEL_HARDCODED_ZERO_SKUS: frozenset[str] = frozenset({"7010.70"})
+RULE_VERSION = "forecast-2.0.0"
 
 # Patterns métier confirmés par le planner (CLAUDE.md).
 VERTUO_MULTIPLE = 240
@@ -49,6 +51,12 @@ REASON_SUSPECT_MULTIPLE = "Multiple suspect"
 REASON_NO_ACTIVITY = "Aucune activité"
 REASON_NEGATIVE_EXPECTED = "Expected négatif"
 REASON_DC_INSUFFICIENT = "Stock DC insuffisant"
+REASON_DC_RETURN = "Retour en stock DC : rupture probable, à réapprovisionner"
+REASON_DC_OUT = "Rupture DC, rien à envoyer"
+REASON_NO_FALLBACK = (
+    "Historique de secours insuffisant : quantité à décider (déposer 4 à 8 semaines de mouvements)"
+)
+REASON_TWO_MULTIPLES = "Deux multiples dans la Multiple list"
 
 
 @dataclass(frozen=True)
@@ -60,8 +68,20 @@ class ForecastInputs:
     sales: SalesSummary
     products: Mapping[str, Product]
     conversions: ConversionIndex
-    hardcoded_zero_skus: frozenset[str] = EXCEL_HARDCODED_ZERO_SKUS
     sources: Mapping[str, str] = field(default_factory=dict)
+    portfolio: PortfolioIndex = EMPTY_PORTFOLIO
+    exclusions: Sequence[Exclusion] = ()
+    fallback: FallbackHistory | None = None
+
+
+def find_exclusion(sku: str, boutique: str, exclusions: Iterable[Exclusion]) -> Exclusion | None:
+    """Exclusion qui s'applique au SKU dans cette boutique (comparaison numérique puis texte)."""
+    key = numeric_key(sku)
+    for ex in exclusions:
+        same = ex.sku == sku or (key is not None and numeric_key(ex.sku) == key)
+        if same and ex.applies_to(boutique):
+            return ex
+    return None
 
 
 def ceiling_to_multiple(raw: Fraction, multiple: int) -> int:
@@ -171,11 +191,21 @@ def compute_line(
         qty_reliable = False
     elif list_multiple is not None:
         multiple, multiple_source = list_multiple, "multiple_list"
-        if is_coffee and list_multiple == 1:
+        alternatives = sorted({list_multiple, *(product.alt_multiples if product else ())})
+        if len(alternatives) > 1:
+            family = infer_coffee_multiple(description) if is_coffee else None
+            if family is not None and family in alternatives and mode is ForecastMode.STANDARD:
+                multiple, multiple_source = family, "multiple_list_family"
+                why = f"{family} retenu (famille du café)"
+            else:
+                why = f"{list_multiple} retenu (première ligne)"
+            listed = " / ".join(str(m) for m in alternatives)
+            flags.raise_to(Status.REVIEW, f"{REASON_TWO_MULTIPLES} ({listed}) : {why}")
+        if is_coffee and multiple == 1:
             flags.raise_to(Status.REVIEW, f"{REASON_SUSPECT_MULTIPLE} : café avec multiple 1")
     else:
         inferred = infer_coffee_multiple(description) if is_coffee else None
-        if mode is ForecastMode.SAFE and inferred is not None:
+        if mode is ForecastMode.STANDARD and inferred is not None:
             multiple, multiple_source = inferred, "inferred_family"
             flags.raise_to(Status.REVIEW, f"{REASON_INFERRED_MULTIPLE} ({inferred})")
         else:
@@ -198,14 +228,23 @@ def compute_line(
     days_until_delivery = (params.delivery_date - params.run_date).days
 
     # --- Quantité ---
+    dc_line = inputs.dc_stock.get(sku)
+    dc_available = dc_line.available if dc_line else None
+    in_portfolio = inputs.portfolio.contains(sku)
+    exclusion = find_exclusion(sku, params.boutique, inputs.exclusions)
+    source = QtySource.FORECAST
     raw: Fraction | None = None
-    if sku in inputs.hardcoded_zero_skus:
+    fallback_info: dict[str, Any] | None = None
+    if exclusion is not None:
         qty = 0
-        flags.rules.append("excel_hardcoded_zero")
-        flags.raise_to(
-            Status.BLOCKED,
-            f"Exception Excel codée en dur : {sku} toujours à 0 (raison à confirmer)",
-        )
+        source = QtySource.EXCLUSION
+        flags.rules.append("exclusion")
+        who = f"{exclusion.author}, {exclusion.updated_on:%d/%m/%Y}"
+        flags.raise_to(Status.BLOCKED, f"Exclusion : {exclusion.reason} ({who})")
+    elif mode is ForecastMode.STANDARD and inputs.portfolio.filtered_out(sku):
+        qty = 0
+        flags.rules.append("portfolio_filter_out")
+        flags.raise_to(Status.BLOCKED, "Exclu par le portfolio boutique (Filter out = Yes)")
     elif conv.old_blocked and conv.as_old is not None:
         qty = 0
         old = conv.as_old
@@ -232,14 +271,46 @@ def compute_line(
                 "(ancien SKU encore commandable)",
             )
 
-    if sales_total == 0 and expected_total == 0:
+    if (
+        source is QtySource.FORECAST
+        and sales_total == 0
+        and expected_total == 0
+        and raw is not None
+    ):
+        # SKU dormant : rien en boutique, aucune vente sur la fenêtre (règle A6).
+        rate = inputs.fallback.rate(sku) if inputs.fallback is not None else None
+        relevant = in_portfolio or rate is not None
+        if relevant and dc_available is not None and dc_available > 0:
+            flags.rules.append("dc_return")
+            suggested = 0
+            if rate is not None and multiple > 0:
+                suggested = ceiling_to_multiple(Fraction(cover) * rate.daily_rate, multiple)
+            fallback_info = {
+                "weeks_used": rate.weeks_used if rate else 0,
+                "weeks_wanted": inputs.fallback.weeks_wanted if inputs.fallback else 0,
+                "full_weeks_in_export": inputs.fallback.full_weeks if inputs.fallback else 0,
+                "units": rate.units if rate else 0.0,
+                "daily_rate": float(rate.daily_rate) if rate else None,
+                "suggested_qty": suggested,
+            }
+            flags.raise_to(Status.REVIEW, REASON_DC_RETURN)
+            if rate is None:
+                flags.raise_to(Status.REVIEW, REASON_NO_FALLBACK)
+            elif mode is ForecastMode.STANDARD:
+                qty, source = suggested, QtySource.DC_RETURN
+            else:
+                flags.reasons.append(f"Mode parité Excel : suggestion de {suggested} non appliquée")
+        elif relevant:
+            flags.rules.append("dc_out_of_stock")
+            flags.reasons.append(REASON_DC_OUT)
+        else:
+            flags.reasons.append(REASON_NO_ACTIVITY)
+    elif sales_total == 0 and expected_total == 0:
         flags.reasons.append(REASON_NO_ACTIVITY)
     if expected_total < 0:
         flags.raise_to(Status.REVIEW, f"{REASON_NEGATIVE_EXPECTED} ({float(expected_total):g})")
 
     # --- Stock DC (signalé, jamais plafonné) ---
-    dc_line = inputs.dc_stock.get(sku)
-    dc_available = dc_line.available if dc_line else None
     if qty > 0:
         if dc_available is None:
             flags.raise_to(Status.REVIEW, f"{REASON_DC_INSUFFICIENT} : SKU absent du stock DC")
@@ -257,6 +328,11 @@ def compute_line(
             "cover_days": params.cover_days,
             "coffee_cover_days": params.coffee_cover_days,
             "sales_history_days": history_days,
+            "history_window_days": inputs.sales.window_days,
+            "sales_period": [
+                inputs.sales.period_start.isoformat() if inputs.sales.period_start else None,
+                inputs.sales.period_end.isoformat() if inputs.sales.period_end else None,
+            ],
             "movement_codes": (
                 "ALL"
                 if inputs.sales.movement_codes is None
@@ -271,7 +347,10 @@ def compute_line(
             "sales_total": float(sales_total),
             "expected_total": float(expected_total),
             "dc_available": dc_available,
+            "in_portfolio": in_portfolio,
         },
+        "fallback": fallback_info,
+        "exclusion": exclusion.model_dump(mode="json") if exclusion else None,
         "cover_applied": cover,
         "cover_source": cover_source,
         "raw_need": None if raw is None else float(raw),
@@ -297,6 +376,7 @@ def compute_line(
         status=flags.status,
         reasons=flags.reasons,
         explanation=explanation,
+        source=source,
     )
 
 

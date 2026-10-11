@@ -34,15 +34,15 @@ Nombre d'overrides : 45
 | 156247 | Oatly oat milk x 12, 1L | FB | 8 | 0 | -8 | REVIEW |
 | 7200.70 | VER-Hazelnut Brownie Flavoured | C | 0 | 3600 | +3600 | REVIEW |
 | 7400.70 | VER-Blueberry Cheesecake | C | 0 | 3600 | +3600 | REVIEW |
-| 127708/CA | Salted Caramel Milk Chocolate (Labeled) | CH | 0 | 16 | +16 | OK |
+| 127708/CA | Salted Caramel Milk Chocolate (Labeled) | CH | 0 | 16 | +16 | REVIEW |
 | 7429.70 | VER-Crystal Spark Festive Double Espresso | C | 0 | 3600 | +3600 | REVIEW |
 | 7941.70 | ORI-Blueberry Cheesecake Flavoured | C | 0 | 1600 | +1600 | REVIEW |
 | 3517/BULK | Brown Sugar x280 | FB | 0 | 3 | +3 | OK |
-| 3517/CA | Brown Sugar x60 Sticks (Labelled) | FB | 0 | 15 | +15 | OK |
+| 3517/CA | Brown Sugar x60 Sticks (Labelled) | FB | 0 | 15 | +15 | REVIEW |
 | D145-US-ME-NE | ORI-Citiz & Milk Platinum D145 St. Steel NE | M | 6 | 4 | -2 | OK |
 | J520-US-BL-BV | ORI-Creatista Plus Damson Blue BV | M | 3 | 0 | -3 | REVIEW |
-| F541-US-BK-DL | ORI-Gran Lattissima Black F541 DL | M | 0 | 2 | +2 | OK |
-| F541-US-WH-DL | ORI-Gran Lattissima White F541 DL | M | 0 | 2 | +2 | OK |
+| F541-US-BK-DL | ORI-Gran Lattissima Black F541 DL | M | 0 | 2 | +2 | REVIEW |
+| F541-US-WH-DL | ORI-Gran Lattissima White F541 DL | M | 0 | 2 | +2 | REVIEW |
 | 7938.70 |  |  | 0 | 3200 | +3200 | REVIEW |
 | 160421 |  |  | 0 | 24 | +24 | REVIEW |
 | 160758 |  |  | 0 | 48 | +48 | REVIEW |

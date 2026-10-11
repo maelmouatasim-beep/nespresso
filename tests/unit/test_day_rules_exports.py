@@ -121,7 +121,7 @@ def b80():
 def test_rules_reapplied_once_after_overrides(b80) -> None:
     data, inputs, dc, params = b80
     rule = BoutiqueRule(boutique="B80", rule="max_qty_sku", sku="7005.70", value=3000)
-    res = run_planning(inputs, params, ForecastMode.SAFE, dc=dc, portfolio=data.portfolio,
+    res = run_planning(inputs, params, ForecastMode.STANDARD, dc=dc, portfolio=data.portfolio,
                        business_inputs=BusinessInputs(rules=(rule,)))  # fmt: skip
     melo = next(x for x in res.lines if x.sku == "7005.70")
     assert melo.status is Status.REVIEW
@@ -146,7 +146,7 @@ def test_run_day_isolates_errors(b80) -> None:
         )  # fmt: skip
 
     other = params.model_copy(update={"boutique": "B1"})
-    out = run_day([params, other], ForecastMode.SAFE, build_inputs=build,
+    out = run_day([params, other], ForecastMode.STANDARD, build_inputs=build,
                   portfolio_by_boutique={"B80": data.portfolio})  # fmt: skip
     assert out[0].result is not None and out[0].error is None
     assert out[1].result is None and "B1" in (out[1].error or "")
@@ -160,7 +160,7 @@ def test_order_workbook_and_zip(b80) -> None:
     when = datetime(2026, 10, 5, 11, 51)
     ov = Override(sku="7005.70", qty_before=3120, qty_after=3600, category="promo",
                   reason="Promo AOS", author="A", timestamp=when)  # fmt: skip
-    res = run_planning(inputs, params, ForecastMode.SAFE, dc=dc, portfolio=data.portfolio,
+    res = run_planning(inputs, params, ForecastMode.STANDARD, dc=dc, portfolio=data.portfolio,
                        overrides=[ov])  # fmt: skip
     wb = load_workbook(io.BytesIO(order_workbook(res, author="A", overrides=[ov])))
     assert wb.sheetnames == ["Commande", "Paramètres", "Overrides", "Palettes", "Lignes exclues"]
@@ -179,10 +179,9 @@ def test_order_workbook_and_zip(b80) -> None:
 # --- Base : catégories et migration -----------------------------------------------------------
 
 
-def test_override_category_required() -> None:
-    with pytest.raises(ValidationError):
-        Override(sku="A", qty_before=1, qty_after=2, reason="xyz", author="A",
-                 timestamp=datetime(2026, 1, 1))  # type: ignore[call-arg]  # fmt: skip
+def test_override_category_is_optional() -> None:
+    o = Override(sku="A", qty_before=1, qty_after=2, author="A", timestamp=datetime(2026, 1, 1))
+    assert o.category is None and o.reason == ""
 
 
 def test_storage_migrates_old_overrides_table(tmp_path: Path, b80) -> None:
@@ -197,10 +196,40 @@ def test_storage_migrates_old_overrides_table(tmp_path: Path, b80) -> None:
     data, inputs, dc, params = b80
     ov = Override(sku="7005.70", qty_before=3120, qty_after=3600, category="launch",
                   reason="Lancement", author="A", timestamp=datetime(2026, 10, 5))  # fmt: skip
-    res = run_planning(inputs, params, ForecastMode.SAFE, dc=dc, portfolio=data.portfolio,
+    res = run_planning(inputs, params, ForecastMode.STANDARD, dc=dc, portfolio=data.portfolio,
                        overrides=[ov])  # fmt: skip
     conn = db.connect(path)
     run_id = db.save_run(conn, res, author="A", sources={}, overrides=[ov])
     assert db.run_overrides(conn, run_id)[0]["category"] == "launch"
     stats = db.override_stats(conn, "B80")
     assert stats[0]["sku"] == "7005.70" and stats[0]["boutique"] == "B80"
+
+
+def test_storage_migrates_reason_constraint_and_keeps_rows(tmp_path: Path, b80) -> None:
+    """Base d'avant D-028 (raison obligatoire en base) : lignes gardées, raison vide acceptée."""
+    path = tmp_path / "v2.db"
+    conn = db.connect(path)
+    with conn:
+        conn.execute("DROP TABLE overrides")
+        conn.execute(
+            """CREATE TABLE overrides (id INTEGER PRIMARY KEY AUTOINCREMENT,
+               run_id INTEGER NOT NULL REFERENCES runs(id), sku TEXT NOT NULL,
+               qty_before INTEGER NOT NULL, qty_after INTEGER NOT NULL,
+               category TEXT NOT NULL DEFAULT 'other',
+               reason TEXT NOT NULL CHECK (length(trim(reason)) >= 3),
+               author TEXT NOT NULL CHECK (length(trim(author)) >= 1), timestamp TEXT NOT NULL)"""
+        )
+    data, inputs, dc, params = b80
+    old_ov = Override(sku="7005.70", qty_before=3120, qty_after=3600, category="promo",
+                      reason="Promo AOS", author="A", timestamp=datetime(2026, 10, 5))  # fmt: skip
+    res = run_planning(inputs, params, ForecastMode.STANDARD, dc=dc, portfolio=data.portfolio,
+                       overrides=[old_ov])  # fmt: skip
+    first = db.save_run(conn, res, author="A", sources={}, overrides=[old_ov])
+    conn.close()
+    conn = db.connect(path)  # migration
+    bare = Override(sku="7005.70", qty_before=3120, qty_after=3840, author="B",
+                    timestamp=datetime(2026, 10, 8))  # fmt: skip
+    second = db.save_run(conn, res, author="B", sources={}, overrides=[bare])
+    assert db.run_overrides(conn, first)[0]["reason"] == "Promo AOS"
+    got = db.run_overrides(conn, second)[0]
+    assert got["reason"] == "" and got["category"] is None and got["author"] == "B"

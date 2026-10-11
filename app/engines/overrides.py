@@ -8,8 +8,16 @@ l'explication.
 from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
+from fractions import Fraction
 
-from app.domain.models import Override, QtySource, RecommendationLine, Status
+from app.domain.models import (
+    OVERRIDE_CATEGORY_LABELS,
+    Override,
+    QtySource,
+    RecommendationLine,
+    Status,
+)
+from app.engines.forecast import ceiling_to_multiple
 
 
 class OverrideError(ValueError):
@@ -40,20 +48,29 @@ def apply_overrides(
                 f"{line.sku} : l'override part de {ov.qty_before} mais la ligne vaut {line.qty} "
                 "(données recalculées depuis ?)"
             )
+        multiple = int(line.explanation.get("multiple") or 1)
+        multiple = multiple if multiple > 0 else 1
+        final = ceiling_to_multiple(Fraction(ov.qty_after), multiple)
         status = line.status
+        why = " : ".join(
+            x for x in (OVERRIDE_CATEGORY_LABELS.get(ov.category) if ov.category else None,
+                        ov.reason.strip()) if x
+        )  # fmt: skip
         reasons = [
             *line.reasons,
-            f"Override de {ov.author} : {ov.qty_before} → {ov.qty_after} ({ov.reason.strip()})",
+            f"Modifié par {ov.author} : {ov.qty_before} → {final}" + (f" ({why})" if why else ""),
         ]
+        if final != ov.qty_after:
+            reasons.append(f"Saisie {ov.qty_after} arrondie au multiple de {multiple} : {final}")
         if line.status is Status.BLOCKED and ov.qty_after > 0:
             status = Status.REVIEW
             reasons.append("Override sur une ligne bloquée : à vérifier")
         explanation = dict(line.explanation)
-        explanation["override"] = ov.model_dump(mode="json")
+        explanation["override"] = {**ov.model_dump(mode="json"), "qty_final": final}
         out.append(
             line.model_copy(
                 update={
-                    "qty": ov.qty_after,
+                    "qty": final,
                     "source": QtySource.OVERRIDE,
                     "forecast_qty": line.qty if line.forecast_qty is None else line.forecast_qty,
                     "status": status,
