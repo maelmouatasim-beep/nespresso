@@ -8,8 +8,10 @@ import pandas as pd
 import streamlit as st
 from pydantic import ValidationError
 
+from app.domain.events import EventScope
 from app.domain.models import PlanningParameters, RecommendationLine, Status
 from app.engines.categories import CATEGORIES
+from app.engines.events import blocked_by_event, event_tags, select_for_order
 from app.engines.overrides import OverrideError
 from app.engines.pallets import MACHINES, OL, OTHERS, VL
 from app.engines.schedule import boutiques_ordering_on
@@ -19,18 +21,24 @@ from app.ui.common import (
     CATEGORY_BY_LABEL,
     DEPOT,
     EDITABLE_COLUMNS,
+    EVENT_DOT,
+    EVENTS,
     EXPORT,
     MODE_LABEL,
     MODES,
     MODIFIED_MD,
+    ORDER,
     ORDER_COLUMN_CONFIG,
     SOURCE_LABEL,
     STATUS_MD,
+    all_events,
+    author,
     boutique_label,
     category_of_line,
     current,
     day_data,
     default_order,
+    event_context,
     explain_steps,
     fmt_1,
     fmt_date,
@@ -64,14 +72,15 @@ def compute_order(boutique: str, delivery: date, cover: float, coffee: float | N
         portfolio=data.masters.portfolio.get(boutique, {}), exclusions=data.exclusions,
     )  # fmt: skip
     reset_order()
-    ss.base = run_planning(inputs, params, MODES[mode_label], dc=dc, business_inputs=data.business)
+    ss.base = run_planning(inputs, params, MODES[mode_label], dc=dc, business_inputs=data.business,
+                           event_context=event_context())  # fmt: skip
 
 
 def open_result(result) -> None:  # noqa: ANN001 - PlanningResult déjà calculé (onglet Journée)
     reset_order()
     ss.base = result
     ss.p_boutique = result.params.boutique
-    go("2. Commande boutique")
+    go(ORDER)
 
 
 def _set_delivery(day: date) -> None:
@@ -141,9 +150,13 @@ def _tiles(res) -> None:  # noqa: ANN001
 
 
 def _matches(x: RecommendationLine, cat: str, status: str, qty_only: bool, search: str,
-             mapping: dict[str, str]) -> bool:  # fmt: skip
+             mapping: dict[str, str], event: str | int | None = None) -> bool:  # fmt: skip
     if cat != "Tous" and category_of_line(x, mapping) != cat:
         return False
+    if event is not None:
+        ids = {t["id"] for t in event_tags(x)}
+        if not ids or (event != "all" and event not in ids):
+            return False
     modified = x.sku in ss.overrides
     if status == "Modifié" and not modified:
         return False
@@ -152,6 +165,45 @@ def _matches(x: RecommendationLine, cat: str, status: str, qty_only: bool, searc
     if qty_only and x.qty <= 0:
         return False
     return not search or search in x.sku.lower() or search in (x.description or "").lower()
+
+
+def _event_banner(res) -> str | int | None:  # noqa: ANN001
+    """« Équipe : 3 · Personnel : 1 » + une puce par événement, cliquable pour filtrer."""
+    others = _others_personal(res)
+    if not res.events and not others:
+        return None
+    if res.events:
+        counts: dict[int | None, set[str]] = {}
+        for x in res.base_lines:
+            for t in event_tags(x):
+                counts.setdefault(t["id"], set()).add(x.sku)
+        team = sum(e.scope is EventScope.TEAM for e in res.events)
+        labels: dict[str | int, str] = {"all": f"Tous ({len(set().union(*counts.values()))} SKU)"}
+        for e in res.events:
+            n = len(counts.get(e.id, ()))
+            labels[e.id or 0] = f"{EVENT_DOT[e.scope.value]} {e.title} ({n} SKU)"
+        c1, c2 = st.columns([1.6, 6], vertical_alignment="center")
+        c1.markdown(f"**Événements** · Équipe : {team} · Personnel : {len(res.events) - team}")
+        choice = c2.pills("Événements", list(labels), key="f_event", format_func=labels.get,
+                          label_visibility="collapsed")  # fmt: skip
+    else:
+        choice = None
+    if others:
+        listed = ", ".join(f"« {e.title} » ({e.planner})" for e in others)
+        st.info(f"Événements personnels d'autres planners pour cette boutique, non appliqués : "
+                f"{listed}. Ouvre « Événements SKU » → « Reprendre » pour les appliquer.",
+                icon=":material/visibility:")  # fmt: skip
+    return choice
+
+
+def _others_personal(res) -> list:  # noqa: ANN001
+    """Personnels d'un collègue, actifs pour cette commande, mais pas appliqués (lecture seule)."""
+    p = res.params
+    personal = [e for e in all_events() if e.scope is EventScope.PERSONAL and e.id is not None]
+    active = select_for_order(personal, boutique=p.boutique, dc=res.dc, delivery=p.delivery_date,
+                              planner="", taken_over={e.id for e in personal})  # fmt: skip
+    applied = {e.id for e in res.events}
+    return [e for e in active if e.id not in applied]
 
 
 def _filters(
@@ -235,6 +287,24 @@ def _close_why() -> None:
 def _toggle_seen(sku: str) -> None:
     (ss.seen.discard if sku in ss.seen else ss.seen.add)(sku)
     ss.nonce += 1
+    line = next((x for x in ss.base.base_lines if x.sku == sku), None) if ss.base else None
+    if line is not None and event_tags(line):
+        _trace("seen", [sku], "" if sku in ss.seen else "retiré")
+
+
+def _toggle_block(sku: str) -> None:
+    confirmed = sku not in ss.confirmed_blocks
+    ss.confirmed_blocks = (
+        (ss.confirmed_blocks | {sku}) if confirmed else (ss.confirmed_blocks - {sku})
+    )
+    _trace("confirm_block", [sku], "" if confirmed else "retiré")
+
+
+def _trace(kind: str, skus: list[str], note: str = "") -> None:
+    from app.ui.gate import trace
+
+    p = ss.base.params
+    trace(p.boutique, p.delivery_date, kind, skus, note)
 
 
 def _why_panel(res, sku: str, mapping: dict[str, str]) -> None:  # noqa: ANN001
@@ -257,6 +327,14 @@ def _why_panel(res, sku: str, mapping: dict[str, str]) -> None:  # noqa: ANN001
                 f"stock projeté à la livraison : **{fmt_int(e['projected_stock_at_delivery'])}**")  # fmt: skip
     if line.reasons:
         st.markdown("\n".join(f"- {r}" for r in line.reasons))
+    base_line = next((x for x in res.base_lines if x.sku == sku), line)
+    if blocked_by_event(base_line):
+        done = sku in ss.confirmed_blocks
+        st.button("Retirer la confirmation du blocage" if done else "Confirmer le blocage (qty 0)",
+                  icon=":material/undo:" if done else ":material/block:", key="why_block",
+                  on_click=_toggle_block, args=(sku,), width="stretch",
+                  help="Bloqué par un événement : confirmer (tracé), ou modifier la quantité "
+                       "AVEC une raison pour l'envoyer quand même.")  # fmt: skip
     st.button("Retirer la validation" if sku in ss.seen else "Marquer comme vérifiée",
               icon=":material/undo:" if sku in ss.seen else ":material/check:",
               key="why_seen", on_click=_toggle_seen, args=(sku,), width="stretch")  # fmt: skip
@@ -300,20 +378,25 @@ def render() -> None:
         + (f" (café {fmt_1(p.coffee_cover_days)} j)" if p.coffee_cover_days else "")
         + f" · historique {res.history_days} j · {MODE_LABEL[res.mode.value]}"
     )
+    if not author():
+        st.caption(":material/info: Choisis ton prénom (Planner) pour appliquer aussi tes "
+                   "événements personnels.")  # fmt: skip
     _tiles(res)
     for w in res.rule_warnings:
         st.warning(w)
 
+    event = _event_banner(res)
     cat, status, qty_only, search = _filters(res.lines, mapping)
     base_qty = {x.sku: x.qty for x in res.base_lines}
     shown = default_order(
-        [x for x in res.lines if _matches(x, cat, status, qty_only, search, mapping)], base_qty
+        [x for x in res.lines if _matches(x, cat, status, qty_only, search, mapping, event)],
+        base_qty,
     )
     side = bool(ss.why_sku)
     table, panel = st.columns([2.8, 1.2]) if side else (st.container(), None)
     with table:
         df = order_frame(shown, base_qty, mapping)
-        key = f"grid_{cat}_{status}_{qty_only}_{search}_{ss.nonce}"
+        key = f"grid_{cat}_{status}_{qty_only}_{search}_{event}_{ss.nonce}"
         edited = st.data_editor(style_order_frame(df), key=key, hide_index=True, width="stretch", height=TABLE_HEIGHT, placeholder="—",
                                 column_config=ORDER_COLUMN_CONFIG,
                                 disabled=[c for c in df.columns if c not in EDITABLE_COLUMNS])  # fmt: skip
@@ -326,4 +409,8 @@ def render() -> None:
     if panel is not None:
         with panel, st.container(border=True, height=TABLE_HEIGHT + 38, key="why_panel"):
             _why_panel(res, ss.why_sku, mapping)
-    st.button("Continuer vers l'export", on_click=go, args=(EXPORT,), key="to_export")
+    c1, c2, _ = st.columns([1.3, 1.3, 4])
+    c1.button("Continuer vers l'export", on_click=go, args=(EXPORT,), key="to_export",
+              type="primary", width="stretch")  # fmt: skip
+    c2.button("Événements SKU", on_click=go, args=(EVENTS,), key="to_events",
+              icon=":material/event:", width="stretch")  # fmt: skip

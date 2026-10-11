@@ -130,24 +130,24 @@ def _fmt_day(d: date | None) -> str:
 
 
 def example_events() -> list[SkuEvent]:
-    """Exemples FICTIFS (template et démo B80)."""
+    """Exemples FICTIFS (template et démo B80 du 05-oct-2026)."""
     base = date(2026, 10, 5)
     return [
         SkuEvent(scope=EventScope.TEAM, type=EventType.PROMOTION, title="Festive AOS Oct 14-21",
-                 description="Mise en avant des cafés de fêtes (exemple fictif)",
-                 skus=(EventSku(sku="7005.70"), EventSku(sku="7039.70"), EventSku(sku="7921.70")),
+                 description="Mise en avant des cafés de saison (exemple fictif)",
+                 skus=(EventSku(sku="7072.70"), EventSku(sku="7087.70"), EventSku(sku="7094.70")),
                  start=date(2026, 10, 14), end=date(2026, 10, 21), lead_days=7,
                  effect=EventEffect.FLAG, source_file="FESTIVE AOS OCT14-21.xlsx",
                  owner="Marketing (exemple)", planner="Camille"),
         SkuEvent(scope=EventScope.TEAM, type=EventType.LAUNCH, title="Lancement Advent",
-                 description="Calendrier de l'Avent (exemple fictif)",
-                 skus=(EventSku(sku="ADV-2026", multiple=12),), dcs=("CY1",),
+                 description="Calendrier de l'Avent, pas encore dans la Multiple list (exemple)",
+                 skus=(EventSku(sku="ADV-2026-CA", multiple=6),), dcs=("CY1",),
                  start=date(2026, 10, 12), end=date(2026, 11, 30), lead_days=7,
-                 effect=EventEffect.SET_QTY, quantities=(EventQty(qty=24),),
+                 effect=EventEffect.SET_QTY, quantities=(EventQty(qty=20),),
                  source_file="LAUNCH ADVENT 2026.xlsx", planner="Camille"),
-        SkuEvent(scope=EventScope.TEAM, type=EventType.STOP, title="Arrêt 7921.70",
-                 description="Fin de série, ne plus réapprovisionner (exemple fictif)",
-                 skus=(EventSku(sku="7921.70"),), start=base, end=None,
+        SkuEvent(scope=EventScope.TEAM, type=EventType.STOP, title="Arrêt 7928.70",
+                 description="Fin de série : ne plus réapprovisionner (exemple fictif)",
+                 skus=(EventSku(sku="7928.70"),), start=base, end=None,
                  effect=EventEffect.BLOCK, planner="Sami"),
         SkuEvent(scope=EventScope.PERSONAL, type=EventType.STORE_REQUEST, title="Demande B80",
                  description="La boutique demande du Melozio en plus (exemple fictif)",
@@ -156,6 +156,9 @@ def example_events() -> list[SkuEvent]:
                  planner="Camille", requested_by="Gérance B80", requested_on=base,
                  until_next_order=True),
     ]  # fmt: skip
+
+
+DEMO_PLANNERS = ("Camille", "Léa", "Sami")  # prénoms fictifs
 
 
 def events_workbook(events: Iterable[SkuEvent]) -> bytes:

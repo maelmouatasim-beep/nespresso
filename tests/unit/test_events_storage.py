@@ -66,7 +66,7 @@ def test_event_history_keeps_who_changed_what(conn) -> None:  # noqa: ANN001
         "Festive AOS Oct 14-21", "Festive AOS v2"]  # fmt: skip
     again = store.get_event(conn, 1)
     assert again is not None and again.status is EventStatus.DONE
-    assert again.created_by == "Camille" and again.skus[0].sku == "7005.70"
+    assert again.created_by == "Camille" and again.skus[0].sku == "7072.70"
     with pytest.raises(ValueError, match="Choisis ton nom"):
         store.save_event(conn, e, " ")
 
@@ -86,7 +86,7 @@ def test_template_exists_and_roundtrips_with_fictional_examples() -> None:
     assert not res.problems, res.problems
     assert [e.title for e in res.events] == [e.title for e in example_events()]
     advent = res.events[1]
-    assert advent.skus[0].multiple == 12 and advent.dcs == ("CY1",) and advent.lead_days == 7
+    assert advent.skus[0].multiple == 6 and advent.dcs == ("CY1",) and advent.lead_days == 7
     assert res.events[3].until_next_order and res.events[3].scope is EventScope.PERSONAL
 
 

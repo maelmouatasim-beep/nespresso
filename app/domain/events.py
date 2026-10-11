@@ -178,6 +178,8 @@ class SkuEvent(_Frozen):
         keys = [(q.boutique, q.sku) for q in self.quantities]
         if len(keys) != len(set(keys)):
             raise ValueError("Quantité saisie deux fois pour la même boutique et le même SKU")
+        if "@" in self.requested_by or "@" in self.owner or "@" in self.planner:
+            raise ValueError("Pas d'email : un prénom, un rôle ou une équipe seulement")
         if self.type is EventType.STORE_REQUEST and len(self.boutiques) != 1:
             raise ValueError("Une demande boutique concerne une seule boutique")
         return self

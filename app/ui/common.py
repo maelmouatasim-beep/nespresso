@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import date, datetime
 from pathlib import Path
 
 import pandas as pd
 import streamlit as st
 
+from app.domain.events import SkuEvent
 from app.domain.models import (
     OVERRIDE_CATEGORY_LABELS,
     ForecastMode,
@@ -16,7 +19,10 @@ from app.domain.models import (
     Status,
 )
 from app.engines.categories import category_of
-from app.services.planning import PlanningResult, with_overrides
+from app.engines.events import event_tags
+from app.services.planning import EventContext, PlanningResult, with_overrides
+from app.storage import db
+from app.storage import events as event_store
 from app.ui.workspace import DEMO_EXTRACTION, DayData, Workspace, demo_workspace, real_workspace
 
 PAGES = (
@@ -24,10 +30,11 @@ PAGES = (
     "2. Commande boutique",
     "3. Journée",
     "4. Export",
-    "5. Référentiels",
-    "6. Historique",
+    "5. Événements SKU",
+    "6. Référentiels",
+    "7. Historique",
 )
-DEPOT, ORDER, DAY, EXPORT, REFS, HISTORY = PAGES
+DEPOT, ORDER, DAY, EXPORT, EVENTS, REFS, HISTORY = PAGES
 
 MODES = {"Standard": ForecastMode.STANDARD, "Parité Excel": ForecastMode.EXCEL_PARITY}
 MODE_LABEL = {v.value: k for k, v in MODES.items()} | {"safe": "Standard"}
@@ -50,8 +57,11 @@ SOURCE_LABEL = {
     "target_stock": "Stock cible",
     "dc_return": "Retour DC",
     "exclusion": "Exclusion",
+    "event": "Événement",
     "override": "Modifié",
 }
+# Puce pleine = événement d'équipe, cerclée = événement personnel.
+EVENT_DOT = {"team": "●", "personal": "○"}
 CATEGORY_BY_LABEL = {label: cat for cat, label in OVERRIDE_CATEGORY_LABELS.items()}
 FRESH_ICON = {
     "green": ":green[:material/check_circle:]",
@@ -76,7 +86,14 @@ def init_state() -> None:
         "day_outcomes": None,
         "nonce": 0,
         "why_sku": None,
-        "author": "",
+        "author": None,
+        "taken_over": set(),  # événements personnels d'un collègue repris pour ma session
+        "confirmed_blocks": set(),  # SKU bloqués par un événement, blocage confirmé
+        "include_ok": False,  # lancements / demandes à inclure confirmés
+        "requests_to_close": [],  # demandes boutique à terminer après l'export
+        "day_checks": {},  # Journée : validations par boutique
+        "ev_edit": None,  # Événements : panneau ouvert (id, "new" ou "request")
+        "ev_nonce": 0,
     }
     for k, v in defaults.items():
         ss.setdefault(k, v)
@@ -101,6 +118,7 @@ def run_date() -> date:
 
 def reset_order() -> None:
     ss.base, ss.overrides, ss.seen = None, {}, set()
+    ss.confirmed_blocks, ss.include_ok = set(), False
     ss.saved_run_id, ss.why_sku = None, None
     ss.nonce += 1
 
@@ -144,6 +162,59 @@ def current() -> PlanningResult | None:
 
 def author() -> str:
     return (ss.get("author") or "").strip()
+
+
+@contextmanager
+def db_conn() -> Iterator:
+    conn = db.connect(workspace().db_path)
+    try:
+        yield conn
+    finally:
+        conn.close()
+
+
+def all_events() -> list[SkuEvent]:
+    with db_conn() as conn:
+        return event_store.list_events(conn)
+
+
+def planners() -> list[str]:
+    with db_conn() as conn:
+        return event_store.list_planners(conn)
+
+
+def seed_demo_events() -> None:
+    """Démo : 3 planners et 4 événements FICTIFS sur B80, créés une seule fois."""
+    from app.ingestion.events import DEMO_PLANNERS, example_events
+
+    with db_conn() as conn:
+        if event_store.list_planners(conn) or event_store.list_events(conn):
+            return
+        for name in DEMO_PLANNERS:
+            event_store.add_planner(conn, name)
+        for e in example_events():
+            event_store.save_event(conn, e, "Démo")
+
+
+def add_planner_and_select(name: str) -> str | None:
+    """Ajoute un prénom à la liste et le choisit. Retourne un message d'erreur sinon."""
+    try:
+        with db_conn() as conn:
+            ss.author = event_store.add_planner(conn, name)
+    except ValueError as exc:
+        return str(exc)
+    return None
+
+
+def event_context() -> EventContext:
+    """Tous les événements + le planner connecté + ceux qu'il a repris (« Reprendre »)."""
+    return EventContext(tuple(all_events()), author(), frozenset(ss.taken_over))
+
+
+def event_cell(line: RecommendationLine) -> str:
+    """« ● Festive AOS · ○ Demande B80 » (pleine : Équipe, cerclée : Personnel)."""
+    tags = {(t["scope"], t["title"]) for t in event_tags(line)}
+    return " · ".join(f"{EVENT_DOT[scope]} {title}" for scope, title in sorted(tags))
 
 
 def boutique_label(code: str, names: dict[str, str]) -> str:
@@ -222,6 +293,7 @@ def order_frame(
                 "SKU": x.sku,
                 "Description": x.description or "",
                 "Catégorie": category_of_line(x, mapping),
+                "Événement": event_cell(x),
                 "Expected": num(inp["expected_total"]),
                 "Ventes": num(sales),
                 "Couv. actuelle": num(_round1(e["current_cover_days"])),
@@ -238,7 +310,8 @@ def order_frame(
 
 
 ORDER_COLUMNS = [
-    "Détail", "Statut", "SKU", "Description", "Catégorie", "Expected", "Ventes", "Couv. actuelle",
+    "Détail", "Statut", "SKU", "Description", "Catégorie", "Événement", "Expected", "Ventes",
+    "Couv. actuelle",
     "Qty proposée", "Qty finale", "Couv. après", "Multiple", "Stock DC", "Source", "Raisons",
 ]  # fmt: skip
 
@@ -251,6 +324,9 @@ ORDER_COLUMN_CONFIG = {
     "SKU": st.column_config.TextColumn(width=100),
     "Description": st.column_config.TextColumn(width=210),
     "Catégorie": st.column_config.TextColumn(width=120),
+    "Événement": st.column_config.TextColumn(
+        width=150, help="● événement d'équipe · ○ événement personnel"
+    ),
     "Expected": st.column_config.NumberColumn(width=80, **_INT),
     "Ventes": st.column_config.NumberColumn(width=70, **_INT),
     "Couv. actuelle": st.column_config.NumberColumn("Couv. act.", width=75, format="%.1f"),
@@ -353,6 +429,10 @@ def explain_steps(line: RecommendationLine) -> list[str]:
                      f"{fmt_int(la['qty'])} − Expected, arrondi au multiple")  # fmt: skip
     elif business and "target" in business:
         steps.append("**Stock cible** appliqué (voir les raisons)")
+    events = e.get("events")
+    if events:
+        titles = ", ".join(dict.fromkeys(f"« {t['title']} »" for t in events["applied"]))
+        steps.append(f"**Événement(s)** {titles} : voir les raisons ci-dessous")
     if e.get("override"):
         o = e["override"]
         steps.append(f"**Modifié** par {o['author']} : {fmt_int(o['qty_before'])} → "

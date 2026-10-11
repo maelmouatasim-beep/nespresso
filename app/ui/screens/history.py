@@ -1,4 +1,4 @@
-"""Écran 6 — Historique : runs, modifications par catégorie, comparaison de deux runs."""
+"""Écran 7 — Historique : runs, modifications par catégorie, comparaison de deux runs."""
 
 from __future__ import annotations
 

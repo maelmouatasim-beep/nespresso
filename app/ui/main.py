@@ -22,19 +22,24 @@ from app.ingestion.depot import freshness  # noqa: E402
 from app.ui.common import (  # noqa: E402
     DAY,
     DEPOT,
+    EVENTS,
     EXPORT,
     FRESH_ICON,
     HISTORY,
     ORDER,
     PAGES,
     REFS,
+    add_planner_and_select,
     init_state,
+    is_demo,
+    planners,
     reset_all,
     run_date,
+    seed_demo_events,
     ss,
     workspace,
 )
-from app.ui.screens import day, depot, export, history, order, referentials  # noqa: E402
+from app.ui.screens import day, depot, events, export, history, order, referentials  # noqa: E402
 
 st.set_page_config(
     page_title="Supply Planning Copilot", page_icon=":material/local_cafe:", layout="wide"
@@ -77,12 +82,32 @@ st.markdown(
 )
 
 init_state()
+if is_demo():
+    seed_demo_events()
+
+
+def _add_planner() -> None:
+    ss.planner_error = add_planner_and_select(ss.get("new_planner", ""))
+    if not ss.planner_error:
+        ss.new_planner = ""
+
 
 with st.sidebar:
     st.markdown('<div class="spc-logo">Supply Planning <b>Copilot</b>'
                 "<span>Boutique Planning · Nespresso Canada</span></div>",
                 unsafe_allow_html=True)  # fmt: skip
-    st.text_input("Planner", key="author", placeholder="Ton nom")
+    names = planners()
+    if ss.author and ss.author not in names:
+        names.append(ss.author)
+    c1, c2 = st.columns([4, 1], vertical_alignment="bottom")
+    c1.selectbox("Planner", names, key="author", index=None, placeholder="Choisis ton prénom",
+                 help="Sert à « Mes événements », aux événements personnels et à signer "
+                      "les modifications et validations.")  # fmt: skip
+    with c2.popover(":material/person_add:", help="Ajouter un planner"):
+        st.text_input("Prénom (pas d'email)", key="new_planner")
+        st.button("Ajouter", key="add_planner", on_click=_add_planner)
+        if ss.get("planner_error"):
+            st.error(ss.planner_error)
     st.radio("Données", ["Mes données", "Démo B80"], key="ws_kind", horizontal=True,
              on_change=reset_all)  # fmt: skip
     st.radio("Écran", PAGES, key="page", label_visibility="collapsed")
@@ -100,6 +125,7 @@ SCREENS = {
     ORDER: order.render,
     DAY: day.render,
     EXPORT: export.render,
+    EVENTS: events.render,
     REFS: referentials.render,
     HISTORY: history.render,
 }
