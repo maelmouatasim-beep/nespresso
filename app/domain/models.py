@@ -116,6 +116,7 @@ class QtySource(StrEnum):
     TARGET_STOCK = "target_stock"
     DC_RETURN = "dc_return"  # SKU dormant revenu en stock au DC (historique de secours)
     EXCLUSION = "exclusion"  # référentiel des exclusions
+    EVENT = "event"  # événement SKU (promotion, lancement, arrêt, demande boutique…)
     OVERRIDE = "override"
 
 

@@ -219,3 +219,31 @@ def test_overrides_report(run: ParityRun) -> None:
     melozio = run.lines["7005.70"]
     assert melozio.qty == 3120
     assert int(overrides.set_index("sku").loc["7005.70", "excel_suggested_qty"]) == 3600
+
+
+def test_parity_unchanged_through_run_planning_when_no_event_is_active(run: ParityRun) -> None:
+    """Des événements existent mais aucun n'est actif pour B80 à cette date : 416/416."""
+    from app.domain.events import EventEffect, EventScope, EventSku, EventType, SkuEvent
+    from app.services.planning import EventContext, run_planning
+
+    data = load_fixture_dir(FIXTURE_DIR)
+    p = data.parameters
+    day = date.fromisoformat(p["run_date"])
+    params = PlanningParameters(boutique="B80", run_date=day, delivery_date=day,
+                                cover_days=p["cover_days"],
+                                coffee_cover_days=p["coffee_cover_days"])  # fmt: skip
+    skus = list(run.golden["sku"])
+    others = (
+        SkuEvent(id=1, scope=EventScope.TEAM, type=EventType.BAN, title="Autre boutique",
+                 skus=(EventSku(sku=skus[0]),), boutiques=("B19",), start=day,
+                 effect=EventEffect.BLOCK),
+        SkuEvent(id=2, scope=EventScope.PERSONAL, type=EventType.WATCH, title="Collègue",
+                 skus=(EventSku(sku=skus[1]),), start=day, end=day, effect=EventEffect.FLAG,
+                 planner="Léa"),
+    )  # fmt: skip
+    res = run_planning(build_forecast_inputs(data), params, ForecastMode.EXCEL_PARITY, dc="CY1",
+                       skus=skus, event_context=EventContext(others, "Camille"))  # fmt: skip
+    by_sku = {x.sku: x.qty for x in res.lines}
+    rows = _formula_rows(run)
+    assert all(by_sku[r.sku] == int(r.excel_suggested_qty) for r in rows.itertuples())
+    assert len(rows) == 416 and res.events == ()

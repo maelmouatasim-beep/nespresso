@@ -16,6 +16,7 @@ OUT = ROOT / "templates"
 sys.path.insert(0, str(ROOT))
 
 from app.engines.categories import CATEGORIES, DEFAULT_CATEGORY_MAP  # noqa: E402
+from app.ingestion.events import events_workbook, example_events  # noqa: E402
 
 TEMPLATES = {
     "allocations.xlsx": (
@@ -115,6 +116,9 @@ def main() -> None:
         help_ws.column_dimensions["A"].width = 100
         wb.save(OUT / name)
         print(f"Modèle écrit : {OUT / name}")
+    # Événements SKU : template rempli avec 4 exemples FICTIFS (à remplacer).
+    (OUT / "evenements_sku.xlsx").write_bytes(events_workbook(example_events()))
+    print(f"Modèle écrit : {OUT / 'evenements_sku.xlsx'}")
 
 
 if __name__ == "__main__":
