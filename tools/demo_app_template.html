@@ -97,7 +97,7 @@ table.order tr.sel td { box-shadow: inset 0 2px 0 var(--accent), inset 0 -2px 0 
 .chip b { font-weight: 600; font-variant-numeric: tabular-nums; margin-left: 4px; opacity: .7; }
 .tablewrap { overflow: auto; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); max-height: 470px; }
 table { border-collapse: separate; border-spacing: 0; width: 100%; }
-table.order { table-layout: fixed; width: 1240px; }
+table.order { table-layout: fixed; width: 1410px; }
 th, td { padding: 5px 8px; border-bottom: 1px solid var(--border); text-align: left; white-space: nowrap; vertical-align: middle; overflow: hidden; text-overflow: ellipsis; font-size: 14px; }
 th { position: sticky; top: 0; background: var(--surface-2); font-size: 12.5px; color: var(--muted); z-index: 2; font-weight: 600; white-space: normal; line-height: 1.2; vertical-align: bottom; }
 td.n, th.n { text-align: right; font-variant-numeric: tabular-nums; }
@@ -200,12 +200,35 @@ table.order tr.sel td { box-shadow: inset 0 2px 0 var(--gold), inset 0 -2px 0 va
 #why { box-shadow: -8px 0 30px rgba(43, 29, 20, .12); }
 select, input[type=text], input[type=search], input[type=date], input[type=number] { border-radius: 8px; }
 input:focus, select:focus { outline: none; border-color: var(--gold); box-shadow: 0 0 0 3px var(--gold-soft); }
+.side select { font: inherit; font-size: 14px; text-transform: none; letter-spacing: 0; border-radius: 7px; border: 1px solid var(--side-on); background: var(--side-on); color: var(--side-fg); padding: 7px 9px; }
+/* --- Événements SKU --- */
+.evbanner { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; margin: 10px 0 2px; }
+.evbanner .lab { font-size: 14px; margin-right: 4px; }
+.evcell { font-size: 13px; }
+.evlayout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; align-items: start; }
+.evlayout.open { grid-template-columns: minmax(0, 1fr) minmax(300px, 380px); }
+.evpanel { position: sticky; top: 12px; max-height: calc(100vh - 24px); overflow-y: auto; }
+.evpanel h2 { font-size: 17px; margin: 0 0 4px; padding-right: 30px; }
+.evpanel .x { float: right; font-size: 22px; background: none; border: 0; color: var(--muted); cursor: pointer; margin: -6px -4px 0 0; }
+dl.kv { display: grid; grid-template-columns: 118px minmax(0, 1fr); gap: 5px 10px; margin: 10px 0; font-size: 14px; }
+dl.kv dt { color: var(--muted); font-weight: 600; font-size: 12.5px; padding-top: 1px; }
+dl.kv dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+table.ev tbody tr { cursor: pointer; }
+table.ev tr.sel td { box-shadow: inset 0 2px 0 var(--gold), inset 0 -2px 0 var(--gold); }
+.gate { border: 1px solid var(--border); border-radius: 10px; background: var(--surface); padding: 12px 14px; margin: 12px 0; box-shadow: var(--shadow); }
+.gate .g { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--border); }
+.gate .g:last-of-type { border-bottom: 0; }
+.gate .g .t { flex: 1 1 320px; min-width: 0; }
+.gate .g .t small { display: block; color: var(--muted); overflow-wrap: anywhere; }
+.gate .ico { font-weight: 700; margin-right: 6px; }
+.gate .ico.ok { color: var(--ok); } .gate .ico.ko { color: var(--blocked); } .gate .ico.todo { color: var(--review); }
+@media (max-width: 1100px) { .evlayout.open { grid-template-columns: minmax(0, 1fr); } .evpanel { position: static; max-height: none; } }
 </style>
 
 <div class="app">
   <aside class="side">
     <div class="brand">Supply Planning <b>Copilot</b><small>Boutique Planning · Nespresso Canada</small></div>
-    <label>Planner<input type="text" id="author" placeholder="Ton nom" autocomplete="name"></label>
+    <label>Planner<select id="author" aria-label="Planner"></select></label>
     <div class="srcsw" id="source" role="group" aria-label="Données"></div>
     <nav id="nav"></nav>
     <div class="fresh" id="sidefresh"></div>
@@ -218,9 +241,16 @@ input:focus, select:focus { outline: none; border-color: var(--gold); box-shadow
 <script>
 const DATA = /*__DATA__*/null;
 const M = DATA.meta, L = DATA.lines, T = DATA.text;
-const PAGES = ["1. Dépôt du jour", "2. Commande boutique", "3. Journée", "4. Export", "5. Référentiels", "6. Historique"];
+const PAGES = ["1. Dépôt du jour", "2. Commande boutique", "3. Journée", "4. Export", "5. Événements SKU", "6. Référentiels", "7. Historique"];
 const STATUS = { O: "OK", R: "REVIEW", B: "BLOCKED" };
-const SRC = { forecast: "Prévision", allocation: "Allocation", launch: "Lancement", target_stock: "Stock cible", dc_return: "Retour DC", exclusion: "Exclusion", override: "Modifié" };
+const SRC = { forecast: "Prévision", allocation: "Allocation", launch: "Lancement", target_stock: "Stock cible", dc_return: "Retour DC", exclusion: "Exclusion", event: "Événement", override: "Modifié" };
+// Événements SKU (démo : 4 événements fictifs, mêmes règles que l'outil installé).
+const TYPE_LABELS = { promotion: "Promotion", launch: "Lancement", stop: "Arrêt d'envoi", ban: "Interdiction d'envoi", conversion: "Conversion de SKU", urgent: "Urgence", store_request: "Demande boutique", watch: "À surveiller" };
+const EFFECT_LABELS = { flag: "Flag seulement", set_qty: "Quantité imposée", add_qty: "Quantité ajoutée", block: "Bloquer l'envoi", replace: "Remplacer par un autre SKU" };
+const INCLUDE_TYPES = new Set(["launch", "urgent", "store_request"]);
+const DOT = { t: "●", p: "○", team: "●", personal: "○" };
+const EV_CLS = { "Actif": "G", "À venir": "Y", "Bloqué": "X", "Terminé": "U", "Annulé": "U", "Brouillon": "M" };
+const EV_FILTERS = ["Actifs", "À venir", "Terminés", "Brouillons", "Tous"];
 const MSRC = { multiple_list: "Multiple list", multiple_list_family: "famille (deux multiples)", inferred_family: "inféré (famille)", excel_default_1: "absent → 1 (Excel)", missing_default_1: "absent" };
 const CAT = Object.fromEntries(M.categories);
 const CATEGORY_FILTERS = ["Tous", ...DATA.category_names];
@@ -273,17 +303,21 @@ const store = { get(k, d) { try { const v = localStorage.getItem(k); return v ? 
                 set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); return true; } catch (e) { return false; } } };
 
 const st = {
-  page: store.get("spc2_page", PAGES[0]), author: store.get("spc_author", ""), examples: store.get("spc2_examples", true),
+  page: (p => PAGES.includes(p) ? p : PAGES[0])(store.get("spc2_page", PAGES[0])), author: store.get("spc_author", ""), examples: store.get("spc2_examples", true),
   form: { boutique: "", delivery: "", cover: "", coffee: "", mode: "standard" }, order: null, err: "",
   overrides: {}, seen: new Set(), f: { cat: "Tous", status: "Tous", qty: false }, sort: null, q: "", why: null, gear: false, savedId: null, xmsg: null,
   day: null, refTab: 0, source: "demo", busy: "", depotErr: [],
+  // Événements : reprises (session seulement), demandes terminées, validations avant export.
+  taken: new Set(), evDone: store.get("spc2_ev_done", {}), confirmed: new Set(), includeOk: false,
+  validations: store.get("spc2_validations", []), toClose: [], evTab: "team", evStatus: "Actifs", evQ: "", evTypes: new Set(), evPlanner: null, evSel: null,
 };
+st.f.ev = null;
 
 // Catégories : table du référentiel (modifiable dans Référentiels, gardée dans ce navigateur).
 function categories() { return store.get("spc2_categories", null) || DATA.category_map; }
 
 // ---------- Résultat pré-calculé ----------
-function variantKey(mode) { return mode + "|" + (st.examples ? "examples" : "none"); }
+function variantKey(mode) { return mode + "|" + (st.examples ? "examples" : "none") + "|" + (personalApplied() ? "all" : "team"); }
 // Résultat de la commande en cours : démo (calculé d'avance) ou moteur dans le navigateur.
 function V(o = st.order) {
   if (o.live) return { L: o.live.lines, T: o.live.text, sel: o.live.lines.map((_, i) => i), res: o.live.res, warnings: o.live.warnings, dc: o.live.dc, hd: o.live.history_days, period: o.live.period };
@@ -295,9 +329,10 @@ function baseLine(j) {
   const o = st.order, v = V(o), m = v.L[v.sel[j]], T = v.T;
   const cell = v.res[j], ci = m.coffee && o.coffee !== "" ? +o.coffee : +o.cover;
   const t = Array.isArray(cell[0]) ? cell[ci] : cell;
-  const [qty, raw, s, rids, multiple, msrc, source, fq, fbs, bzs, flags] = t;
+  const [qty, raw, s, rids, multiple, msrc, source, fq, fbs, bzs, flags, evs] = t;
+  const ev = (evs || []).map(([id, scope, ti, type, effect]) => ({ id, scope, title: T[ti], type, effect }));
   return { m, qty, raw, s, reasons: rids.map(i => T[i]), multiple, msrc: T[msrc], source, fq, fb: fbs < 0 ? null : T[fbs], biz: bzs < 0 ? null : T[bzs],
-           conv: !!(flags & 1), dcr: !!(flags & 2), cover: M.covers[ci], coffeeCover: m.coffee && o.coffee !== "" };
+           conv: !!(flags & 1), dcr: !!(flags & 2), cover: M.covers[ci], coffeeCover: m.coffee && o.coffee !== "", ev };
 }
 function finalLine(j) {
   const b = baseLine(j), ov = st.overrides[b.m.sku];
@@ -326,6 +361,57 @@ function summarize(ls) {
 }
 function palKey(f) { const u = (f || "").toUpperCase(); if (u.includes("VERTUO") || u.startsWith("VL")) return "VL"; if (u.includes("ORIGINAL") || u.startsWith("OL")) return "OL"; if (u.includes("MACHINE")) return "MACHINES"; return "OTHERS"; }
 
+// ---------- Événements SKU ----------
+function addDays(isoStr, n) { const d = parseIso(isoStr); d.setDate(d.getDate() + n); return iso(d); }
+// Une demande terminée dans ce navigateur garde son statut (comme dans la base de l'outil installé).
+function evAll() { return DATA.events.map(e => st.evDone[e.id] ? { ...e, status: "done", updated_at: st.evDone[e.id].at } : e); }
+const evById = id => evAll().find(e => e.id === id);
+const activeFrom = e => addDays(e.start, -e.lead_days);
+const inWindow = (e, day) => activeFrom(e) <= day && (!e.end || day <= e.end);
+function evStatus(e, day) {
+  if (e.status !== "active") return { draft: "Brouillon", done: "Terminé", cancelled: "Annulé" }[e.status];
+  if (e.end && day > e.end) return "Terminé";
+  if (day >= e.start) return e.effect === "block" ? "Bloqué" : "Actif";
+  return "À venir";
+}
+const evGroup = l => ({ "Actif": "Actifs", "Bloqué": "Actifs", "À venir": "À venir", "Terminé": "Terminés", "Annulé": "Terminés", "Brouillon": "Brouillons" }[l]);
+function appliesToMe(e) { return e.scope === "team" || (!!st.author && e.planner.toLowerCase() === st.author.toLowerCase()) || st.taken.has(e.id); }
+function personalApplied() { return evAll().some(e => e.scope === "personal" && e.status === "active" && appliesToMe(e)); }
+function targets(e, b, dc) { return (!e.boutiques.length && !e.dcs.length) || e.boutiques.includes(b) || (!!dc && e.dcs.includes(dc)); }
+// Démo : les événements sont évalués pour la livraison prévue de B80 (calcul fait d'avance).
+const evDay = o => o.live ? o.delivery : DATA.demo_delivery;
+function evCell(x) { return [...new Set(x.ev.map(e => DOT[e.scope] + " " + e.title))].join(" · "); }
+function logValidation(kind, boutique, skus, note) {
+  st.validations.unshift({ at: new Date().toISOString(), who: st.author || "Planner non renseigné", kind, boutique, skus, note: note || "" });
+  store.set("spc2_validations", st.validations.slice(0, 500));
+}
+// Garde-fou avant export : mêmes règles que app/engines/events.py (export_check).
+function evCheck(baseRows, ovs, seen, confirmed, includeOk) {
+  const blocked = [], unval = [], inc = [];
+  for (const b of baseRows) {
+    if (!b.ev.length) continue;
+    const sku = b.m.sku, ov = ovs[sku];
+    if (b.s === "B") { if (!confirmed.has(sku) && !(ov && ov.reason)) blocked.push(sku); continue; }
+    if (!seen.has(sku) && !ov) unval.push(sku);
+    const titles = [...new Set(b.ev.filter(e => INCLUDE_TYPES.has(e.type)).map(e => e.title))];
+    if (titles.length) inc.push(sku + " (" + titles.join(" / ") + ")");
+  }
+  return { blocked, unval, inc, ok: !blocked.length && !unval.length && (!inc.length || includeOk) };
+}
+function gateCard(c, includeOk, onBlocks, onSeen, onInclude) {
+  const line = (ok, cls, title, detail, btn) => el("div", "g", el("div", "t", el("span", "ico " + (ok ? "ok" : cls), ok ? "✓" : (cls === "ko" ? "⦸" : "…")), el("b", "", title), detail ? el("small", "", detail) : null), btn);
+  const incBox = el("input", { type: "checkbox", id: "gate_include", checked: includeOk, onchange: e => onInclude(e.target.checked) });
+  return el("div", "gate",
+    el("div", "", el("b", "", "Vérification avant export (événements SKU)")),
+    line(!c.blocked.length, "ko", c.blocked.length + " ligne(s) BLOCKED par un événement", c.blocked.join(", "),
+      c.blocked.length ? el("button", { class: "btn", id: "gate_blocks", title: "La quantité reste 0 (tracé). Pour envoyer quand même : modifier la ligne avec une raison.", onclick: onBlocks }, "Confirmer les blocages") : null),
+    line(!c.unval.length, "todo", c.unval.length + " SKU flagué(s) par un événement non encore validé(s)", c.unval.join(", "),
+      c.unval.length ? el("button", { class: "btn", id: "gate_seen", onclick: onSeen }, ic("check"), "Marquer comme vus") : null),
+    c.inc.length ? line(includeOk, "todo", "Lancements et demandes boutique à inclure", c.inc.join(", "), el("label", "chk", incBox, "J'ai vérifié : inclus"))
+      : line(true, "", "Aucun lancement ni demande boutique à inclure", "", null),
+    c.ok ? null : el("p", "small muted", "Le téléchargement est désactivé tant que ces points ne sont pas verts."));
+}
+
 // ---------- Navigation ----------
 function go(p) { st.page = p; store.set("spc2_page", p); st.why = null; render(); window.scrollTo(0, 0); }
 function renderNav() {
@@ -349,9 +435,20 @@ function setSource(v) {
   render();
 }
 const freshCls = l => ({ green: "G", orange: "Y", red: "X" }[l] || "U");
-$("author").value = st.author;
-$("author").oninput = e => { st.author = e.target.value.trim(); store.set("spc_author", st.author); if (st.page === PAGES[3] || st.page === PAGES[2]) render(); };
-function needAuthor() { return st.author ? null : el("div", "msg err", "Indique ton nom dans la barre de gauche."); }
+function fillAuthors() {
+  const names2 = [...DATA.planners]; if (st.author && !names2.includes(st.author)) names2.push(st.author);
+  $("author").replaceChildren(new Option("Choisis ton prénom", ""), ...names2.map(n => new Option(n, n)));
+  $("author").value = st.author;
+}
+fillAuthors();
+$("author").onchange = e => {
+  st.author = e.target.value; store.set("spc_author", st.author);
+  // Le planner change les événements personnels appliqués : la commande est relue.
+  st.overrides = {}; st.seen = new Set(); st.confirmed = new Set(); st.includeOk = false; st.savedId = null; st.f.ev = null; st.evPlanner = null;
+  if (st.order && st.order.live) { st.order = null; st.err = "Planner changé : recalcule la commande pour appliquer ses événements personnels."; }
+  render();
+};
+function needAuthor() { return st.author ? null : el("div", "msg err", "Choisis ton prénom (Planner, barre de gauche)."); }
 
 // ---------- Moteur Python dans le navigateur (Pyodide) ----------
 // Les fichiers du planner sont lus ici, dans le navigateur, puis calculés par le MÊME code
@@ -444,7 +541,8 @@ async function depositFiles(files) {
 function livePlan(p) {
   const out = JSON.parse(ENGINE.bridge.plan(JSON.stringify({
     boutique: p.boutique, run_date: RUN(), delivery: p.delivery, cover: M.covers[+p.cover],
-    coffee: p.coffee === "" ? null : M.covers[+p.coffee], mode: p.mode, examples: st.examples })));
+    coffee: p.coffee === "" ? null : M.covers[+p.coffee], mode: p.mode, examples: st.examples,
+    events: evAll(), planner: st.author, taken: [...st.taken] })));
   return out;
 }
 async function computeLive(f) {
@@ -590,12 +688,13 @@ function matches(x) {
   if (f.cat !== "Tous" && categoryOf(x.m) !== f.cat) return false;
   if (f.status !== "Tous" && statusKey(x) !== f.status) return false;
   if (f.qty && x.qty <= 0) return false;
+  if (f.ev !== null && (!x.ev.length || (f.ev !== "all" && !x.ev.some(e => e.id === f.ev)))) return false;
   return !st.q || x.m.sku.toLowerCase().includes(st.q) || x.m.desc.toLowerCase().includes(st.q);
 }
 // Colonnes : [titre, largeur, numérique, valeur de tri]
 const COLS = [
   ["Statut", 112, 0, x => statusKey(x)], ["SKU", 96, 0, x => x.m.sku], ["Description", 210, 0, x => x.m.desc],
-  ["Catégorie", 130, 0, x => categoryOf(x.m)], ["Expected", 86, 1, x => x.m.exp], ["Ventes", 68, 1, x => x.m.sales],
+  ["Catégorie", 130, 0, x => categoryOf(x.m)], ["Événement", 170, 0, x => evCell(x)], ["Expected", 86, 1, x => x.m.exp], ["Ventes", 68, 1, x => x.m.sales],
   ["Couv. act.", 72, 1, x => x.m.cur], ["Proposée", 78, 1, (x, b) => b[x.m.sku]], ["Qty finale", 92, 1, x => x.qty],
   ["Couv. après", 80, 1, x => postCover(x.m, x.qty)], ["Multiple", 68, 1, x => x.multiple], ["Stock DC", 80, 1, x => x.m.dc],
   ["Source", 92, 0, x => SRC[x.source]], ["Raisons", 300, 0, x => x.reasons.join(" | ")]];
@@ -633,7 +732,8 @@ function orderTable(rows, baseQty) {
     const qi = el("input", { type: "number", min: 0, step: x.multiple || 1, value: x.qty, "aria-label": "Qty finale " + sku });
     qi.onchange = () => { const v = Math.round(Number(qi.value)); if (!Number.isFinite(v) || v < 0) { qi.value = x.qty; return; } if (v !== x.qty) { applyOverride(sku, v); render(); } };
     const reasons = x.reasons.join(" | ");
-    tr.append(el("td", "", stCell), el("td", "mono", sku), el("td", { title: m.desc }, m.desc || "—"), el("td", "", categoryOf(m)),
+    const evText = evCell(x);
+    tr.append(el("td", "", stCell), el("td", "mono", sku), el("td", { title: m.desc }, m.desc || "—"), el("td", "", categoryOf(m)), el("td", { class: "evcell", title: evText }, evText),
       el("td", "n", fmt(m.exp)), el("td", "n", fmt(m.sales)), el("td", "n", fmt1(m.cur)), el("td", "n", fmt(baseQty[sku])),
       el("td", "n q", qi), el("td", "n", fmt1(postCover(m, x.qty))), el("td", "n", fmt(x.multiple)),
       el("td", "n", m.dc === null ? "—" : fmt(m.dc)), el("td", "", SRC[x.source]), el("td", { title: reasons, class: "small" }, reasons || ""));
@@ -657,6 +757,7 @@ function renderOrder() {
     tile("Palettes estimées", fmt1(s.palTotal), "VL " + fmt1(s.pal.VL) + " · OL " + fmt1(s.pal.OL) + " · Mach. " + fmt1(s.pal.MACHINES) + " · Autres " + fmt1(s.pal.OTHERS)),
     tile("OK", fmt(s.by.O), null, "O"), tile("REVIEW", fmt(s.by.R), null, "R"), tile("BLOCKED", fmt(s.by.B), null, "B")));
   v.warnings.forEach(w => out.push(el("div", "msg warn", w)));
+  out.push(...eventBanner(o, ls));
   const byCat = { Tous: ls.length }, bySt = { Tous: ls.length };
   ls.forEach(x => { const c = categoryOf(x.m), k = statusKey(x); byCat[c] = (byCat[c] || 0) + 1; bySt[k] = (bySt[k] || 0) + 1; });
   const search = el("input", { type: "search", id: "search", placeholder: "Rechercher un SKU ou une description", value: st.q });
@@ -671,7 +772,23 @@ function renderOrder() {
   out.push(shown.length ? orderTable(shown, baseQty) : el("div", "msg info", "Aucune ligne pour ces filtres."));
   out.push(el("div", "row", { style: "justify-content:space-between;margin-top:8px" },
     el("span", "small muted", shown.length + " ligne(s) affichée(s) sur " + ls.length + " · lignes validées : " + st.seen.size + " / " + ls.length + " · clic sur un en-tête pour trier, sur une ligne pour le détail"),
-    el("button", { class: "btn primary", onclick: () => go(PAGES[3]) }, "Continuer vers l'export")));
+    el("span", "row", el("button", { class: "btn", onclick: () => go(PAGES[4]) }, "Événements SKU"), el("button", { class: "btn primary", onclick: () => go(PAGES[3]) }, "Continuer vers l'export"))));
+  return out;
+}
+
+function eventBanner(o, ls) {
+  const counts = {};
+  ls.forEach(x => x.ev.forEach(e => { (counts[e.id] = counts[e.id] || new Set()).add(x.m.sku); }));
+  const ids = Object.keys(counts).map(Number), evs = ids.map(evById).filter(Boolean), out = [];
+  if (evs.length) {
+    const team = evs.filter(e => e.scope === "team").length, all = new Set(ls.filter(x => x.ev.length).map(x => x.m.sku));
+    const chip = (key, label) => el("button", { class: "chip" + (st.f.ev === key ? " on" : ""), onclick: () => { st.f.ev = st.f.ev === key ? null : key; render(); } }, label);
+    out.push(el("div", "evbanner", el("span", "lab", el("b", "", "Événements actifs"), " · Équipe : " + team + " · Personnel : " + (evs.length - team)),
+      chip("all", "Tous (" + all.size + " SKU)"), ...evs.map(e => chip(e.id, DOT[e.scope] + " " + e.title + " (" + counts[e.id].size + " SKU)"))));
+    out.push(el("p", "small muted", { style: "margin:2px 0 0" }, "Clic sur un événement pour filtrer la table." + (o.live ? "" : " Démo : événements évalués pour une livraison le " + fdate(DATA.demo_delivery) + ".")));
+  }
+  const others = evAll().filter(e => e.scope === "personal" && e.status === "active" && !appliesToMe(e) && targets(e, o.boutique, V(o).dc) && inWindow(e, evDay(o)));
+  if (others.length) out.push(el("div", "msg info", "Événements personnels d'autres planners pour cette boutique, non appliqués : " + others.map(e => "« " + e.title + " » (" + e.planner + ")").join(", ") + ". Ouvre « 5. Événements SKU » → « Reprendre » pour les appliquer."));
   return out;
 }
 
@@ -731,9 +848,13 @@ function renderWhy() {
     el("ol", "steps", steps(x).map(([a, v]) => el("li", "", a, v !== undefined ? el("b", "", v) : null)), el("li", "tot", "Quantité finale : " + fmt(x.qty))),
     el("p", "small", "Stock DC " + V().dc + " : ", el("b", "", m.dc === null ? "absent" : fmt(m.dc)), " · stock projeté le jour de la livraison (" + days + " j) : ", el("b", "", fmt(proj)),
       x.qty > 0 && m.dc !== null && m.dc < x.qty ? el("span", "", " · ", el("span", "st R", "DC insuffisant")) : null),
+    b.ev.length ? el("p", "small", el("b", "", "Événement(s) : "), evCell(b)) : null,
     x.reasons.length ? el("div", "", el("h3", "", "Raisons et alertes"), el("ul", "list", x.reasons.map(r => el("li", "", r)))) : null,
     el("p", "small muted", "Excel (cover 9 j) : " + (m.xl === null || m.xl === undefined ? "SKU absent de la feuille" : fmt(m.xl) + (m.xlf ? " (formule)" : " (saisie manuelle dans Excel)"))),
-    el("button", { class: "btn", style: "width:100%;margin-top:6px", onclick: () => { st.seen.has(m.sku) ? st.seen.delete(m.sku) : st.seen.add(m.sku); render(); } }, st.seen.has(m.sku) ? ic("undo") : ic("check"), st.seen.has(m.sku) ? "Retirer la validation" : "Marquer comme vérifiée"),
+    b.s === "B" && b.ev.length ? el("button", { class: "btn", id: "why_block", style: "width:100%;margin-top:6px", title: "Bloqué par un événement : confirmer (tracé), ou modifier la quantité AVEC une raison pour l'envoyer quand même.",
+      onclick: () => { const on = !st.confirmed.has(m.sku); on ? st.confirmed.add(m.sku) : st.confirmed.delete(m.sku); logValidation("confirm_block", st.order.boutique, [m.sku], on ? "" : "retiré"); render(); } },
+      st.confirmed.has(m.sku) ? "Retirer la confirmation du blocage" : "Confirmer le blocage (qty 0)") : null,
+    el("button", { class: "btn", style: "width:100%;margin-top:6px", onclick: () => { const on = !st.seen.has(m.sku); on ? st.seen.add(m.sku) : st.seen.delete(m.sku); if (b.ev.length) logValidation("seen", st.order.boutique, [m.sku], on ? "" : "retiré"); render(); } }, st.seen.has(m.sku) ? ic("undo") : ic("check"), st.seen.has(m.sku) ? "Retirer la validation" : "Marquer comme vérifiée"),
     el("h3", "", "Modifier la quantité"),
     el("div", "form3", el("label", "f", "Qty finale", qty), el("label", "f", "Catégorie (facultatif)", cat), el("label", "f wide", "Raison (facultatif)", reason)),
     el("div", "row", { style: "margin-top:10px" }, el("button", { class: "btn primary", id: "dlg_save", onclick: () => {
@@ -791,24 +912,38 @@ function renderDay() {
     } }, "Calculer toutes les commandes")));
   if (d.err) out.push(el("div", "msg err", d.err));
   if (d.outcomes) {
-    const prev = st.order, res = [];
+    const prev = st.order, res = [], checks = [];
+    d.checks = d.checks || {};
     for (const o of d.outcomes) {
-      if (o.error) { res.push([btqLabel(o.b), "—", "", "", "", "", "", el("span", "st B", o.error), ""]); continue; }
+      if (o.error) { res.push([btqLabel(o.b), "—", "", "", "", "", "", "", el("span", "st B", o.error), ""]); continue; }
       st.order = { boutique: o.b, delivery: o.r.delivery, cover: o.r.cover, coffee: o.r.coffee, mode: d.mode, live: o.live || null, run_date: RUN() };
-      const saveOv = st.overrides; st.overrides = {}; const s = summarize(lines()); st.overrides = saveOv;
-      const order = st.order;
-      res.push([btqLabel(o.b), frday(o.r.delivery), fmt(s.ordered), fmt(s.units), fmt1(s.palTotal), el("span", "st R", String(s.by.R)), el("span", "st B", String(s.by.B)), V(order).warnings.join(" | ") || "—",
+      const saveOv = st.overrides; st.overrides = {}; const ls0 = lines(), s = summarize(ls0); st.overrides = saveOv;
+      const order = st.order, base = ls0.map((_, j) => baseLine(j));
+      const ck = d.checks[o.b] = d.checks[o.b] || { seen: new Set(), blocks: new Set(), include: false };
+      checks.push([o.b, evCheck(base, {}, ck.seen, ck.blocks, ck.include), ck]);
+      const teamN = new Set(base.filter(x => x.ev.some(e => e.scope === "t")).map(x => x.m.sku)).size, persN = new Set(base.filter(x => x.ev.some(e => e.scope === "p")).map(x => x.m.sku)).size;
+      res.push([btqLabel(o.b), frday(o.r.delivery), fmt(s.ordered), fmt(s.units), fmt1(s.palTotal), el("span", "st R", String(s.by.R)), el("span", "st B", String(s.by.B)),
+        teamN || persN ? el("span", { title: "SKU flagués : ● équipe · ○ personnel" }, "● " + teamN + " · ○ " + persN) : "—", V(order).warnings.join(" | ") || "—",
         el("button", { class: "btn", onclick: () => { st.form = { ...order }; st.order = { ...order }; st.overrides = {}; st.seen = new Set(); st.savedId = null; go(PAGES[1]); } }, "Ouvrir")]);
     }
     st.order = prev;
-    out.push(el("h3", "", "Résultats"), tableOf(["Boutique", "Livraison", "Lignes", "Unités", "Palettes", "REVIEW", "BLOCKED", "Alertes", ""], res, [2, 3, 4]));
+    out.push(el("h3", "", "Résultats"), tableOf(["Boutique", "Livraison", "Lignes", "Unités", "Palettes", "REVIEW", "BLOCKED", "Événements", "Alertes", ""], res, [2, 3, 4]));
     const okOnes = d.outcomes.filter(o => !o.error);
+    const pre = (b, list) => checks.length > 1 ? list.map(x => b + " " + x) : list;
+    const all = { blocked: checks.flatMap(([b, c]) => pre(b, c.blocked)), unval: checks.flatMap(([b, c]) => pre(b, c.unval)), inc: checks.flatMap(([b, c]) => pre(b, c.inc)) };
+    const incOk = checks.every(([, c, k]) => !c.inc.length || k.include);
+    all.ok = !all.blocked.length && !all.unval.length && (!all.inc.length || incOk);
+    if (all.blocked.length || all.unval.length || all.inc.length) out.push(gateCard(all, incOk,
+      () => { checks.forEach(([b, c, k]) => { if (c.blocked.length) { c.blocked.forEach(x => k.blocks.add(x)); logValidation("confirm_block", b, c.blocked); } }); render(); },
+      () => { checks.forEach(([b, c, k]) => { if (c.unval.length) { c.unval.forEach(x => k.seen.add(x)); logValidation("seen", b, c.unval); } }); render(); },
+      on => { checks.forEach(([b, c, k]) => { if (c.inc.length) { k.include = on; logValidation("include", b, c.inc, on ? "coché" : "décoché"); } }); render(); }));
     if (okOnes.length) {
       const m2 = el("div");
-      out.push(el("div", { style: "margin-top:10px" }, el("button", { class: "btn primary", disabled: !st.author, onclick: () => dayZip(okOnes, m2) }, okOnes.length === 1 ? "Télécharger le fichier LT (zip)" : "Télécharger les " + okOnes.length + " fichiers LT (zip)")), m2);
-      if (!st.author) out.push(el("p", "small muted", "Indique ton nom dans la barre de gauche pour télécharger."));
+      out.push(el("div", { style: "margin-top:10px" }, el("button", { class: "btn primary", id: "day_zip", disabled: !st.author || !all.ok, onclick: () => dayZip(okOnes, m2) }, okOnes.length === 1 ? "Télécharger le fichier LT (zip)" : "Télécharger les " + okOnes.length + " fichiers LT (zip)")), m2);
+      if (!st.author) out.push(el("p", "small muted", "Choisis ton prénom (Planner, barre de gauche) pour télécharger."));
     }
   }
+  out.push(...closeRequestsPrompt());
   return out;
 }
 async function dayZip(okOnes, box) {
@@ -817,12 +952,14 @@ async function dayZip(okOnes, box) {
   for (const o of okOnes) {
     st.order = { boutique: o.b, delivery: o.r.delivery, cover: o.r.cover, coffee: o.r.coffee, mode: st.day.mode, live: o.live || null, run_date: RUN() }; st.overrides = {};
     const ls = lines(), text = ltText(ls);
+    ls.forEach((_, j) => baseLine(j).ev.forEach(e => { if (e.type === "store_request" && !st.toClose.includes(e.id)) st.toClose.push(e.id); }));
     if (text) { files.push([ltName(o.b, now), text]); saveRun(ls, ltName(o.b, now), true); }
     st.order = prev; st.overrides = prevOv;
   }
   st.order = prev; st.overrides = prevOv;
   if (!files.length) return box.replaceChildren(el("div", "msg info", "Aucune ligne à commander."));
   await offer("LT " + now.getFullYear() + "-" + pad(now.getMonth() + 1) + "-" + pad(now.getDate()) + " " + pad(now.getHours()) + "_" + pad(now.getMinutes()) + ".zip", zipStore(files), box, files.length + " fichier(s) LT dans le zip.");
+  box.append(...closeRequestsPrompt());
 }
 
 // ---------- 4. Export ----------
@@ -860,20 +997,40 @@ function renderExport() {
   const unseen = ls.filter(x => x.s !== "O" && !st.seen.has(x.m.sku));
   if (unseen.length) out.push(el("div", "msg warn", unseen.length + " ligne(s) REVIEW ou BLOCKED pas encore marquée(s) « Vu »."));
   const na = needAuthor(); if (na) out.push(na);
+  const base = []; for (let j = 0; j < ls.length; j++) base.push(baseLine(j));
+  const chk = evCheck(base, st.overrides, st.seen, st.confirmed, st.includeOk), b0 = st.order.boutique;
+  if (chk.blocked.length || chk.unval.length || chk.inc.length) out.push(gateCard(chk, st.includeOk,
+    () => { chk.blocked.forEach(k => st.confirmed.add(k)); logValidation("confirm_block", b0, chk.blocked); render(); },
+    () => { chk.unval.forEach(k => st.seen.add(k)); logValidation("seen", b0, chk.unval); render(); },
+    on => { st.includeOk = on; logValidation("include", b0, chk.inc, on ? "coché" : "décoché"); render(); }));
   const box = el("div");
   if (st.xmsg) box.append(st.xmsg);
+  const requests = [...new Set(base.flatMap(x => x.ev.filter(e => e.type === "store_request").map(e => e.id)))];
   out.push(el("div", "row",
-    el("button", { class: "btn primary", disabled: !st.author, onclick: async () => {
+    el("button", { class: "btn primary", id: "dl_lt", disabled: !st.author || !chk.ok, onclick: async () => {
       const text = ltText(ls); if (!text) return box.replaceChildren(el("div", "msg info", "Aucune ligne à commander : pas de fichier LT."));
-      if (await offer(name, text, box, "Fichier « " + name + " » téléchargé (" + s.ordered + " lignes).")) saveRun(ls, name);
-    } }, "Fichier LT (SKU;QTY)"),
+      if (await offer(name, text, box, "Fichier « " + name + " » téléchargé (" + s.ordered + " lignes).")) { saveRun(ls, name); st.toClose = [...new Set([...st.toClose, ...requests])]; st.xmsg = box.firstChild; render(); }
+    } }, "Télécharger le fichier LT (SKU;QTY)"),
     el("button", { class: "btn", disabled: !st.author, onclick: () => offer("Recap " + name, recapText(ls, s), box, "Récapitulatif téléchargé.") }, "Récapitulatif boutique"),
     el("button", { class: "btn", disabled: true, title: "Disponible dans l'outil installé" }, "Export Excel détaillé"),
-    el("button", { class: "btn", id: "save_run", disabled: !st.author, onclick: () => { const id = saveRun(ls); st.xmsg = id ? el("div", "msg ok", "Commande n° " + id + " enregistrée (6. Historique).") : el("div", "msg err", "Ton navigateur bloque l'enregistrement local."); render(); } }, "Enregistrer sans exporter")));
+    el("button", { class: "btn", id: "save_run", disabled: !st.author, onclick: () => { const id = saveRun(ls); st.xmsg = id ? el("div", "msg ok", "Commande n° " + id + " enregistrée (7. Historique).") : el("div", "msg err", "Ton navigateur bloque l'enregistrement local."); render(); } }, "Enregistrer sans exporter")));
   out.push(box);
+  out.push(...closeRequestsPrompt());
+  if (st.validations.length) out.push(el("details", "", el("summary", "", "Validations tracées (" + st.validations.length + ")"),
+    tableOf(["Quand", "Qui", "Boutique", "Validation", "SKU", "Note"], st.validations.slice(0, 60).map(v => [v.at.slice(0, 16).replace("T", " "), v.who, v.boutique, { seen: "Vu", confirm_block: "Blocage confirmé", include: "Inclusion vérifiée", close_request: "Demande terminée", takeover: "Repris" }[v.kind] || v.kind, (v.skus || []).join(", "), v.note]))));
   out.push(el("p", "small muted", "Importe le fichier LT dans Nessoft à la main : l'outil n'y écrit jamais. L'export Excel détaillé est disponible dans l'outil installé."));
   out.push(el("details", "", el("summary", "", "Contenu du fichier LT"), el("pre", { class: "mono card", style: "max-height:240px;overflow:auto" }, ltText(ls) || "(aucune ligne)")));
   return out;
+}
+// Après l'export : chaque demande boutique propose de se terminer (avec confirmation).
+function closeRequestsPrompt() {
+  return st.toClose.map(evById).filter(e => e && e.status === "active").map(e => el("div", "msg info", { style: "display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between" },
+    el("span", "", "Demande boutique « " + e.title + " » (" + e.skus.map(x => x.sku).join(", ") + ") exportée : la terminer ?"),
+    el("span", "row", el("button", { class: "btn primary", id: "close_req_" + e.id, onclick: () => {
+      st.evDone[e.id] = { by: st.author || "Planner non renseigné", at: new Date().toISOString() }; store.set("spc2_ev_done", st.evDone);
+      logValidation("close_request", e.boutiques[0] || "", e.skus.map(x => x.sku), "commande exportée");
+      st.toClose = st.toClose.filter(i => i !== e.id); st.overrides = {}; st.seen = new Set(); st.confirmed = new Set(); render(); } }, "Terminer"),
+      el("button", { class: "btn", onclick: () => { st.toClose = st.toClose.filter(i => i !== e.id); render(); } }, "Garder active"))));
 }
 let downloads = null;
 (async () => { try { downloads = await window.claude?.use?.("downloads") ?? null; } catch (e) { downloads = null; } })();
@@ -908,7 +1065,105 @@ function zipStore(files) {
   return out;
 }
 
-// ---------- 5. Référentiels ----------
+// ---------- 5. Événements SKU ----------
+// Démo : 4 événements fictifs, en lecture seule (création et modification dans l'outil installé).
+// On peut filtrer, ouvrir le détail, « Reprendre » un événement personnel d'un collègue et
+// terminer une demande boutique : la commande B80 en tient compte tout de suite.
+function evTargets(e) { return !e.boutiques.length && !e.dcs.length ? "Toutes" : [...e.dcs.map(d => "DC " + d), ...e.boutiques].join(", "); }
+function evEffect(e) {
+  let t = EFFECT_LABELS[e.effect];
+  if (e.quantities.length) { const q = e.quantities[0]; t += " (" + fmt(q.qty) + (q.boutique === "*" ? "" : " " + q.boutique) + (e.quantities.length > 1 ? " …)" : ")"); }
+  if (e.effect === "replace") t += " : " + e.skus.slice(0, 2).map(x => x.sku + "→" + x.new_sku).join(", ");
+  return t;
+}
+const evScope = e => e.scope === "personal" ? "○ Personnel · " + e.planner : "● Équipe";
+function evDaysLeft(e, day) { return e.end ? Math.round((parseIso(e.end) - parseIso(day)) / 86400000) : null; }
+function takeOver(e, on) {
+  if (!st.author) { st.evMsg = "Choisis ton prénom (Planner, barre de gauche) pour reprendre."; return render(); }
+  on ? st.taken.add(e.id) : st.taken.delete(e.id);
+  if (on) logValidation("takeover", e.boutiques[0] || "", e.skus.map(x => x.sku), "« " + e.title + " » de " + e.planner);
+  st.overrides = {}; st.seen = new Set(); st.confirmed = new Set(); st.includeOk = false; st.f.ev = null;
+  if (st.order && st.order.live) { st.order = null; st.err = "Événement repris : recalcule la commande."; }
+  render();
+}
+function evPanel(e, day) {
+  const mine = e.scope === "team" || (!!st.author && e.planner.toLowerCase() === st.author.toLowerCase());
+  const label = evStatus(e, day), until = e.end ? "au " + fdate(e.end) : (e.until_next_order ? "jusqu'à la prochaine commande" : "jusqu'à nouvel ordre");
+  const kv = [["Statut", el("span", "st " + EV_CLS[label], label)], ["Portée", evScope(e)], ["Type", TYPE_LABELS[e.type]],
+    ["SKU", el("span", "mono", e.skus.map(x => x.sku + (x.multiple ? " (multiple " + x.multiple + ")" : "")).join(", "))], ["Boutiques", evTargets(e)],
+    ["Dates", fdate(e.start) + " → " + (e.end ? fdate(e.end) : "—")], ["Actif", "du " + fdate(activeFrom(e)) + " " + until + " (anticipation " + e.lead_days + " j comprise)"],
+    ["Effet", evEffect(e)], ["Fichier source", e.source_file || "—"], ["Propriétaire", e.owner || "—"], ["Responsable", e.planner || "—"]];
+  if (e.type === "store_request") kv.push(["Demandé par", (e.requested_by || "—") + (e.requested_on ? " le " + fdate(e.requested_on) : "")]);
+  kv.push(["Créé", (e.created_by || "—") + (e.created_at ? " le " + fdate(e.created_at.slice(0, 10)) : "")]);
+  const hist = st.validations.filter(v => (v.kind === "takeover" || v.kind === "close_request") && v.skus.join() === e.skus.map(x => x.sku).join());
+  const out = [el("button", { class: "x", "aria-label": "Fermer", onclick: () => { st.evSel = null; render(); } }, "×"), el("h2", "", e.title),
+    e.description ? el("p", "small muted", e.description) : null, el("dl", "kv", kv.flatMap(([k, v]) => [el("dt", "", k), el("dd", "", v)]))];
+  if (!mine) {
+    out.push(el("div", "msg info", "Événement personnel de " + e.planner + " : lecture seule. « Reprendre » l'applique à tes commandes pendant ta session (tracé)."));
+    out.push(st.taken.has(e.id) ? el("div", "", el("div", "msg ok", "Repris : appliqué à tes commandes."), el("button", { class: "btn", onclick: () => takeOver(e, false) }, "Ne plus appliquer"))
+      : el("button", { class: "btn primary", id: "ev_take", style: "width:100%", onclick: () => takeOver(e, true) }, "Reprendre"));
+  } else if (e.type === "store_request" && e.status === "active") {
+    out.push(el("button", { class: "btn", id: "ev_done", style: "width:100%", onclick: () => {
+      st.evDone[e.id] = { by: st.author || "Planner non renseigné", at: new Date().toISOString() }; store.set("spc2_ev_done", st.evDone);
+      logValidation("close_request", e.boutiques[0] || "", e.skus.map(x => x.sku), "terminée depuis Événements SKU"); st.overrides = {}; render(); } }, "Terminer la demande"));
+  } else out.push(el("p", "small muted", "Démo : modification, duplication et fin d'un événement dans l'outil installé."));
+  if (st.evDone[e.id]) out.push(el("p", "small muted", "Terminé par " + st.evDone[e.id].by + " le " + st.evDone[e.id].at.slice(0, 16).replace("T", " ") + ".",
+    el("button", { class: "btn link", style: "margin-left:6px", onclick: () => { delete st.evDone[e.id]; store.set("spc2_ev_done", st.evDone); render(); } }, "Réactiver (démo)")));
+  if (hist.length) out.push(el("h3", "", "Historique"), el("ul", "list small", hist.map(v => el("li", "", v.at.slice(0, 16).replace("T", " ") + " · " + v.who + " · " + (v.kind === "takeover" ? "repris" : "terminé")))));
+  if (st.evMsg) { out.push(el("div", "msg err", st.evMsg)); st.evMsg = null; }
+  return el("div", "card evpanel", out);
+}
+function renderEvents() {
+  const day = RUN(), all = evAll(), me = st.author;
+  const applied = all.filter(appliesToMe);
+  const active = applied.filter(e => ["Actif", "Bloqué"].includes(evStatus(e, day))).length;
+  const week = addDays(day, 7), soon = applied.filter(e => evStatus(e, day) === "À venir" && activeFrom(e) <= week).length;
+  const live = e => !["Terminé", "Annulé"].includes(evStatus(e, day));
+  const team = all.filter(e => e.scope === "team"), personal = all.filter(e => e.scope === "personal");
+  const mineN = personal.filter(e => me && e.planner === me && live(e)).length;
+  const out = [el("div", "row", { style: "justify-content:space-between;align-items:baseline" }, el("h1", { style: "margin:0" }, "Événements SKU"),
+    el("span", "", el("b", "", String(active)), " actif(s), ", el("b", "", String(soon)), " à venir cette semaine · au " + fdate(day)))];
+  out.push(el("p", "small muted", "Promotions, lancements, arrêts, interdictions, conversions, urgences et demandes boutique : saisis une fois, ils flaguent ou bloquent les SKU dans toutes les commandes tant qu'ils sont actifs. Le planner valide."));
+  out.push(el("div", "msg info", "Démo : 4 événements fictifs sur B80, en lecture seule. Tu peux filtrer, ouvrir un événement, « Reprendre » la demande d'un collègue et terminer une demande boutique. Création, modification, duplication et import Excel : dans l'outil installé."));
+  out.push(el("div", "row", { style: "margin:10px 0" },
+    el("div", "seg", [["team", "Équipe", team.filter(live).length], ["mine", "Mes événements", mineN]].map(([k, t, n]) =>
+      el("button", { class: st.evTab === k ? "on" : "", onclick: () => { st.evTab = k; st.evSel = null; st.evPlanner = null; render(); } }, t, el("b", "", String(n))))),
+    el("button", { class: "btn primary", disabled: true, title: "Démo : dans l'outil installé" }, "+ Nouvel événement"),
+    st.evTab === "mine" ? el("button", { class: "btn", disabled: true, title: "Démo : dans l'outil installé" }, "+ Demande boutique") : null));
+  let list = st.evTab === "team" ? team : personal;
+  const plannerSel = el("select", { id: "ev_planner", onchange: e => { st.evPlanner = e.target.value; render(); } }, new Option("Tous les planners", ""), ...[...new Set(personal.map(e => e.planner))].map(n => new Option(n, n)));
+  if (st.evTab === "mine") { if (st.evPlanner === null) st.evPlanner = me || ""; plannerSel.value = st.evPlanner; if (st.evPlanner) list = list.filter(e => e.planner === st.evPlanner); }
+  const counts = { Tous: list.length }; list.forEach(e => { const g = evGroup(evStatus(e, day)); counts[g] = (counts[g] || 0) + 1; });
+  const types = Object.keys(TYPE_LABELS).filter(t => st.evTab === "mine" || !["store_request", "watch"].includes(t));
+  const q = el("input", { type: "search", id: "ev_search", placeholder: "Rechercher un titre, un SKU ou une boutique", value: st.evQ });
+  q.oninput = () => { st.evQ = q.value.trim().toLowerCase(); clearTimeout(q._t); q._t = setTimeout(() => { render(); const q2 = $("ev_search"); q2.focus(); q2.setSelectionRange(q2.value.length, q2.value.length); }, 200); };
+  out.push(el("div", "filters", segmented("Statut", EV_FILTERS, st.evStatus, counts, c => { st.evStatus = c; render(); }),
+    st.evTab === "mine" ? el("label", { class: "f", style: "width:180px" }, "Planner", plannerSel) : null, el("div", "grow", q)));
+  out.push(el("div", "chips", { style: "margin-top:0" }, types.map(t => el("button", { class: "chip" + (st.evTypes.has(t) ? " on" : ""), onclick: () => { st.evTypes.has(t) ? st.evTypes.delete(t) : st.evTypes.add(t); render(); } }, TYPE_LABELS[t]))));
+  const shown = list.filter(e => (st.evStatus === "Tous" || evGroup(evStatus(e, day)) === st.evStatus) && (!st.evTypes.size || st.evTypes.has(e.type))
+    && (!st.evQ || [e.title, e.description, ...e.skus.map(x => x.sku), ...e.boutiques, ...e.dcs].join(" ").toLowerCase().includes(st.evQ)))
+    .sort((a, b) => (!a.end - !b.end) || (a.end || "").localeCompare(b.end || "") || a.start.localeCompare(b.start));
+  const head = ["Statut", "Portée", "Type", "Titre", "SKU", "Boutiques", "Début", "Fin", "Restant (j)", "Effet", "Responsable", "Fichier source", "Modifié le"];
+  const t = el("table", "ev", el("thead", "", el("tr", "", head.map((h, i) => el("th", i === 8 ? "n" : "", h)))));
+  const body = el("tbody");
+  for (const e of shown) {
+    const label = evStatus(e, day), left = evDaysLeft(e, day), skus = e.skus.map(x => x.sku);
+    const near = left !== null && left >= 0 && left <= 3 && label !== "Terminé";
+    const tr = el("tr", st.evSel === e.id ? "sel" : "", el("td", "", el("span", "st " + EV_CLS[label], label)), el("td", "", evScope(e)), el("td", "", TYPE_LABELS[e.type]), el("td", { title: e.title }, e.title),
+      el("td", { title: skus.join(", ") }, skus.length + " : " + skus.slice(0, 3).join(", ") + (skus.length > 3 ? " …" : "")), el("td", "", evTargets(e)), el("td", "", fdate(e.start)), el("td", "", e.end ? fdate(e.end) : "—"),
+      el("td", "n", left === null ? "—" : String(Math.max(left, 0)), near ? el("span", { class: "st Y", style: "margin-left:6px" }, "Fin proche") : null), el("td", "", evEffect(e)), el("td", "", e.planner || "—"),
+      el("td", { title: e.source_file }, e.source_file || "—"), el("td", "", e.updated_at ? fdate(e.updated_at.slice(0, 10)) : "—"));
+    tr.onclick = () => { st.evSel = e.id; render(); };
+    body.append(tr);
+  }
+  t.append(body);
+  const sel = st.evSel !== null ? evById(st.evSel) : null;
+  out.push(el("div", "evlayout" + (sel ? " open" : ""), el("div", "", shown.length ? el("div", "tablewrap", t) : el("div", "msg info", "Aucun événement pour ces filtres."),
+    el("p", "small muted", shown.length + " événement(s) · ● Équipe ○ Personnel · tri par date de fin · clic sur une ligne pour le détail")), sel ? evPanel(sel, day) : null));
+  return out;
+}
+
+// ---------- 6. Référentiels ----------
 function renderRefs() {
   const out = [el("h1", "", "Référentiels")], owners = store.get("spc2_owners", {});
   out.push(el("div", "tabs", DATA.refs.map((r, i) => el("button", { class: i === st.refTab ? "on" : "", onclick: () => { st.refTab = i; render(); } }, r.label, r.anomalies.length ? el("span", "cnt", String(r.anomalies.length)) : null))));
@@ -949,7 +1204,7 @@ function categoriesEditor() {
     el("div", "row", { style: "margin-top:10px" },
       el("button", { class: "btn", onclick: () => { st.catDraft.push({ t: "", c: "Autres" }); render(); } }, "Ajouter un type"),
       el("button", { class: "btn primary", id: "save_cats", onclick: () => {
-        if (!st.author) return msg.replaceChildren(el("div", "msg err", "Indique ton nom dans la barre de gauche."));
+        if (!st.author) return msg.replaceChildren(el("div", "msg err", "Choisis ton prénom (Planner, barre de gauche)."));
         const map = {}, errs = [];
         st.catDraft.forEach((r, i) => { const t = r.t.trim().toUpperCase(); if (!t) errs.push("ligne " + (i + 1) + " : type produit vide"); else if (map[t] && map[t] !== r.c) errs.push("type " + t + " déjà classé en « " + map[t] + " »"); else map[t] = r.c; });
         if (errs.length) return msg.replaceChildren(el("div", "msg err", errs.join(" · ")));
@@ -960,7 +1215,7 @@ function categoriesEditor() {
     el("div", { id: "catmsg" }, msg)];
 }
 
-// ---------- 6. Historique ----------
+// ---------- 7. Historique ----------
 function renderHistory() {
   const out = [el("h1", "", "Historique")], runs = store.get("spc2_runs", []);
   if (!runs.length) return [...out, el("div", "msg info", "Aucune commande enregistrée pour l'instant."), el("p", "small muted", "Dans cette démo, les commandes restent dans ton navigateur. Dans l'outil installé, elles vont dans la base locale.")];
@@ -992,7 +1247,7 @@ function renderHistory() {
   return out;
 }
 
-const SCREENS = { [PAGES[0]]: renderDepot, [PAGES[1]]: renderOrder, [PAGES[2]]: renderDay, [PAGES[3]]: renderExport, [PAGES[4]]: renderRefs, [PAGES[5]]: renderHistory };
+const SCREENS = { [PAGES[0]]: renderDepot, [PAGES[1]]: renderOrder, [PAGES[2]]: renderDay, [PAGES[3]]: renderExport, [PAGES[4]]: renderEvents, [PAGES[5]]: renderRefs, [PAGES[6]]: renderHistory };
 let rendering = false;
 function render() {
   // Un champ retiré pendant le rendu peut déclencher « change » : on reporte ce rendu-là.

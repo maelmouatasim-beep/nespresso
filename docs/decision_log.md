@@ -183,3 +183,42 @@ Format : contexte → décision → conséquence.
 - Catégorie et raison deviennent facultatives : on peut les ajouter dans le panneau « Pourquoi ». L'Historique classe les modifications sans catégorie sous « Sans catégorie ».
 - Base locale : la contrainte « raison d'au moins 3 caractères » est retirée ; les bases existantes sont migrées automatiquement (table recréée, toutes les modifications passées gardées).
 
+
+## D-029 — Événements SKU : une seule source pour promos, lancements, arrêts et demandes (2026-10-11)
+
+- Demande du planner : remplacer la liste gardée en tête ou dans la Bible par une page « Événements SKU ». Un événement est saisi une fois et flague ou bloque les SKU dans toutes les commandes tant qu'il est actif. La Bible n'est pas lue : un template Excel (`templates/evenements_sku.xlsx`, 4 exemples fictifs) permet de recopier la feuille du jour ; l'import liste les lignes incomplètes avec la raison, il ne les ignore pas.
+- **Modèle** (`app/domain/events.py`) : portée Équipe / Personnel, 8 types, 5 effets (flag, quantité imposée, quantité ajoutée, bloquer, remplacer), SKU toujours en texte, boutiques (toutes, par DC ou liste), début / fin (fin vide permise pour Arrêt et Interdiction, et pour une demande boutique « jusqu'à la prochaine commande »), jours d'anticipation (7 par défaut pour un lancement), quantités par boutique et par SKU (« * » = toutes / tous ; la plus précise gagne), multiple facultatif par SKU, fichier source, propriétaire, planner, statut. Pas d'email dans les champs de personnes.
+- **Actif pour une commande** quand : statut Actif, début − anticipation ≤ date de livraison ≤ fin, boutique ciblée, et (Équipe, ou Personnel de ce planner, ou repris par lui).
+- **Ordre d'application** : prévision → arbitrage métier (allocations, lancements, stock cible) → événements → modifications du planner. Sans événement actif, rien ne change : parité 416/416 vérifiée par un test qui passe des événements inactifs.
+- **Stockage** : tables `sku_events`, `sku_event_history` (qui, quand, quels champs), `planners` (prénoms seulement), `event_validations` dans la base locale.
+- **Interface** : 7 écrans (complète D-024) — « 5. Événements SKU » s'ajoute avant Référentiels et Historique.
+
+## D-030 — Événements : priorités et conflits, jamais de choix silencieux (2026-10-11)
+
+1. Problème de conversion (contradiction avec SKU Conversion, chaîne A → B → C) → BLOCKED.
+2. Bloquer l'envoi (Interdiction, Arrêt) → BLOCKED, quantité 0. Une interdiction gagne toujours : si un autre événement donnait une quantité, la raison « Le blocage prime sur … » est écrite.
+3. Quantité imposée ou ajoutée → REVIEW, source « Événement », arrondie au multiple supérieur. Deux quantités différentes sur le même SKU (deux imposées différentes, imposée + ajoutée, deux ajoutées) → BLOCKED « Deux événements contradictoires », quantité 0, à trancher par une modification. Deux quantités identiques : appliquée une fois.
+4. Flag → REVIEW, la quantité du moteur reste.
+- Une **allocation officielle n'est jamais écrasée** (règle 5) : la ligne garde l'allocation et passe en REVIEW avec la quantité que proposait l'événement.
+- Une ligne déjà **bloquée par le moteur** (exclusion, portfolio, ancien SKU) reste bloquée ; la demande de l'événement est écrite dans les raisons.
+- **Quantité imposée** = quantité de la commande (pas de déduction de l'Expected, contrairement au référentiel Lancements, Q-029). **Quantité ajoutée** = quantité du moteur + quantité saisie arrondie au multiple (jamais moins que demandé).
+- Quantité non saisie pour la boutique → REVIEW « quantité non définie », quantité du moteur gardée.
+- **Multiple** : celui de la Multiple list ; si elle n'en a pas (ou un multiple inféré / à 1 par défaut), le multiple saisi dans l'événement est utilisé et signalé. S'il diffère de la Multiple list, la Multiple list gagne et l'écart est signalé.
+- **Conversion** par événement : ajoutée au moteur de conversion existant avec une date d'effet = jour du calcul − 1 (l'ancien SKU est bloqué tout de suite, le nouveau reprend ventes et Expected).
+- **SKU absent de la Stock Situation** (lancement, demande) : toujours ajouté à la commande, avec la quantité saisie, ou REVIEW sans quantité si rien n'est saisi (ne jamais inventer, ne jamais oublier). Vrai aussi en mode Parité Excel (démo B80 : 453 lignes avec le lancement fictif ADV-2026-CA).
+
+## D-031 — Garde-fou avant export et validations tracées (2026-10-11)
+
+- Le fichier LT (et le zip de la Journée) ne se télécharge que si trois points sont verts : (1) chaque ligne BLOCKED par un événement est traitée — blocage confirmé, ou modification **avec une raison** (exception voulue à D-028 pour ces lignes seulement) ; (2) chaque SKU flagué par un événement est marqué « Vu » ou modifié ; (3) les lancements, urgences et demandes boutique à inclure sont cochés.
+- Boutons « Confirmer les blocages » et « Marquer comme vus » pour toute la commande (ou la journée) : chaque clic est tracé (qui, quand, quels SKU) dans `event_validations` (Q-030).
+- Après l'export, chaque demande boutique appliquée propose de se terminer ; « Terminer » est tracé dans l'historique de l'événement (« terminé (commande exportée) »).
+
+## D-032 — Identité du planner et événements personnels (2026-10-11)
+
+- Le planner choisit son prénom dans une liste éditable (barre latérale « Ajouter un planner », Référentiels → Planners). Prénom seulement, jamais d'email. Il sert à « Mes événements », aux événements personnels et à signer modifications et validations.
+- Un événement personnel est visible des autres en lecture seule, avec le nom du planner. Commande boutique : un bandeau signale les événements personnels d'un collègue actifs pour la boutique et non appliqués. « Reprendre » l'applique à la session du collègue (tracé dans l'historique de l'événement ; non gardé après la session, Q-031).
+
+## D-033 — Version web : événements fictifs en lecture seule (2026-10-11)
+
+- La démo web contient les 4 événements fictifs de B80 (promotion, lancement absent de la Stock Situation, arrêt, demande boutique personnelle de Camille). La page « Événements SKU » est en lecture seule (filtres, détail, « Reprendre », terminer une demande) : création, modification, duplication et import Excel sont dans l'outil installé.
+- Démo : la commande B80 est calculée d'avance avec les événements évalués pour la livraison du 08/10/2026 ; « Mes fichiers » envoie les événements au moteur Python du navigateur, qui choisit lui-même ceux actifs à la date saisie (mêmes quantités que l'outil installé, test `test_web_bridge.py`).

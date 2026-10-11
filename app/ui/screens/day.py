@@ -9,6 +9,7 @@ import streamlit as st
 from pydantic import ValidationError
 
 from app.domain.models import PlanningParameters
+from app.engines.events import event_tags, export_check
 from app.engines.export import lt_filename
 from app.engines.schedule import boutiques_ordering_on
 from app.exports.files import lt_zip
@@ -21,6 +22,7 @@ from app.ui.common import (
     author,
     boutique_label,
     day_data,
+    event_context,
     fmt_1,
     fmt_int,
     go,
@@ -28,10 +30,56 @@ from app.ui.common import (
     ss,
     workspace,
 )
+from app.ui.gate import GateRow, close_requests_prompt, render_gate, requests_after_export, trace
 from app.ui.screens.order import FALLBACK_WEEKS_DEFAULT, open_result
 
 
+def _checks(boutique: str) -> dict:
+    """Validations de la Journée pour une boutique : SKU vus, blocages confirmés, inclusion."""
+    return ss.day_checks.setdefault(boutique, {"seen": set(), "blocks": set(), "include": False})
+
+
+def _confirm_blocks(row: GateRow) -> None:
+    trace(row.boutique, row.delivery, "confirm_block", list(row.check.blocked))
+    _checks(row.boutique)["blocks"] |= set(row.check.blocked)
+
+
+def _mark_seen(row: GateRow) -> None:
+    trace(row.boutique, row.delivery, "seen", list(row.check.unvalidated))
+    _checks(row.boutique)["seen"] |= set(row.check.unvalidated)
+
+
+def _set_include(row: GateRow, value: bool) -> None:
+    trace(row.boutique, row.delivery, "include", [s for s, _ in row.check.to_include],
+          "coché" if value else "décoché")  # fmt: skip
+    _checks(row.boutique)["include"] = value
+
+
+def _gate_rows(outcomes: list[DayOutcome]) -> list[GateRow]:
+    rows = []
+    for o in outcomes:
+        if o.result is None:
+            continue
+        c = _checks(o.boutique)
+        check = export_check(o.result.base_lines, overrides={}, seen=c["seen"],
+                             confirmed_blocks=c["blocks"], include_confirmed=c["include"])  # fmt: skip
+        rows.append(GateRow(o.boutique, o.result.params.delivery_date, check))
+    return rows
+
+
+def _event_counts(result) -> str:  # noqa: ANN001
+    """« ● 4 · ○ 1 » : SKU flagués par un événement d'équipe / personnel."""
+    team = {x.sku for x in result.lines for t in event_tags(x) if t["scope"] == "team"}
+    mine = {x.sku for x in result.lines for t in event_tags(x) if t["scope"] == "personal"}
+    if not team and not mine:
+        return "—"
+    return f"● {len(team)} · ○ {len(mine)}"
+
+
 def _save_day(outcomes: list[DayOutcome], when: datetime) -> None:
+    for o in outcomes:
+        if o.result is not None:
+            requests_after_export(list(o.result.events))
     data = day_data()
     conn = db.connect(workspace().db_path)
     try:
@@ -136,22 +184,25 @@ def render() -> None:
                     portfolio=data.masters.portfolio.get(boutique, {}), exclusions=data.exclusions,
                 )  # fmt: skip
 
+            ss.day_checks = {}
             ss.day_outcomes = run_day(requests, MODES[mode], build_inputs=build,
-                                      business_inputs=data.business)  # fmt: skip
+                                      business_inputs=data.business,
+                                      event_context=event_context())  # fmt: skip
 
     outcomes: list[DayOutcome] | None = ss.day_outcomes
     if not outcomes:
         return
     st.divider()
-    head = st.columns([2.6, 1.1, 0.8, 1, 0.9, 0.8, 0.8, 2.2, 1])
+    widths = [2.4, 1, 0.75, 0.9, 0.85, 0.8, 0.8, 1.1, 2, 0.9]
+    head = st.columns(widths)
     for col, title in zip(head, ["Boutique", "Livraison", "Lignes", "Unités", "Palettes", "REVIEW",
-                                 "BLOCKED", "Alertes", ""], strict=True):  # fmt: skip
+                                 "BLOCKED", "Événements", "Alertes", ""], strict=True):  # fmt: skip
         col.markdown(f"**{title}**")
     for i, o in enumerate(outcomes):
-        cols = st.columns([2.6, 1.1, 0.8, 1, 0.9, 0.8, 0.8, 2.2, 1], vertical_alignment="center")
+        cols = st.columns(widths, vertical_alignment="center")
         cols[0].write(boutique_label(o.boutique, names))
         if o.result is None:
-            cols[7].error(o.error or "Erreur")
+            cols[8].error(o.error or "Erreur")
             continue
         r = o.result
         cols[1].write(f"{r.params.delivery_date:%d/%m}")
@@ -160,9 +211,17 @@ def render() -> None:
         cols[4].write(fmt_1(r.pallets.total_pallets))
         cols[5].markdown(f":orange[● {r.summary.by_status['REVIEW']}]")
         cols[6].markdown(f":red[● {r.summary.by_status['BLOCKED']}]")
-        cols[7].write(" | ".join(r.rule_warnings) or "—")
-        cols[8].button("Ouvrir", key=f"open_{i}_{o.boutique}", on_click=open_result, args=(r,))
+        cols[7].write(_event_counts(r))
+        cols[8].write(" | ".join(r.rule_warnings) or "—")
+        cols[9].button("Ouvrir", key=f"open_{i}_{o.boutique}", on_click=open_result, args=(r,))
     ok = [o for o in outcomes if o.result is not None]
+    gate_ok = True
+    rows = _gate_rows(ok)
+    if any(r.check.blocked or r.check.unvalidated or r.check.to_include for r in rows):
+        st.caption("Événements : ● équipe · ○ personnel (SKU flagués). Pour traiter une ligne une "
+                   "par une, « Ouvrir » la boutique.")  # fmt: skip
+        gate_ok = render_gate(rows, key="day_gate", confirm_blocks=_confirm_blocks,
+                              mark_seen=_mark_seen, set_include=_set_include)  # fmt: skip
     if ok:
         when = datetime.now()
         name, payload = lt_zip([o.result for o in ok], when)
@@ -172,6 +231,8 @@ def render() -> None:
             else f"Télécharger les {len(ok)} fichiers LT (zip)"
         )
         st.download_button(label, data=payload, file_name=name, mime="application/zip", type="primary",
-                           key="day_zip", disabled=not author(), on_click=_save_day, args=(ok, when))  # fmt: skip
+                           key="day_zip", disabled=not author() or not gate_ok, on_click=_save_day,
+                           args=(ok, when))  # fmt: skip
         if not author():
-            st.caption("Indique ton nom dans la barre de gauche pour télécharger.")
+            st.caption("Choisis ton prénom (Planner, barre de gauche) pour télécharger.")
+    close_requests_prompt()

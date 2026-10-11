@@ -22,19 +22,24 @@ from app.ingestion.depot import freshness  # noqa: E402
 from app.ui.common import (  # noqa: E402
     DAY,
     DEPOT,
+    EVENTS,
     EXPORT,
     FRESH_ICON,
     HISTORY,
     ORDER,
     PAGES,
     REFS,
+    add_planner_and_select,
     init_state,
+    is_demo,
+    planners,
     reset_all,
     run_date,
+    seed_demo_events,
     ss,
     workspace,
 )
-from app.ui.screens import day, depot, export, history, order, referentials  # noqa: E402
+from app.ui.screens import day, depot, events, export, history, order, referentials  # noqa: E402
 
 st.set_page_config(
     page_title="Supply Planning Copilot", page_icon=":material/local_cafe:", layout="wide"
@@ -67,6 +72,15 @@ st.markdown(
     button[data-variant="segmented_control"][aria-checked="true"] * {color: #2B1D14 !important;
         font-weight: 600;}
     button[data-variant="segmented_control"]:hover {border-color: #B08D57;}
+    /* Puces (filtres Type, événements) : sélection lisible (texte brun sur doré clair) */
+    button[data-variant="pills"][aria-pressed="true"],
+    button[data-variant="pills"][aria-checked="true"] {background: #F3E9D8 !important;
+        border-color: #B08D57 !important;}
+    button[data-variant="pills"][aria-pressed="true"], button[data-variant="pills"][aria-checked="true"],
+    button[data-variant="pills"][aria-pressed="true"] *, button[data-variant="pills"][aria-checked="true"] *
+        {color: #2B1D14 !important; font-weight: 600;}
+    button[data-variant="pills"]:hover {border-color: #B08D57;}
+    .st-key-ev_panel {background: #FFFFFF; box-shadow: 0 2px 8px rgba(43, 29, 20, 0.08);}
     /* Logo texte de la barre latérale */
     .spc-logo {font-weight: 700; font-size: 1.15rem; letter-spacing: 0.01em; color: #FAF7F2;
         line-height: 1.25; margin: -0.6rem 0 1rem;}
@@ -77,12 +91,31 @@ st.markdown(
 )
 
 init_state()
+if is_demo():
+    seed_demo_events()
+
+
+def _add_planner() -> None:
+    ss.planner_error = add_planner_and_select(ss.get("new_planner", ""))
+    if not ss.planner_error:
+        ss.new_planner = ""
+
 
 with st.sidebar:
     st.markdown('<div class="spc-logo">Supply Planning <b>Copilot</b>'
                 "<span>Boutique Planning · Nespresso Canada</span></div>",
                 unsafe_allow_html=True)  # fmt: skip
-    st.text_input("Planner", key="author", placeholder="Ton nom")
+    names = planners()
+    if ss.author and ss.author not in names:
+        names.append(ss.author)
+    st.selectbox("Planner", names, key="author", index=None, placeholder="Choisis ton prénom",
+                 help="Sert à « Mes événements », aux événements personnels et à signer "
+                      "les modifications et validations.")  # fmt: skip
+    with st.popover("Ajouter un planner", icon=":material/person_add:"):
+        st.text_input("Prénom (pas d'email)", key="new_planner")
+        st.button("Ajouter", key="add_planner", on_click=_add_planner)
+        if ss.get("planner_error"):
+            st.error(ss.planner_error)
     st.radio("Données", ["Mes données", "Démo B80"], key="ws_kind", horizontal=True,
              on_change=reset_all)  # fmt: skip
     st.radio("Écran", PAGES, key="page", label_visibility="collapsed")
@@ -100,6 +133,7 @@ SCREENS = {
     ORDER: order.render,
     DAY: day.render,
     EXPORT: export.render,
+    EVENTS: events.render,
     REFS: referentials.render,
     HISTORY: history.render,
 }

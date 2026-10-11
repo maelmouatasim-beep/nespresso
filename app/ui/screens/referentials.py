@@ -1,4 +1,4 @@
-"""Écran 5 — Référentiels : propriétaire, mise à jour, import, anomalies."""
+"""Écran 6 — Référentiels : propriétaire, mise à jour, import, anomalies."""
 
 from __future__ import annotations
 
@@ -14,7 +14,8 @@ from app.ingestion import referential_checks as checks
 from app.ingestion.categories import check_mapping
 from app.ingestion.exclusions import parse_boutiques
 from app.ingestion.masters import load_masters_dir
-from app.ui.common import author, fmt_date, reset_all, ss, workspace
+from app.storage import events as event_store
+from app.ui.common import author, db_conn, fmt_date, reset_all, ss, workspace
 from app.ui.workspace import REFERENTIALS, ROOT, Referential
 
 TEMPLATES = ROOT / "templates"
@@ -99,7 +100,7 @@ def _exclusions_editor() -> None:
     )  # fmt: skip
     if st.button("Enregistrer les exclusions", type="primary", key="save_excl"):
         if not author():
-            st.error("Indique ton nom dans la barre de gauche.")
+            st.error("Choisis ton prénom (Planner, barre de gauche).")
             return
         rows, errors = [], []
         for i, r in enumerate(edited.to_dict("records"), start=1):
@@ -141,7 +142,7 @@ def _categories_editor() -> None:
     )  # fmt: skip
     if st.button("Enregistrer les catégories", type="primary", key="save_cats"):
         if not author():
-            st.error("Indique ton nom dans la barre de gauche.")
+            st.error("Choisis ton prénom (Planner, barre de gauche).")
             return
         rows = [(str(r["Type produit"] or ""), str(r["Catégorie"] or ""))
                 for r in edited.to_dict("records")
@@ -186,7 +187,7 @@ def _referential_tab(ref: Referential) -> None:
                           key=f"imp_{ref.key}_{ss.nonce}")  # fmt: skip
     if up is not None and u1.button("Importer", key=f"imp_btn_{ref.key}"):
         if not author():
-            st.error("Indique ton nom dans la barre de gauche.")
+            st.error("Choisis ton prénom (Planner, barre de gauche).")
         else:
             try:
                 ws.import_referential(ref.key, up.name, up.getvalue(), author())
@@ -208,7 +209,7 @@ def calculator_import_block(key: str) -> None:
     if up is not None and st.button("Importer les référentiels du calculateur", type="primary",
                                     key=f"calc_btn_{key}"):  # fmt: skip
         if not author():
-            st.error("Indique ton nom dans la barre de gauche.")
+            st.error("Choisis ton prénom (Planner, barre de gauche).")
             return
         with st.spinner("Lecture du calculateur…"):
             reports = workspace().import_calculator(up.name, up.getvalue(),
@@ -240,13 +241,40 @@ def bootstrap_block(key: str) -> None:
               on_click=_use_test_referentials)  # fmt: skip
 
 
+def _planners_block() -> None:
+    """Liste des planners (prénom seulement) : identité, événements personnels, signatures."""
+    with db_conn() as conn:
+        names = event_store.list_planners(conn)
+    st.caption("Prénoms seulement, jamais d'email. Retirer un planner ne supprime pas ses "
+               "événements ni ses signatures.")  # fmt: skip
+    c1, c2 = st.columns([3, 1], vertical_alignment="bottom")
+    new = c1.text_input("Ajouter un planner", key="refs_new_planner", placeholder="Prénom")
+    if c2.button("Ajouter", key="refs_add_planner", width="stretch") and new.strip():
+        try:
+            with db_conn() as conn:
+                event_store.add_planner(conn, new)
+        except ValueError as exc:
+            st.error(str(exc))
+        else:
+            st.rerun()
+    for name in names:
+        a, b = st.columns([3, 1], vertical_alignment="center")
+        a.write(name + (" (toi)" if name == author() else ""))
+        if b.button("Retirer", key=f"refs_rm_{name}", width="stretch"):
+            with db_conn() as conn:
+                event_store.remove_planner(conn, name)
+            st.rerun()
+
+
 def render() -> None:
     st.header("Référentiels")
     with st.expander(
         "Importer depuis le calculateur Excel (.xlsm)", expanded=not workspace().has_masters()
     ):
         calculator_import_block("refs")
-    tabs = st.tabs([r.label for r in REFERENTIALS])
-    for tab, ref in zip(tabs, REFERENTIALS, strict=True):
+    tabs = st.tabs([*(r.label for r in REFERENTIALS), "Planners"])
+    for tab, ref in zip(tabs, REFERENTIALS, strict=False):
         with tab:
             _referential_tab(ref)
+    with tabs[-1]:
+        _planners_block()

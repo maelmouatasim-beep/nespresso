@@ -1,4 +1,5 @@
-"""Stockage local SQLite : runs, recommandations et overrides (audit).
+"""Stockage local SQLite : runs, recommandations, overrides (audit), planners et
+événements SKU (voir app/storage/events.py).
 
 La base vit dans `data/` (jamais versionnée). Tout est en clair et lisible avec
 n'importe quel outil SQLite.
@@ -63,6 +64,43 @@ CREATE TABLE IF NOT EXISTS overrides (
     timestamp TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS runs_boutique ON runs(boutique, id);
+CREATE TABLE IF NOT EXISTS planners (
+    name TEXT PRIMARY KEY COLLATE NOCASE CHECK (length(trim(name)) >= 1),
+    active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS sku_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    scope TEXT NOT NULL,
+    type TEXT NOT NULL,
+    status TEXT NOT NULL,
+    planner TEXT NOT NULL DEFAULT '',
+    title TEXT NOT NULL,
+    start TEXT NOT NULL,
+    end TEXT,
+    payload TEXT NOT NULL,
+    created_by TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS sku_event_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_id INTEGER NOT NULL REFERENCES sku_events(id),
+    at TEXT NOT NULL,
+    author TEXT NOT NULL CHECK (length(trim(author)) >= 1),
+    action TEXT NOT NULL,
+    changes TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS event_validations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    at TEXT NOT NULL,
+    author TEXT NOT NULL CHECK (length(trim(author)) >= 1),
+    boutique TEXT NOT NULL,
+    delivery_date TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    skus TEXT NOT NULL,
+    note TEXT NOT NULL DEFAULT ''
+);
 """
 
 

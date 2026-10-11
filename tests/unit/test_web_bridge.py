@@ -88,3 +88,29 @@ def test_excel_rows_from_the_page_with_negative_exits(day) -> None:  # noqa: ANN
     # remet les mouvements de test pour ne pas gêner les autres tests
     name = "stock_movements_B80.csv"
     bridge.ingest_csv((FIXTURES / name).read_text(encoding="utf-8"), name)
+
+
+def test_browser_engine_applies_the_same_sku_events(day) -> None:  # noqa: ANN001
+    """Événements envoyés par la page : mêmes quantités et mêmes drapeaux que l'outil installé."""
+    from app.ingestion.events import example_events
+    from app.services.planning import EventContext
+
+    events = [e.model_copy(update={"id": i}) for i, e in enumerate(example_events(), 1)]
+    payload = [e.model_dump(mode="json") for e in events]
+    out = plan(delivery="2026-10-08", events=payload, planner="Sami", taken=[4])
+    inputs, dc = build_inputs_for_boutique(
+        "B80", day.stock, day.movements, day.masters.products, day.masters.conversions,
+        day.masters.dc_mapping, portfolio=day.masters.portfolio["B80"], exclusions=day.exclusions,
+    )  # fmt: skip
+    params = PlanningParameters(boutique="B80", run_date=date(2026, 10, 5),
+                                delivery_date=date(2026, 10, 8), cover_days=9,
+                                coffee_cover_days=None)  # fmt: skip
+    context = EventContext(tuple(events), "Sami", frozenset({4}))
+    res = run_planning(inputs, params, ForecastMode.STANDARD, dc=dc, event_context=context)
+    web = {m["sku"]: (t[0], t[2], [e[0] for e in t[11]]) for m, t in
+           zip(out["lines"], out["res"], strict=True)}  # fmt: skip
+    native = {x.sku: (x.qty, x.status.value[0], [t["id"] for t in x.explanation.get("events",
+              {}).get("applied", [])]) for x in res.lines}  # fmt: skip
+    assert web == native
+    assert web["7042.70"][0] == 1440 and web["7928.70"][:2] == (0, "B")  # repris + arrêt
+    assert web["ADV-2026-CA"] == (24, "R", [2]) and out["events"] == [1, 2, 3, 4]
