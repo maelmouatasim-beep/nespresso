@@ -86,3 +86,39 @@ def test_event_checked_with_the_same_rules() -> None:
     assert json.loads(bridge.check_event(json.dumps(ok)))["errors"] == []
     bad = ok | {"effect": "set_qty"}
     assert json.loads(bridge.check_event(json.dumps(bad)))["errors"]
+
+
+def _fixture_table(name: str) -> dict:
+    from app.ingestion.fixtures_loader import read_csv_records
+
+    cols, recs = read_csv_records(FIXTURES / name)
+    return {"columns": cols, "rows": [[r[c] for c in cols] for r in recs]}
+
+
+def test_products_tab_in_the_page_changes_the_order(demo) -> None:  # noqa: ANN001
+    tables = {"multiples": _fixture_table("master_multiples.csv"),
+              "conversions": _fixture_table("master_sku_conversions.csv"),
+              "exclusions": {"columns": ["sku", "boutiques", "reason", "author", "updated_on"],
+                             "rows": []}}  # fmt: skip
+    payload = {"tables": tables, "categories": {"C": "Cafés"}}
+    rows = json.loads(bridge.product_rows(json.dumps(payload)))
+    row = next(r for r in rows if r["SKU"] == "7072.70")
+    row.update({"Exclu": "oui", "Raison exclusion": "test web"})
+    out = json.loads(bridge.save_products(json.dumps(
+        payload | {"edited": rows, "author": "Amine", "today": "2026-10-12"})))  # fmt: skip
+    assert out["errors"] == [] and set(out["tables"]) == {"exclusions"}
+    assert qty(plan(), "7072.70") == 0
+
+
+def test_boutiques_tab_and_part_in_the_page(demo) -> None:  # noqa: ANN001
+    tables = {"dc_mapping": _fixture_table("master_dc_mapping.csv"),
+              "schedule": _fixture_table("master_schedule.csv")}  # fmt: skip
+    rows = json.loads(bridge.boutique_rows(json.dumps({"tables": tables})))
+    next(r for r in rows if r["Code"] == "B80")["Nom"] = "Chinook test"
+    out = json.loads(bridge.save_boutiques(json.dumps({"tables": tables, "edited": rows})))
+    assert out["errors"] == [] and out["tables"]["boutiques"]["rows"][0][1] == "Chinook test"
+    rules = {"part": "rules", "boutique": "B80", "table": None,
+             "rows": [{"rule": "max_units", "sku": "", "value": "10", "comment": ""}]}  # fmt: skip
+    res = json.loads(bridge.save_part(json.dumps(rules)))
+    assert res["errors"] == []
+    assert any("10" in w for w in plan()["warnings"])

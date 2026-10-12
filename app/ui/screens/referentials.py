@@ -185,7 +185,7 @@ def _part_editor(part: str, boutique: str, columns: list[str], label: str) -> No
         reset_all()
         for w in warnings:
             st.warning(w)
-        st.success(f"{label.capitalize()} de {boutique} enregistré(e)s.")
+        st.success(f"Enregistré : {label} de {boutique}.")
 
 
 def _boutiques_list() -> None:

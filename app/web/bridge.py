@@ -9,6 +9,7 @@ Chaque fonction prend et rend du texte JSON (simple à passer entre JavaScript e
 
 from __future__ import annotations
 
+import csv
 import dataclasses
 import io
 import json
@@ -35,6 +36,12 @@ from app.domain.models import (
 )
 from app.engines.schedule import boutiques_ordering_on
 from app.ingestion import referential_checks as checks
+from app.ingestion.boutique_table import (
+    BoutiqueSources,
+    apply_boutique_edits,
+    build_boutique_rows,
+    replace_boutique_rows,
+)
 from app.ingestion.business_inputs import read_allocations, read_launches, read_rules, read_targets
 from app.ingestion.depot import MOVES_KIND, STOCK_KIND, _header_found, date_from_filename
 from app.ingestion.exclusions import read_exclusions
@@ -44,6 +51,7 @@ from app.ingestion.fixtures_loader import (
     load_conversions,
     load_multiples,
     read_csv_as_text,
+    read_csv_records,
 )
 from app.ingestion.masters import (
     Masters,
@@ -58,7 +66,8 @@ from app.ingestion.powerbi import (
     movements_from_records,
     stock_situation_from_records,
 )
-from app.ingestion.referential_edit import check_table
+from app.ingestion.product_table import ProductSources, apply_product_edits, build_product_rows
+from app.ingestion.referential_edit import DEFAULT_COLUMNS, check_table
 from app.ingestion.tables import (
     RawTable,
     ValidationReport,
@@ -163,14 +172,24 @@ def _apply_table(key: str, csv_text: str) -> None:
             update = {"portfolio": portfolio}
         elif key == "schedule":
             schedule, issues = load_schedule(path)
-            update = {"schedule": schedule, "schedule_issues": issues,
-                      "boutique_names": load_boutique_names(path)}  # fmt: skip
+            names = {**load_boutique_names(path), **_STATE.get("extra_names", {})}
+            update = {"schedule": schedule, "schedule_issues": issues, "boutique_names": names}
+        elif key == "boutiques":  # onglet Boutiques : nom modifié (master_boutiques.csv)
+            _, extra = read_csv_records(path)
+            _STATE["extra_names"] = {
+                r["boutique"].strip(): r["name"].strip()
+                for r in extra
+                if r.get("boutique", "").strip() and r.get("name", "").strip()
+            }
+            update = {"boutique_names": {**masters.boutique_names, **_STATE["extra_names"]}}
         else:
             raise ValueError(f"Référentiel inconnu : {key}")
     _STATE["masters"] = dataclasses.replace(masters, **update)
 
 
 def _check(key: str, csv_text: str) -> tuple[list[str], list[str]]:
+    if key == "boutiques":
+        return [], []
     if key == "exclusions":
         _, report = read_exclusions(io.BytesIO(csv_text.encode("utf-8")), "exclusions.csv")
         return [i.message for i in report.issues if i.level == "error"], []
@@ -202,6 +221,113 @@ def set_tables(tables_json: str) -> str:
             errors, warnings = [str(exc)], []
         out[key] = {"errors": errors, "warnings": warnings}
     return json.dumps({"tables": out, "anomalies": anomalies()})
+
+
+# --- Onglets Produits et Boutiques (mêmes fonctions que l'outil installé) ------------------
+
+Table = dict[str, Any]  # {"columns": [...], "rows": [[...], ...]} : la forme gardée par la page
+
+
+def _recs(table: Table | None) -> list[dict[str, str]]:
+    if not table:
+        return []
+    cols = table["columns"]
+    return [{c: str(r[i]) if i < len(r) and r[i] is not None else "" for i, c in enumerate(cols)}
+            for r in table["rows"]]  # fmt: skip
+
+
+def _table(csv_text: str) -> Table:
+    rows = list(csv.reader(io.StringIO(csv_text)))
+    return {"columns": rows[0] if rows else [], "rows": rows[1:]}
+
+
+def _product_sources(d: dict[str, Any]) -> ProductSources:
+    t = d["tables"]
+    return ProductSources(
+        multiples=_recs(t.get("multiples")),
+        conversions=_recs(t.get("conversions")),
+        exclusions=_recs(t.get("exclusions")),
+        categories=d["categories"],
+    )
+
+
+def product_rows(payload: str) -> str:
+    return json.dumps(build_product_rows(_product_sources(json.loads(payload))))
+
+
+def save_products(payload: str) -> str:
+    """Tableau Produits modifié → tables réécrites, vérifiées puis appliquées au moteur."""
+    d = json.loads(payload)
+    res = apply_product_edits(_product_sources(d), d["edited"], d["author"],
+                              date.fromisoformat(d["today"]))  # fmt: skip
+    if res.errors:
+        return json.dumps({"errors": res.errors})
+    texts = {"multiples": res.multiples_csv, "conversions": res.conversions_csv,
+             "exclusions": res.exclusions_csv}  # fmt: skip
+    touched = {k: v for k, v in texts.items() if k in res.touched}
+    warnings: list[str] = []
+    for key, text in touched.items():
+        errors, warns = _check(key, text)
+        if errors:
+            return json.dumps({"errors": errors})
+        warnings += warns
+    for key, text in touched.items():
+        _apply_table(key, text)
+    return json.dumps({
+        "errors": [], "warnings": warnings, "changes": res.changes,
+        "tables": {k: _table(v) for k, v in touched.items()},
+        "categories": res.categories if "categories" in res.touched else None,
+        "anomalies": anomalies(),
+    })  # fmt: skip
+
+
+def _boutique_sources(t: dict[str, Table]) -> BoutiqueSources:
+    counts: dict[str, int] = {}
+    for r in _recs(t.get("portfolio")):
+        counts[r["boutique"].strip()] = counts.get(r["boutique"].strip(), 0) + 1
+    sched = t.get("schedule") or {"columns": DEFAULT_COLUMNS["schedule"], "rows": []}
+    return BoutiqueSources(dc_mapping=_recs(t.get("dc_mapping")), schedule=_recs(sched),
+                           schedule_columns=list(sched["columns"]), extra=_recs(t.get("boutiques")),
+                           portfolio_counts=counts)  # fmt: skip
+
+
+def boutique_rows(payload: str) -> str:
+    return json.dumps(build_boutique_rows(_boutique_sources(json.loads(payload)["tables"])))
+
+
+def save_boutiques(payload: str) -> str:
+    d = json.loads(payload)
+    res = apply_boutique_edits(_boutique_sources(d["tables"]), d["edited"])
+    if res.errors:
+        return json.dumps({"errors": res.errors})
+    texts = {"dc_mapping": res.dc_csv, "schedule": res.schedule_csv, "boutiques": res.extra_csv}
+    for key, text in texts.items():
+        errors, _ = _check(key, text)
+        if errors:
+            return json.dumps({"errors": errors})
+    for key in ("boutiques", "dc_mapping", "schedule"):
+        _apply_table(key, texts[key])
+    return json.dumps({"errors": [], "changes": res.changes, "anomalies": anomalies(),
+                       "tables": {k: _table(v) for k, v in texts.items()}})  # fmt: skip
+
+
+def save_part(payload: str) -> str:
+    """Créneaux, règles ou portfolio d'UNE boutique : les autres boutiques restent identiques."""
+    d = json.loads(payload)
+    key = {"slots": "schedule", "rules": "rules", "portfolio": "portfolio"}[d["part"]]
+    table = d.get("table") or {"columns": DEFAULT_COLUMNS[key], "rows": []}
+    records, rows, b = _recs(table), list(d["rows"]), d["boutique"]
+    own = [r for r in records if r.get("boutique", "").strip() == b]
+    name = next((r["boutique_name"] for r in own if r.get("boutique_name", "").strip()), "")
+    if key == "schedule" and name and rows:
+        rows[0] = {**rows[0], "boutique_name": name}
+    text = replace_boutique_rows(records, table["columns"], b, rows)
+    errors, warnings = _check(key, text)
+    if errors:
+        return json.dumps({"errors": errors})
+    _apply_table(key, text)
+    return json.dumps({"errors": [], "warnings": warnings, "table": _table(text),
+                       "anomalies": anomalies()})  # fmt: skip
 
 
 def check_event(event_json: str) -> str:

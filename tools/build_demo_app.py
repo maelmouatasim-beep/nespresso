@@ -41,12 +41,18 @@ from app.domain.models import (  # noqa: E402
     PlanningParameters,
     TargetStock,
 )
-from app.engines.categories import CATEGORIES  # noqa: E402
+from app.engines.categories import CATEGORIES, DEFAULT_CATEGORY_MAP  # noqa: E402
 from app.ingestion import referential_checks as checks  # noqa: E402
+from app.ingestion.boutique_table import (  # noqa: E402
+    EXTRA_COLUMNS,
+    BoutiqueSources,
+    build_boutique_rows,
+)
 from app.ingestion.depot import freshness  # noqa: E402
 from app.ingestion.events import DEMO_PLANNERS, example_events  # noqa: E402
 from app.ingestion.fixtures_loader import read_csv_records  # noqa: E402
 from app.ingestion.masters import all_boutiques, build_inputs_for_boutique  # noqa: E402
+from app.ingestion.product_table import ProductSources, build_product_rows  # noqa: E402
 from app.ingestion.referential_edit import DEFAULT_COLUMNS  # noqa: E402
 from app.services.planning import (  # noqa: E402
     RULE_VERSIONS,
@@ -160,6 +166,22 @@ def write_tables(exclusions) -> None:  # noqa: ANN001
         "rows": [[e.sku, ";".join(e.boutiques) or "ALL", e.reason, e.author,
                   e.updated_on.isoformat()] for e in exclusions],
     }  # fmt: skip
+    tables["boutiques"] = {"columns": EXTRA_COLUMNS, "rows": []}
+    # Lignes des onglets Produits et Boutiques, calculées d'avance (sans modification).
+    recs = {
+        k: [dict(zip(t["columns"], r, strict=True)) for r in t["rows"]] for k, t in tables.items()
+    }
+    tables["products_rows"] = build_product_rows(ProductSources(
+        multiples=recs["multiples"], conversions=recs["conversions"],
+        exclusions=recs["exclusions"], categories=DEFAULT_CATEGORY_MAP,
+    ))  # fmt: skip
+    counts: dict[str, int] = {}
+    for r in recs["portfolio"]:
+        counts[r["boutique"]] = counts.get(r["boutique"], 0) + 1
+    tables["boutique_rows"] = build_boutique_rows(BoutiqueSources(
+        dc_mapping=recs["dc_mapping"], schedule=recs["schedule"],
+        schedule_columns=tables["schedule"]["columns"], extra=[], portfolio_counts=counts,
+    ))  # fmt: skip
     (ENGINE_DIR / "tables.json").write_text(
         json.dumps(tables, ensure_ascii=False, separators=(",", ":")), encoding="utf-8"
     )

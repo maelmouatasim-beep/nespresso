@@ -464,7 +464,7 @@ function setSource(v) {
 }
 const freshCls = l => ({ green: "G", orange: "Y", red: "X" }[l] || "U");
 function fillAuthors() {
-  const names2 = [...DATA.planners]; if (st.author && !names2.includes(st.author)) names2.push(st.author);
+  const names2 = [...planners()]; if (st.author && !names2.includes(st.author)) names2.push(st.author);
   $("author").replaceChildren(new Option("Choisis ton prénom", ""), ...names2.map(n => new Option(n, n)));
   $("author").value = st.author;
 }
@@ -1237,7 +1237,7 @@ function eventForm(d) {
     f("Titre", text(d.title, v => { d.title = v; }, { id: "ev_f_title" })),
     el("div", "two", f("Portée", select(d.scope, [["team", "Équipe"], ["personal", "Personnel"]], v => { d.scope = v; if (v === "personal" && !d.planner) d.planner = st.author; render(); })),
       f("Type", select(d.type, types.map(t => [t, TYPE_LABELS[t]]), v => { d.type = v; d.until_next_order = v === "store_request" && d.until_next_order; render(); }))),
-    d.scope === "personal" ? f("Planner responsable", select(d.planner || "", [["", "Choisir"], ...[...new Set([...DATA.planners, st.author].filter(Boolean))].map(n => [n, n])], v => { d.planner = v; })) : null,
+    d.scope === "personal" ? f("Planner responsable", select(d.planner || "", [["", "Choisir"], ...[...new Set([...planners(), st.author].filter(Boolean))].map(n => [n, n])], v => { d.planner = v; })) : null,
     f("SKU", text(skuText, v => { d.skus = splitList(v).map(x => { const [a, b] = x.split(">"); return b ? { sku: a, new_sku: b } : { sku: a }; }); }, { id: "ev_f_skus", class: "mono" }),
       conv ? "Ancien>nouveau, séparés par des virgules (ex. 7882.70>7965.70)" : "Séparés par des virgules"),
     el("div", "two", f("Boutiques", text(d.boutiques.join(", "), v => { d.boutiques = splitList(v).map(x => x.toUpperCase()); }), "Vide = toutes"),
@@ -1357,116 +1357,257 @@ function renderEvents() {
 }
 
 // ---------- 5. Référentiels ----------
-// Chaque table est modifiable : cellules, lignes ajoutées ou retirées, puis « Enregistrer ».
-// La table est relue par le moteur Python avec les mêmes lecteurs qu'à l'import : une
-// erreur bloque l'enregistrement avec sa raison. Gardée dans ce navigateur.
+// Trois onglets : Produits (une ligne par SKU), Boutiques (DC, nom, carrier, planner,
+// règles et créneaux au clic, portfolio en sous-onglet) et Planners. Tout est modifiable ;
+// chaque enregistrement est vérifié par le moteur Python de la page (mêmes fonctions que
+// l'outil installé), gardé dans ce navigateur, et la commande B80 est recalculée avec.
 const PAGE_ROWS = 50;
-function refAnomalies(r) { return EDIT.anomalies && EDIT.anomalies[r.key] ? EDIT.anomalies[r.key] : r.anomalies; }
-function renderRefs() {
-  const out = [el("h1", "", "Référentiels")], owners = store.get("spc2_owners", {});
-  out.push(el("div", "tabs", DATA.refs.map((r, i) => el("button", { class: i === st.refTab ? "on" : "", onclick: () => { st.refTab = i; st.tbl = null; render(); } }, r.label, refAnomalies(r).length ? el("span", "cnt", String(refAnomalies(r).length)) : null, EDIT.tables[r.key] ? el("span", { class: "cnt", title: "Modifié par toi", style: "background:var(--mod, #3b6ea5)" }, "✎") : null))));
-  const r = DATA.refs[st.refTab], mine = EDIT.meta[r.key];
-  const owner = el("input", { type: "text", id: "owner_" + r.key, value: owners[r.key] ?? r.owner, onchange: e => { owners[r.key] = e.target.value; store.set("spc2_owners", owners); } });
-  const upd = mine ? mine.at : r.updated, by = mine ? mine.by : r.by, src = mine ? "modifié dans l'outil" : r.src;
-  const when = upd ? fdate(upd.slice(0, 10)) + (upd.length > 11 ? " à " + upd.slice(11, 16) : "") : "—";
-  out.push(el("div", "row", { style: "align-items:end" }, el("label", { class: "f", style: "width:260px" }, "Propriétaire", owner),
-    el("p", { style: "margin:0 0 6px" }, "Mis à jour le ", el("b", "", when), by ? " par " + by : "", src ? " · source : " + src : "")));
-  const an = refAnomalies(r);
-  out.push(an.length ? el("details", { open: true, class: "card", style: "margin:12px 0;border-color:var(--review)" }, el("summary", "", el("b", "", an.length + " anomalie(s)")), el("ul", "list", an.map(a => el("li", "", a))))
-    : el("div", "msg ok", "Aucune anomalie."));
-  if (r.key === "categories") { out.push(...categoriesEditor()); return out; }
-  if (r.examples.length || ["allocations", "launches", "targets", "rules"].includes(r.key)) out.push(el("label", { style: "display:flex;gap:8px;align-items:center;margin:8px 0" }, el("input", { type: "checkbox", checked: st.examples, onchange: e => setExamples(e.target.checked) }), "Appliquer les allocations, lancements, stocks cibles et règles boutique au calcul"));
-  out.push(...tableEditor(r));
-  out.push(el("div", "row", { style: "margin-top:12px" },
-    el("div", { class: "drop", style: "flex:1 1 300px" }, "Importer un fichier (remplace la table)", el("br"), el("span", "small", "Démo : modifie la table ci-dessus directement ; l'import de fichier est dans l'outil installé.")),
-    r.template ? el("button", { class: "btn", disabled: true, title: "Disponible dans l'outil installé" }, "Modèle vierge") : null));
-  return out;
+const REF_TABS = [["produits", "Produits"], ["boutiques", "Boutiques"], ["planners", "Planners"]];
+const PRODUCT_KEYS = ["multiples", "conversions", "exclusions"], BOUTIQUE_KEYS = ["dc_mapping", "schedule", "boutiques", "portfolio"];
+const P_COLS = ["SKU", "Description", "Type", "Catégorie", "Multiple", "Unités par palette", "Ancien SKU remplacé", "Date conversion", "Exclu", "Raison exclusion"];
+const B_COLS = ["Code", "Nom", "DC", "Carrier", "Planner habituel"];
+const SLOT_COLS = ["order_day", "shipping_day", "delivery_day", "carrier", "deliveries_per_week", "cover_days", "notes"];
+const RULE_COLS = ["rule", "sku", "value", "comment"];
+const curTable = k => EDIT.tables[k] || (EDIT.base && EDIT.base[k]) || null;
+const recsOf = t => t ? t.rows.map(r => Object.fromEntries(t.columns.map((c, i) => [c, r[i] ?? ""]))) : [];
+function planners() { return store.get("spc2_planners", null) || [...DATA.planners]; }
+function refHistory() { return store.get("spc2_refhist", []); }
+function logRef(ref, changes) {
+  if (!changes || !changes.length) return;
+  const h = refHistory(); h.unshift({ at: new Date().toISOString().slice(0, 16), by: st.author, ref, changes });
+  store.set("spc2_refhist", h.slice(0, 300));
+  EDIT.meta[ref] = { by: st.author, at: new Date().toISOString().slice(0, 16) }; store.set("spc2_refmeta", EDIT.meta);
 }
-function tableEditor(r) {
-  if (!st.tbl || st.tbl.key !== r.key) {
-    const saved = EDIT.tables[r.key];
-    if (saved) st.tbl = { key: r.key, draft: JSON.parse(JSON.stringify(saved)), q: "", page: 0, dirty: false };
-    else if (EDIT.base) st.tbl = { key: r.key, draft: JSON.parse(JSON.stringify(EDIT.base[r.key])), q: "", page: 0, dirty: false };
-    else {
-      baseTables().then(render).catch(e => { st.tblErr = String((e && e.message) || e); render(); });
-      return [st.tblErr ? el("div", "msg err", "Table introuvable : " + st.tblErr) : el("div", "msg info busy", "Chargement de la table…")];
-    }
+const busyBox = (box, text) => box.replaceChildren(el("div", "msg info busy", text));
+const engineErr = e => el("div", "msg err", "Le moteur n'a pas pu démarrer ici (" + String((e && e.message) || e).slice(0, 160) + ").");
+async function callEngine(box, fn, payload) {
+  busyBox(box, "Vérification par le moteur (la première fois : chargement ≈ 18 Mo)…");
+  const bridge = await engine(m => busyBox(box, m));
+  return JSON.parse(bridge[fn](JSON.stringify(payload)));
+}
+function keepTables(tables) {
+  Object.assign(EDIT.tables, tables);
+  if (!store.set("spc2_tables", EDIT.tables)) st.refMsg = "Ce navigateur n'a pas pu garder tes tables : elles seront perdues en fermant la page.";
+}
+// Lignes du tableau : calculées d'avance tant que rien n'est modifié, sinon par le moteur.
+function viewRows(kind) {
+  const keys = kind === "produits" ? PRODUCT_KEYS : BOUTIQUE_KEYS;
+  const edited = keys.some(k => EDIT.tables[k]) || (kind === "produits" && store.get("spc2_categories", null));
+  if (!edited) return EDIT.base[kind === "produits" ? "products_rows" : "boutique_rows"];
+  if (EDIT.rows && EDIT.rows[kind]) return EDIT.rows[kind];
+  if (!EDIT.rowsLoading) {
+    EDIT.rowsLoading = (async () => {
+      try {
+        const bridge = await engine(m => { st.busy = m; render(); });
+        const tables = Object.fromEntries(keys.map(k => [k, curTable(k)]));
+        const rows = JSON.parse(kind === "produits" ? bridge.product_rows(JSON.stringify({ tables, categories: categories() })) : bridge.boutique_rows(JSON.stringify({ tables })));
+        EDIT.rows = { ...(EDIT.rows || {}), [kind]: rows };
+      } catch (e) { st.refMsg = "Le moteur n'a pas pu démarrer ici (" + String((e && e.message) || e).slice(0, 160) + ")."; }
+      EDIT.rowsLoading = null; st.busy = ""; render();
+    })();
   }
-  const t = st.tbl, d = t.draft, q = t.q.toLowerCase();
-  const idx = d.rows.map((_, i) => i).filter(i => !q || d.rows[i].some(c => String(c ?? "").toLowerCase().includes(q)));
-  const pages = Math.max(1, Math.ceil(idx.length / PAGE_ROWS)); t.page = Math.min(t.page, pages - 1);
-  const shown = idx.slice(t.page * PAGE_ROWS, (t.page + 1) * PAGE_ROWS);
-  const markDirty = () => { if (!t.dirty) { t.dirty = true; $("tbl_state")?.replaceChildren(el("span", "st Y", "Modifications non enregistrées")); const u = $("tbl_undo"); if (u) u.disabled = false; } };
-  const search = el("input", { type: "search", id: "tbl_q", placeholder: "Rechercher dans la table (SKU, boutique…)", value: t.q });
-  search.oninput = () => { t.q = search.value.trim(); t.page = 0; clearTimeout(search._t); search._t = setTimeout(() => { render(); const s2 = $("tbl_q"); s2.focus(); s2.setSelectionRange(s2.value.length, s2.value.length); }, 250); };
-  const head = el("tr", "", el("th", "n", "Ligne"), d.columns.map(c => el("th", "", c)), el("th", "", ""));
-  const body = el("tbody", "", shown.map(i => el("tr", "", el("td", "n muted", String(i + 2)),
-    d.columns.map((c, ci) => el("td", { style: "padding:2px 4px" }, el("input", { type: "text", class: ci === 0 || /sku/i.test(c) ? "mono" : "", "aria-label": c + " ligne " + (i + 2), value: d.rows[i][ci] ?? "", style: "width:100%;min-width:90px", oninput: e => { d.rows[i][ci] = e.target.value; markDirty(); } }))),
-    el("td", "", el("button", { class: "btn link", title: "Retirer la ligne", onclick: () => { d.rows.splice(i, 1); t.dirty = true; render(); } }, "Retirer")))));
-  const msg = el("div", { id: "tbl_msg" });
+  return null;
+}
+function resetRows() { EDIT.rows = null; st.grids = {}; }
+
+// Grille modifiable générique : recherche / filtres, pages, ajout et retrait de lignes.
+function gridOf(id, cols, rows) {
+  st.grids = st.grids || {};
+  if (!st.grids[id]) st.grids[id] = { rows: rows.map(r => ({ ...r })), page: 0, dirty: false };
+  return st.grids[id];
+}
+function gridView(g, cols, o) {
+  const idx = g.rows.map((_, i) => i).filter(i => !o.filter || o.filter(g.rows[i]));
+  const pages = Math.max(1, Math.ceil(idx.length / PAGE_ROWS)); g.page = Math.min(g.page, pages - 1);
+  const shown = idx.slice(g.page * PAGE_ROWS, (g.page + 1) * PAGE_ROWS);
+  const dirty = () => { if (!g.dirty) { g.dirty = true; const u = $(o.id + "_undo"); if (u) u.disabled = false; $(o.id + "_state")?.replaceChildren(el("span", "st Y", "Modifications non enregistrées")); } };
+  const cell = (r, c) => {
+    if (o.readonly && o.readonly.includes(c)) return el("td", "small muted", r[c] || "");
+    const opts = o.selects && o.selects[c];
+    if (opts) { const s = el("select", { "aria-label": c, style: "min-width:" + (o.widths && o.widths[c] || 80) + "px", onchange: e => { r[c] = e.target.value; dirty(); } }, ["", ...opts].map(v => el("option", { value: v }, v || "—"))); s.value = r[c] || ""; return el("td", { style: "padding:2px 4px" }, s); }
+    return el("td", { style: "padding:2px 4px" }, el("input", { type: "text", class: /sku|code/i.test(c) ? "mono" : "", "aria-label": c, value: r[c] ?? "", style: "width:100%;min-width:" + (o.widths && o.widths[c] || 80) + "px", oninput: e => { r[c] = e.target.value; dirty(); } }));
+  };
+  const head = el("tr", "", o.badge ? el("th", "", "") : null, cols.map(c => el("th", "", c)), el("th", "", ""));
+  const body = el("tbody", "", shown.map(i => { const r = g.rows[i]; return el("tr", o.selected && o.selected(r) ? "sel" : "",
+    o.badge ? el("td", { title: r[o.badge] || "" }, r[o.badge] ? el("span", { class: "st Y", title: r[o.badge] }, "") : "") : null,
+    cols.map(c => cell(r, c)),
+    el("td", { style: "white-space:nowrap;display:flex;gap:10px" }, o.rowAction ? o.rowAction(r) : null, el("button", { class: "btn link", title: "Retirer la ligne", onclick: () => { g.rows.splice(i, 1); g.dirty = true; render(); } }, "Retirer"))); }));
   const pager = pages > 1 ? el("span", "row", { style: "gap:6px;align-items:center" },
-    el("button", { class: "btn", disabled: t.page === 0, onclick: () => { t.page--; render(); } }, "‹"), el("span", "small", "page " + (t.page + 1) + " / " + pages),
-    el("button", { class: "btn", disabled: t.page >= pages - 1, onclick: () => { t.page++; render(); } }, "›")) : null;
+    el("button", { class: "btn", disabled: g.page === 0, onclick: () => { g.page--; render(); } }, "‹"), el("span", "small", "page " + (g.page + 1) + " / " + pages),
+    el("button", { class: "btn", disabled: g.page >= pages - 1, onclick: () => { g.page++; render(); } }, "›")) : null;
+  const msg = el("div", { id: o.id + "_msg" });
+  if (st.gridMsg && st.gridMsg.id === o.id) { msg.append(...st.gridMsg.nodes); st.gridMsg = null; }
   return [
-    el("div", "row", { style: "align-items:center;margin:8px 0" }, el("div", "grow", search),
-      el("span", "small muted", fmt(d.rows.length) + " lignes" + (q ? " · " + fmt(idx.length) + " trouvée(s)" : "")), pager,
-      el("span", { id: "tbl_state" }, t.dirty ? el("span", "st Y", "Modifications non enregistrées") : EDIT.tables[r.key] ? el("span", "st M", "Modifié par toi") : null)),
-    el("div", { class: "tablewrap", style: "max-height:420px" }, el("table", "", el("thead", "", head), body)),
+    el("div", "row", { style: "align-items:center;margin:6px 0" }, el("span", "small muted grow", fmt(idx.length) + " / " + fmt(g.rows.length) + " lignes" + (o.note ? " · " + o.note : "")), pager,
+      el("span", { id: o.id + "_state" }, g.dirty ? el("span", "st Y", "Modifications non enregistrées") : null)),
+    el("div", { class: "tablewrap", style: "max-height:" + (o.height || 440) + "px" }, el("table", "", el("thead", "", head), body)),
     el("div", "row", { style: "margin-top:10px" },
-      el("button", { class: "btn", id: "tbl_add", onclick: () => { d.rows.unshift(d.columns.map(() => "")); t.q = ""; t.page = 0; t.dirty = true; render(); } }, "Ajouter une ligne"),
-      el("button", { class: "btn primary", id: "tbl_save", onclick: () => saveTable(r, msg) }, "Enregistrer " + r.label.toLowerCase()),
-      el("button", { class: "btn", id: "tbl_undo", disabled: !t.dirty, onclick: () => { st.tbl = null; render(); } }, "Annuler mes changements"),
-      EDIT.tables[r.key] ? el("button", { class: "btn", id: "tbl_reset", onclick: () => resetTable(r) }, "Revenir aux données de test") : null),
+      el("button", { class: "btn", id: o.id + "_add", onclick: () => { g.rows.unshift(Object.fromEntries(cols.map(c => [c, o.defaults && o.defaults[c] || ""]))); g.page = 0; g.dirty = true; if (o.onAdd) o.onAdd(); render(); } }, "Ajouter une ligne"),
+      el("button", { class: "btn primary", id: o.id + "_save", onclick: () => { if (!st.author) return msg.replaceChildren(el("div", "msg err", "Choisis ton prénom (Planner, barre de gauche).")); o.onSave(g.rows, msg); } }, o.saveLabel),
+      el("button", { class: "btn", id: o.id + "_undo", disabled: !g.dirty, onclick: () => { delete st.grids[o.id]; render(); } }, "Annuler mes changements"), ...(o.extra || [])),
     msg];
 }
-async function saveTable(r, box) {
-  if (!st.author) return box.replaceChildren(el("div", "msg err", "Choisis ton prénom (Planner, barre de gauche)."));
-  const t = st.tbl, draft = { columns: t.draft.columns, rows: t.draft.rows.filter(row => row.some(c => String(c ?? "").trim())) };
-  box.replaceChildren(el("div", "msg info busy", "Vérification par le moteur (la première fois : chargement ≈ 18 Mo)…"));
-  let out;
-  try { out = JSON.parse((await engine(m => box.replaceChildren(el("div", "msg info busy", m)))).set_tables(JSON.stringify({ [r.key]: csvOf(draft) }))); }
-  catch (e) { return box.replaceChildren(el("div", "msg err", "Le moteur n'a pas pu démarrer ici (" + String((e && e.message) || e).slice(0, 160) + ").")); }
-  const res = out.tables[r.key];
-  if (res.errors.length) return box.replaceChildren(el("div", "msg err", "Rien n'est enregistré : " + res.errors.join(" · ")));
-  EDIT.tables[r.key] = draft; EDIT.anomalies = out.anomalies;
-  EDIT.meta[r.key] = { by: st.author, at: new Date().toISOString().slice(0, 16) }; store.set("spc2_refmeta", EDIT.meta);
-  const kept = store.set("spc2_tables", EDIT.tables);
-  invalidateOrder(r.label + " modifié");
-  st.tbl = null; render();
-  $("tbl_msg")?.replaceChildren(el("div", "msg ok", r.label + " enregistré (" + fmt(draft.rows.length) + " lignes). La commande B80 sera recalculée avec."),
-    ...res.warnings.map(w => el("div", "msg warn", w)), kept ? "" : el("div", "msg warn", "Ce navigateur n'a pas pu garder la table : elle sera perdue en fermant la page."));
-}
-function resetTable(r) {
-  if (!confirm("Revenir à la table « " + r.label + " » des données de test ? Tes modifications seront effacées.")) return;
-  delete EDIT.tables[r.key]; delete EDIT.meta[r.key];
-  store.set("spc2_tables", EDIT.tables); store.set("spc2_refmeta", EDIT.meta);
-  reapplyTables(); invalidateOrder(r.label + " rétabli"); st.tbl = null; render();
+// Le message reste affiché sous la grille, même si le tableau est recalculé entre-temps.
+function showSaved(id, text, warnings) {
+  st.gridMsg = { id, nodes: [el("div", "msg ok", text), ...(warnings || []).map(w => el("div", "msg warn", w))] };
+  render();
 }
 
-function categoriesEditor() {
-  const order = Object.fromEntries(DATA.category_names.map((c, i) => [c, i]));
-  if (!st.catDraft) st.catDraft = Object.entries(categories()).sort((a, b) => order[a[1]] - order[b[1]] || a[0].localeCompare(b[0])).map(([t, c]) => ({ t, c }));
-  const msg = el("div");
-  const rows = st.catDraft.map((r, i) => {
-    const ti = el("input", { type: "text", value: r.t, "aria-label": "Type produit", style: "width:90px", oninput: e => { r.t = e.target.value; } });
-    const cs = el("select", { "aria-label": "Catégorie", onchange: e => { r.c = e.target.value; } }, DATA.category_names.map(c => el("option", { value: c }, c))); cs.value = r.c;
-    return [ti, cs, el("button", { class: "btn link", onclick: () => { st.catDraft.splice(i, 1); render(); } }, "Retirer")];
+function refHeader(key) {
+  const owners = store.get("spc2_owners", {}), mine = EDIT.meta[key];
+  const owner = el("input", { type: "text", id: "owner_" + key, value: owners[key] ?? "Équipe planning", onchange: e => { owners[key] = e.target.value; store.set("spc2_owners", owners); } });
+  const upd = mine ? mine.at : "2026-10-05T08:20", by = mine ? mine.by : "Démo";
+  const hist = refHistory().filter(h => h.ref === key);
+  return [el("div", "row", { style: "align-items:end" }, el("label", { class: "f", style: "width:260px" }, "Propriétaire", owner),
+      el("p", { style: "margin:0 0 6px" }, "Mis à jour le ", el("b", "", fdate(upd.slice(0, 10)) + " à " + upd.slice(11, 16)), " par " + by)),
+    el("details", "card", { style: "margin:10px 0" }, el("summary", "", "Historique des modifications (" + hist.length + ")"),
+      hist.length ? el("ul", "list small", hist.map(h => el("li", "", h.at.replace("T", " ") + " · ", el("b", "", h.by), " · " + h.changes.slice(0, 20).join(" · ") + (h.changes.length > 20 ? " … (+" + (h.changes.length - 20) + ")" : ""))))
+        : el("p", "small muted", "Aucune modification enregistrée."))];
+}
+
+function renderRefs() {
+  const out = [el("h1", "", "Référentiels")];
+  if (!EDIT.base) {
+    baseTables().then(render).catch(e => { st.refMsg = "Tables introuvables : " + String((e && e.message) || e); render(); });
+    return [...out, st.refMsg ? el("div", "msg err", st.refMsg) : el("div", "msg info busy", "Chargement des référentiels…")];
+  }
+  st.refTab = REF_TABS.some(([k]) => k === st.refTab) ? st.refTab : "produits";
+  out.push(el("div", "tabs", REF_TABS.map(([k, t]) => el("button", { class: st.refTab === k ? "on" : "", id: "reftab_" + k, onclick: () => { st.refTab = k; render(); } }, t))));
+  out.push(...refHeader(st.refTab));
+  if (st.busy) out.push(el("div", "msg info busy", st.busy));
+  if (st.refMsg) { out.push(el("div", "msg warn", st.refMsg)); st.refMsg = null; }
+  if (st.refTab === "produits") out.push(...productsTab());
+  else if (st.refTab === "boutiques") out.push(...boutiquesTab());
+  else out.push(...plannersTab());
+  const edited = Object.keys(EDIT.tables).length || store.get("spc2_categories", null);
+  if (edited) out.push(el("p", "small muted", { style: "margin-top:18px" }, "Tes modifications sont gardées dans ce navigateur. ",
+    el("button", { class: "btn link", id: "refs_reset", onclick: () => {
+      if (!confirm("Revenir à tous les référentiels des données de test ? Tes modifications seront effacées.")) return;
+      EDIT.tables = {}; EDIT.meta = {}; store.set("spc2_tables", {}); store.set("spc2_refmeta", {}); try { localStorage.removeItem("spc2_categories"); } catch (e) { /* stockage bloqué */ }
+      reapplyTables(); resetRows(); invalidateOrder("Référentiels rétablis"); render(); } }, "Revenir aux données de test")));
+  return out;
+}
+
+// --- Produits ---
+function productsTab() {
+  const rows = viewRows("produits");
+  if (!rows) return [el("div", "msg info busy", "Préparation du tableau Produits…")];
+  const g = gridOf("prod", P_COLS, rows), f = st.prodF = st.prodF || { q: "", cat: "Toutes", anom: false };
+  const q = el("input", { type: "search", id: "prod_q", placeholder: "Rechercher un SKU ou une description", value: f.q });
+  q.oninput = () => { f.q = q.value.trim().toLowerCase(); g.page = 0; clearTimeout(q._t); q._t = setTimeout(() => { render(); const q2 = $("prod_q"); q2.focus(); q2.setSelectionRange(q2.value.length, q2.value.length); }, 250); };
+  const cat = el("select", { id: "prod_cat", onchange: e => { f.cat = e.target.value; g.page = 0; render(); } }, ["Toutes", ...DATA.category_names].map(c => el("option", { value: c }, c))); cat.value = f.cat;
+  const nAnom = g.rows.filter(r => r.Anomalies).length;
+  const box = el("div");
+  const out = [el("div", "filters", el("div", "grow", q), el("label", { class: "f", style: "width:200px" }, "Catégorie", cat),
+    el("label", "chk", el("input", { type: "checkbox", id: "prod_anom", checked: f.anom, onchange: e => { f.anom = e.target.checked; g.page = 0; render(); } }), "Anomalies (" + fmt(nAnom) + ")"))];
+  out.push(...gridView(g, P_COLS, {
+    id: "prod", badge: "Anomalies", saveLabel: "Enregistrer les produits", selects: { "Catégorie": DATA.category_names }, widths: { SKU: 100, Description: 200, "Catégorie": 150 },
+    note: "puce orange = anomalie (survole-la) · un multiple modifié vaut pour toutes les lignes du SKU · une catégorie modifiée reclasse tout son type produit",
+    filter: r => (!f.q || (r.SKU || "").toLowerCase().includes(f.q) || (r.Description || "").toLowerCase().includes(f.q)) && (f.cat === "Toutes" || r["Catégorie"] === f.cat) && (!f.anom || r.Anomalies),
+    onSave: (rs, msg) => saveProducts(rs, msg, "Produits enregistrés"),
+    extra: [el("button", { class: "btn", id: "prod_export", onclick: () => exportProducts(g.rows, box) }, "Exporter (Excel)"),
+      el("label", { class: "btn", for: "prod_import" }, "Importer (Excel)", el("input", { type: "file", id: "prod_import", accept: ".xlsx,.csv", style: "display:none", onchange: e => { const fl = e.target.files[0]; if (fl) importProducts(fl, g.rows, box); } }))],
+  }));
+  out.push(box);
+  return out;
+}
+async function saveProducts(rows, box, okText) {
+  let out;
+  try {
+    out = await callEngine(box, "save_products", { tables: Object.fromEntries(PRODUCT_KEYS.map(k => [k, curTable(k)])), categories: categories(),
+      edited: rows.map(r => Object.fromEntries(P_COLS.map(c => [c, r[c] ?? ""]))), author: st.author, today: todayISO() });
+  } catch (e) { return box.replaceChildren(engineErr(e)); }
+  if (out.errors.length) return box.replaceChildren(el("div", "msg err", "Rien n'est enregistré : " + out.errors.slice(0, 10).join(" · ")));
+  keepTables(out.tables);
+  if (out.categories) store.set("spc2_categories", out.categories);
+  EDIT.anomalies = out.anomalies; logRef("produits", out.changes); resetRows();
+  if (out.changes.length) invalidateOrder("Produits modifiés");
+  showSaved("prod", out.changes.length ? okText + " (" + out.changes.length + " changement(s)). La commande B80 sera recalculée avec." : "Aucun changement à enregistrer.", out.warnings);
+}
+async function exportProducts(rows, box) {
+  if (!window.XLSX) await loadScript(SHEETJS);
+  const ws = XLSX.utils.json_to_sheet(rows.map(r => Object.fromEntries([...P_COLS, "Anomalies"].map(c => [c, r[c] ?? ""]))), { header: [...P_COLS, "Anomalies"] });
+  const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "Produits");
+  await offer("produits.xlsx", new Uint8Array(XLSX.write(wb, { type: "array", bookType: "xlsx" })), box, "Produits exportés (" + fmt(rows.length) + " lignes).");
+}
+async function importProducts(file, current, box) {
+  if (!st.author) return box.replaceChildren(el("div", "msg err", "Choisis ton prénom (Planner, barre de gauche)."));
+  const raw = await readRows(file), head = (raw[0] || []).map(h => String(h ?? "").trim());
+  if (!head.includes("SKU")) return box.replaceChildren(el("div", "msg err", "Colonne « SKU » manquante : pars de l'export pour avoir les bonnes colonnes."));
+  const bySku = new Map(current.map(r => [r.SKU, { ...r }]));
+  for (const vals of raw.slice(1)) {
+    const rec = Object.fromEntries(head.map((h, i) => [h, vals[i] === null || vals[i] === undefined ? "" : String(vals[i])]));
+    const sku = (rec.SKU || "").trim(); if (!sku) continue;
+    bySku.set(sku, { ...(bySku.get(sku) || {}), ...Object.fromEntries(P_COLS.filter(c => c in rec).map(c => [c, rec[c]])) });
+  }
+  saveProducts([...bySku.values()], box, "Import de « " + file.name + " » enregistré");
+}
+
+// --- Boutiques ---
+function boutiquesTab() {
+  st.btqSub = st.btqSub || "list";
+  const out = [el("div", "seg", { style: "margin:4px 0 10px" }, [["list", "Boutiques"], ["portfolio", "Portfolio"]].map(([k, t]) => el("button", { class: st.btqSub === k ? "on" : "", id: "btqsub_" + k, onclick: () => { st.btqSub = k; render(); } }, t)))];
+  const rows = viewRows("boutiques");
+  if (!rows) return [...out, el("div", "msg info busy", "Préparation du tableau Boutiques…")];
+  if (st.btqSub === "portfolio") return [...out, ...portfolioPanel(rows)];
+  const g = gridOf("btq", B_COLS, rows);
+  const left = gridView(g, B_COLS, {
+    id: "btq", badge: "Anomalies", saveLabel: "Enregistrer les boutiques", selects: { DC: ["MT1", "TO1", "CY1", "VA1"], "Planner habituel": planners() }, widths: { Code: 60, Nom: 150, DC: 76, "Planner habituel": 110 },
+    note: "le DC est une colonne · « Ouvrir » pour les règles et les créneaux", selected: r => r.Code === st.btqOpen,
+    rowAction: r => el("button", { class: "btn link", onclick: () => { st.btqOpen = r.Code; delete st.grids.rules; delete st.grids.slots; render(); } }, "Ouvrir"),
+    onSave: async (rs, msg) => {
+      let res;
+      try { res = await callEngine(msg, "save_boutiques", { tables: Object.fromEntries(BOUTIQUE_KEYS.map(k => [k, curTable(k)])), edited: rs.map(r => Object.fromEntries(B_COLS.map(c => [c, r[c] ?? ""]))) }); }
+      catch (e) { return msg.replaceChildren(engineErr(e)); }
+      if (res.errors.length) return msg.replaceChildren(el("div", "msg err", "Rien n'est enregistré : " + res.errors.join(" · ")));
+      if (!res.changes.length) return msg.replaceChildren(el("div", "msg info", "Aucun changement à enregistrer."));
+      keepTables(res.tables); EDIT.anomalies = res.anomalies; logRef("boutiques", res.changes); resetRows(); invalidateOrder("Boutiques modifiées");
+      showSaved("btq", "Boutiques enregistrées (" + res.changes.length + " changement(s)).");
+    },
   });
-  return [
-    el("p", "small muted", "Classement des types produit dans le filtre « Catégorie » de la commande. Un type absent est classé « Autres ». Aucune quantité n'en dépend."),
-    el("div", { style: "max-width:520px" }, tableOf(["Type produit", "Catégorie", ""], rows)),
-    el("div", "row", { style: "margin-top:10px" },
-      el("button", { class: "btn", onclick: () => { st.catDraft.push({ t: "", c: "Autres" }); render(); } }, "Ajouter un type"),
-      el("button", { class: "btn primary", id: "save_cats", onclick: () => {
-        if (!st.author) return msg.replaceChildren(el("div", "msg err", "Choisis ton prénom (Planner, barre de gauche)."));
-        const map = {}, errs = [];
-        st.catDraft.forEach((r, i) => { const t = r.t.trim().toUpperCase(); if (!t) errs.push("ligne " + (i + 1) + " : type produit vide"); else if (map[t] && map[t] !== r.c) errs.push("type " + t + " déjà classé en « " + map[t] + " »"); else map[t] = r.c; });
-        if (errs.length) return msg.replaceChildren(el("div", "msg err", errs.join(" · ")));
-        store.set("spc2_categories", map); st.catDraft = null; render();
-        $("catmsg")?.replaceChildren(el("div", "msg ok", Object.keys(map).length + " type(s) produit enregistré(s) dans ce navigateur."));
-      } }, "Enregistrer les catégories"),
-      el("button", { class: "btn", onclick: () => { try { localStorage.removeItem("spc2_categories"); } catch (e) { /* stockage bloqué */ } st.catDraft = null; render(); } }, "Revenir au classement du planner")),
-    el("div", { id: "catmsg" }, msg)];
+  const open = st.btqOpen && rows.find(r => r.Code === st.btqOpen);
+  return [...out, el("div", "evlayout" + (open ? " open" : ""), el("div", "", left), open ? boutiquePanel(open) : null)];
+}
+function partGrid(part, b, cols, label) {
+  const key = { slots: "schedule", rules: "rules", portfolio: "portfolio" }[part];
+  const own = recsOf(curTable(key)).filter(r => (r.boutique || "").trim() === b);
+  const g = gridOf(part, cols, own.map(r => Object.fromEntries(cols.map(c => [c, r[c] ?? ""]))));
+  return gridView(g, cols, { id: part, saveLabel: "Enregistrer " + label, height: 260, defaults: part === "portfolio" ? { filter_out: "No" } : {},
+    onSave: async (rs, msg) => {
+      let res;
+      try { res = await callEngine(msg, "save_part", { part, boutique: b, table: curTable(key), rows: rs }); }
+      catch (e) { return msg.replaceChildren(engineErr(e)); }
+      if (res.errors.length) return msg.replaceChildren(el("div", "msg err", "Rien n'est enregistré : " + res.errors.join(" · ")));
+      keepTables({ [key]: res.table }); EDIT.anomalies = res.anomalies; logRef("boutiques", [b + " : " + label + " (" + rs.length + " ligne(s))"]);
+      resetRows(); invalidateOrder("Modifié : " + label + " de " + b);
+      showSaved(part, "Enregistré : " + label + " de " + b + ".", res.warnings);
+    } });
+}
+function boutiquePanel(r) {
+  return el("div", "card evpanel", el("button", { class: "x", "aria-label": "Fermer", onclick: () => { st.btqOpen = null; render(); } }, "×"),
+    el("h2", "", r.Code + " " + (r.Nom || "")), el("p", "small muted", "DC " + (r.DC || "—") + " · " + (r.Carrier || "carrier —") + " · planner habituel : " + (r["Planner habituel"] || "—")),
+    r.Anomalies ? el("div", "msg warn", r.Anomalies) : null,
+    el("h3", "", "Règles boutique"), el("p", "small muted", "max_pallets, max_units (sans SKU) · max_qty_sku, min_qty_sku (SKU obligatoire). Une règle passe la ligne en REVIEW, elle ne change jamais une quantité."),
+    ...partGrid("rules", r.Code, RULE_COLS, "les règles"),
+    el("h3", "", "Créneaux de livraison (Schedule)"), ...partGrid("slots", r.Code, SLOT_COLS, "les créneaux"));
+}
+function portfolioPanel(rows) {
+  st.pfBtq = st.pfBtq || "B80";
+  const sel = el("select", { id: "pf_btq", onchange: e => { st.pfBtq = e.target.value; delete st.grids.portfolio; render(); } }, rows.map(r => el("option", { value: r.Code }, r.Code + (r.Nom ? " — " + r.Nom : "") + " (" + r.Portfolio + ")"))); sel.value = st.pfBtq;
+  return [el("label", { class: "f", style: "width:320px" }, "Boutique", sel),
+    el("p", "small muted", "filter_out = Yes : SKU retiré de la commande · No : gardé. Comparaison en numérique puis en texte, comme Excel (7005.7 = 7005.70)."),
+    ...partGrid("portfolio", st.pfBtq, ["sku", "filter_out"], "le portfolio")];
+}
+
+// --- Planners ---
+function plannersTab() {
+  const names = planners(), inp = el("input", { type: "text", id: "new_planner_ref", placeholder: "Prénom" });
+  const save = list => { store.set("spc2_planners", list); fillAuthors(); render(); };
+  return [el("p", "small muted", "Prénoms seulement, jamais d'email. Retirer un planner ne supprime pas ses événements."),
+    el("div", "row", { style: "align-items:end;max-width:420px" }, el("label", "f grow", "Ajouter un planner", inp),
+      el("button", { class: "btn", onclick: () => { const n = inp.value.trim(); if (n && !names.includes(n)) { logRef("planners", ["ajouté : " + n]); save([...names, n]); } } }, "Ajouter")),
+    el("ul", "list", names.map(n => el("li", "", n + (n === st.author ? " (toi)" : ""), " ",
+      el("button", { class: "btn link", onclick: () => { logRef("planners", ["retiré : " + n]); save(names.filter(x => x !== n)); } }, "Retirer"))))];
 }
 
 // ---------- 6. Historique ----------
