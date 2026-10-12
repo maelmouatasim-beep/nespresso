@@ -1,33 +1,23 @@
-"""Écran 2 — Commande boutique : paramètres, tuiles, une seule grille, panneau « Pourquoi »."""
+"""Commande d'une boutique (onglet de la page Commandes) : tuiles, une seule grille, « Pourquoi »."""
 
 from __future__ import annotations
 
-from datetime import date
-
 import pandas as pd
 import streamlit as st
-from pydantic import ValidationError
 
 from app.domain.events import EventScope
-from app.domain.models import PlanningParameters, RecommendationLine, Status
+from app.domain.models import RecommendationLine, Status
 from app.engines.categories import CATEGORIES
 from app.engines.events import blocked_by_event, event_tags, select_for_order
 from app.engines.overrides import OverrideError
 from app.engines.pallets import MACHINES, OL, OTHERS, VL
-from app.engines.schedule import boutiques_ordering_on
-from app.ingestion.masters import all_boutiques, build_inputs_for_boutique
-from app.services.planning import run_planning, with_overrides
+from app.services.planning import with_overrides
 from app.ui.common import (
     CONFIRMED_MD,
-    DEPOT,
     EDITABLE_COLUMNS,
     EVENT_DOT,
-    EVENTS,
-    EXPORT,
     MODE_LABEL,
-    MODES,
     MODIFIED_MD,
-    ORDER,
     ORDER_COLUMN_CONFIG,
     SOURCE_LABEL,
     STATUS_MD,
@@ -35,23 +25,17 @@ from app.ui.common import (
     author,
     boutique_label,
     category_of_line,
-    current,
     day_data,
     default_order,
-    event_context,
     explain_steps,
     fmt_1,
     fmt_date,
     fmt_int,
-    fr_day,
-    go,
     is_confirmed,
     make_override,
     mark_events_viewed,
     order_frame,
-    reset_order,
     rounding_note,
-    run_date,
     shown_status,
     ss,
     style_order_frame,
@@ -63,84 +47,6 @@ CATEGORY_FILTERS = ("Tous", *CATEGORIES)
 STATUS_FILTERS = ("Tous", "À traiter", "REVIEW", "BLOCKED", "Confirmé", "Modifié")
 TABLE_HEIGHT = 600
 FALLBACK_WEEKS_DEFAULT = 4
-
-
-def compute_order(boutique: str, delivery: date, cover: float, coffee: float | None,
-                  history: int, mode_label: str, fallback_weeks: int, codes: list[str] | None) -> None:  # fmt: skip
-    data = day_data()
-    assert data is not None
-    params = PlanningParameters(boutique=boutique, run_date=run_date(), delivery_date=delivery,
-                                cover_days=cover, coffee_cover_days=coffee)  # fmt: skip
-    inputs, dc = build_inputs_for_boutique(
-        boutique, data.stock, data.movements, data.masters.products, data.masters.conversions,
-        data.masters.dc_mapping, included_movement_codes=codes, sources=data.source_hashes,
-        history_days=history, fallback_weeks=fallback_weeks,
-        portfolio=data.masters.portfolio.get(boutique, {}), exclusions=data.exclusions,
-    )  # fmt: skip
-    reset_order()
-    ss.base = run_planning(inputs, params, MODES[mode_label], dc=dc, business_inputs=data.business,
-                           event_context=event_context())  # fmt: skip
-
-
-def open_result(result) -> None:  # noqa: ANN001 - PlanningResult déjà calculé (onglet Journée)
-    reset_order()
-    ss.base = result
-    ss.p_boutique = result.params.boutique
-    go(ORDER)
-
-
-def _set_delivery(day: date) -> None:
-    ss.p_delivery = day
-
-
-def _params_row(data) -> None:  # noqa: ANN001
-    names = data.masters.boutique_names
-    boutiques = all_boutiques(data.masters, data.stock)
-    cols = st.columns([2.2, 1.25, 0.85, 0.85, 0.85, 1.05, 0.65, 0.9], vertical_alignment="bottom")
-    boutique = cols[0].selectbox("Boutique", boutiques, index=None, placeholder="Rechercher une boutique",
-                                 format_func=lambda b: boutique_label(b, names), key="p_boutique")  # fmt: skip
-    delivery = cols[1].date_input("Livraison", value=None, min_value=run_date(), key="p_delivery",
-                                  format="DD/MM/YYYY")  # fmt: skip
-    cover = cols[2].number_input("Cover (j)", min_value=0.5, max_value=60.0, step=0.5, value=None,
-                                 key="p_cover", format="%.1f")  # fmt: skip
-    coffee = cols[3].number_input("Cover café", min_value=0.5, max_value=60.0, step=0.5, value=None, format="%.1f",
-                                  key="p_coffee", help="Facultatif : cover propre aux cafés (type C)")  # fmt: skip
-    history = cols[4].number_input("Historique (j)", min_value=1, max_value=56, value=7, step=1,
-                                   key="p_hist")  # fmt: skip
-    mode = cols[5].selectbox("Mode", list(MODES), key="p_mode")
-    with cols[6].popover(":material/tune:", help="Options avancées", width="stretch"):
-        weeks = st.number_input("Semaines de secours (SKU dormants)", min_value=1, max_value=12,
-                                value=FALLBACK_WEEKS_DEFAULT, step=1, key="p_fallback")  # fmt: skip
-        all_codes = sorted({m.movement_code for m in data.movements if m.location == boutique})
-        codes = st.multiselect("Codes de mouvement comptés", all_codes, default=all_codes, placeholder="Aucun",
-                               key=f"p_codes_{boutique}")  # fmt: skip
-    run = cols[7].button("Calculer", type="primary", key="compute", width="stretch")
-
-    if boutique:
-        slot = {
-            d.boutique: d for d in boutiques_ordering_on(data.masters.schedule, run_date())
-        }.get(boutique)
-        if slot and slot.delivery_date != delivery:
-            st.button(f"Livraison selon le Schedule : {fr_day(slot.delivery_date)}",
-                      on_click=_set_delivery, args=(slot.delivery_date,), key="use_schedule")  # fmt: skip
-        elif not slot and data.masters.schedule:
-            st.caption(
-                f"Pas de commande prévue au Schedule le {fr_day(run_date())} pour cette boutique."
-            )
-
-    if run:
-        missing = [n for n, v in (("la boutique", boutique), ("la date de livraison", delivery),
-                                  ("le cover", cover)) if not v]  # fmt: skip
-        if missing:
-            st.error("Il manque " + ", ".join(missing) + ".")
-            return
-        try:
-            compute_order(boutique, delivery, cover, coffee, int(history), mode, int(weeks),
-                          None if set(codes) == set(all_codes) else codes)  # fmt: skip
-        except ValidationError as exc:
-            st.error("; ".join(e["msg"] for e in exc.errors()))
-        except ValueError as exc:
-            st.error(f"Calcul impossible : {exc}")
 
 
 def _tiles(res) -> None:  # noqa: ANN001
@@ -423,17 +329,8 @@ def _why_panel(res, sku: str, mapping: dict[str, str]) -> None:  # noqa: ANN001
         _apply_overrides(new)
 
 
-def render() -> None:
-    data = day_data()
-    if data is None:
-        st.header("Commande boutique")
-        st.info("Dépose d'abord les exports du jour.")
-        st.button("Aller au dépôt du jour", on_click=go, args=(DEPOT,))
-        return
-    _params_row(data)
-    res = current()
-    if res is None:
-        return
+def render_order(res, data) -> None:  # noqa: ANN001 - PlanningResult (avec modifications), DayData
+    """Table de commande pleine page de la boutique affichée."""
     p = res.params
     names, mapping = data.masters.boutique_names, data.categories
     st.markdown(
@@ -467,7 +364,7 @@ def render() -> None:
         # Même grille tant que les lignes affichées ne changent pas : taper une qty ne recrée
         # pas la table, la ligne reste en place et le tri choisi au clic est gardé (D-039).
         rows_id = hash(tuple(x.sku for x in shown))
-        key = f"grid_{cat}_{status}_{qty_only}_{search}_{event}_{ss.nonce}_{rows_id}"
+        key = f"grid_{p.boutique}_{cat}_{status}_{qty_only}_{search}_{event}_{ss.nonce}_{rows_id}"
         edited = st.data_editor(style_order_frame(df), key=key, hide_index=True, width="stretch", height=TABLE_HEIGHT, placeholder="—",
                                 column_config=ORDER_COLUMN_CONFIG,
                                 disabled=[c for c in df.columns if c not in EDITABLE_COLUMNS])  # fmt: skip
@@ -480,8 +377,3 @@ def render() -> None:
     if panel is not None:
         with panel, st.container(border=True, height=TABLE_HEIGHT + 38, key="why_panel"):
             _why_panel(res, ss.why_sku, mapping)
-    c1, c2, _ = st.columns([1.3, 1.3, 4])
-    c1.button("Continuer vers l'export", on_click=go, args=(EXPORT,), key="to_export",
-              type="primary", width="stretch")  # fmt: skip
-    c2.button("Événements SKU", on_click=go, args=(EVENTS,), key="to_events",
-              icon=":material/event:", width="stretch")  # fmt: skip

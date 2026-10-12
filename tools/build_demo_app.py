@@ -42,7 +42,6 @@ from app.domain.models import (  # noqa: E402
     TargetStock,
 )
 from app.engines.categories import CATEGORIES  # noqa: E402
-from app.engines.schedule import boutiques_ordering_on  # noqa: E402
 from app.ingestion import referential_checks as checks  # noqa: E402
 from app.ingestion.depot import freshness  # noqa: E402
 from app.ingestion.events import DEMO_PLANNERS, example_events  # noqa: E402
@@ -291,7 +290,6 @@ def build() -> Path:  # noqa: PLR0915 - un seul script linéaire, plus simple à
     quality = [row for rep in data.reports for row in rep.as_rows()]
 
     names = masters.boutique_names
-    planned = boutiques_ordering_on(masters.schedule, RUN_DATE)
     payload = {
         "meta": {
             "boutique": BOUTIQUE,
@@ -305,7 +303,6 @@ def build() -> Path:  # noqa: PLR0915 - un seul script linéaire, plus simple à
             "period": [dates[0].isoformat(), dates[-1].isoformat()] if dates else None,
         },  # fmt: skip
         "boutiques": [[b, names.get(b, "")] for b in all_boutiques(masters, data.stock)],
-        "planned": [[d.boutique, d.delivery_date.isoformat()] for d in planned],
         "depot": depot,
         "dq": {
             "stock_rows": len(data.stock),

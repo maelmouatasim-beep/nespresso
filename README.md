@@ -36,8 +36,13 @@ la première fois, prénom seulement), choisis « Mes données »
    La première fois, importe les référentiels depuis ton calculateur Excel (`.xlsm`) ou pars des
    référentiels de test. Clique sur « Prêt ».
    L'outil ne se connecte jamais à Power BI : c'est toi qui déposes les fichiers.
-2. **Commande boutique** : boutique (recherche par code ou nom), date de livraison, cover, cover café
-   (facultatif), jours d'historique, mode, puis « Calculer ». Toutes les lignes sont dans une seule
+2. **Commandes** : ajoute une boutique (recherche par code ou nom ; rien n'est présélectionné). Une
+   boutique = une commande simple, plusieurs = une journée. Chaque boutique a sa ligne de paramètres
+   (date de livraison, cover non-café, cover café facultatif, jours d'historique, mode) ; les
+   paramètres de la première sont proposés aux suivantes. « Calculer » par boutique ou « Tout
+   calculer ». Chaque boutique est un onglet (code, statut à calculer / calculé / confirmé, REVIEW et
+   BLOCKED restants, croix pour la retirer) ; une barre récapitulative donne unités, palettes et
+   lignes à traiter par boutique et au total. Un clic sur l'onglet affiche sa table. Toutes les lignes sont dans une seule
    grille, comme dans le calculateur Excel : filtres Catégorie et Statut, « Qty > 0 seulement »,
    recherche, tri au clic sur un en-tête. Coche 🔍 sur une ligne pour voir « Pourquoi cette quantité ? »
    à droite. Tape la « Qty finale » directement dans la cellule : elle compte tout de suite (totaux,
@@ -53,23 +58,23 @@ la première fois, prénom seulement), choisis « Mes données »
    « Confirmer les lignes affichées » pour traiter un paquet filtré. Filtres de statut : Tous,
    À traiter (OK et REVIEW non confirmés), REVIEW, BLOCKED, Confirmé, Modifié. La ligne ne bouge
    pas pendant la saisie : le tri ne se refait qu'au clic sur un en-tête ou au changement de filtre.
-3. **Journée** : plusieurs boutiques d'un coup (présélection du Schedule, modifiable), un cover par
-   boutique, le nombre de SKU flagués par des événements, puis le zip des fichiers LT.
-4. **Export** : fichier LT pour Nessoft, récapitulatif boutique, export Excel détaillé.
-   Avant le fichier LT, une vérification en 3 points (lignes bloquées par un événement, SKU flagués
-   non vus, lancements et demandes boutique à inclure) doit être verte ; chaque validation est tracée.
-   « Marquer comme vus » ne s'active qu'après avoir ouvert une fois le filtre « Événements » de la
-   commande. Le fichier LT attend aussi que toutes les lignes REVIEW et BLOCKED soient confirmées.
+   Sous la table : « Télécharger le LT » de la boutique affichée et « Télécharger tous les LT (zip) ».
+   Chacun passe par le garde-fou : toutes les lignes REVIEW et BLOCKED confirmées, et la vérification
+   en 3 points des événements (lignes bloquées par un événement, SKU flagués non vus, lancements et
+   demandes boutique à inclure) verte ; chaque validation est tracée. « Marquer comme vus » ne
+   s'active qu'après avoir ouvert une fois le filtre « Événements » de la commande. Le zip attend que
+   chaque boutique soit prête et dit lesquelles bloquent encore.
    L'outil n'écrit jamais dans Nessoft : tu importes le fichier toi-même.
-5. **Événements SKU** : promotions, lancements, arrêts, interdictions, conversions, urgences,
+3. **Export** : récapitulatif boutique, export Excel détaillé, « Enregistrer sans exporter ».
+4. **Événements SKU** : promotions, lancements, arrêts, interdictions, conversions, urgences,
    demandes boutique et SKU à surveiller. Onglets « Équipe » et « Mes événements », table triable,
    panneau à droite pour créer, modifier, dupliquer, terminer. « + Demande boutique » : formulaire
    court (boutique, SKU, quantité, qui a demandé). Import / export Excel avec
    `templates/evenements_sku.xlsx` (exemples fictifs à remplacer).
-6. **Référentiels** : multiples, conversions, portfolio, boutiques/DC, Schedule, exclusions,
+5. **Référentiels** : multiples, conversions, portfolio, boutiques/DC, Schedule, exclusions,
    catégories (type produit → catégorie du filtre), allocations, lancements, stocks cibles, règles boutique. Propriétaire, date de mise à jour,
    anomalies, import depuis un modèle.
-7. **Historique** : commandes enregistrées, modifications par contexte déduit, SKU les plus modifiés,
+6. **Historique** : commandes enregistrées, modifications par contexte déduit, SKU les plus modifiés,
    comparaison de deux commandes.
 
 Les fichiers déposés et la base locale restent dans `data/` (jamais versionné).

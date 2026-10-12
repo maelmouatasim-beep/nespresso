@@ -12,7 +12,7 @@ dependencies = [
     "pydantic>=2",
     "openpyxl>=3.1",
     "python-calamine>=0.3",  # lecture Excel rapide (exports Power BI de ~90 000 lignes)
-    "streamlit>=1.40",
+    "streamlit>=1.46",
 ]
 
 [project.optional-dependencies]

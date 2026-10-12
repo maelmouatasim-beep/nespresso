@@ -20,7 +20,6 @@ if str(ROOT) not in sys.path:
 
 from app.ingestion.depot import freshness  # noqa: E402
 from app.ui.common import (  # noqa: E402
-    DAY,
     DEPOT,
     EVENTS,
     EXPORT,
@@ -39,7 +38,7 @@ from app.ui.common import (  # noqa: E402
     ss,
     workspace,
 )
-from app.ui.screens import day, depot, events, export, history, order, referentials  # noqa: E402
+from app.ui.screens import depot, events, export, history, orders, referentials  # noqa: E402
 
 st.set_page_config(
     page_title="Supply Planning Copilot", page_icon=":material/local_cafe:", layout="wide"
@@ -130,8 +129,7 @@ with st.sidebar:
 
 SCREENS = {
     DEPOT: depot.render,
-    ORDER: order.render,
-    DAY: day.render,
+    ORDER: orders.render,
     EXPORT: export.render,
     EVENTS: events.render,
     REFS: referentials.render,

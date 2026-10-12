@@ -9,9 +9,9 @@ import pytest
 from streamlit.testing.v1 import AppTest
 
 APP = str(Path(__file__).resolve().parents[2] / "app" / "ui" / "main.py")
-PAGES = ("1. Dépôt du jour", "2. Commande boutique", "3. Journée", "4. Export",
-         "5. Événements SKU", "6. Référentiels", "7. Historique")  # fmt: skip
-EVENTS, REFS = PAGES[4], PAGES[5]
+PAGES = ("1. Dépôt du jour", "2. Commandes", "3. Export", "4. Événements SKU",
+         "5. Référentiels", "6. Historique")  # fmt: skip
+ORDERS, EXPORT, EVENTS, REFS = PAGES[1], PAGES[2], PAGES[3], PAGES[4]
 
 
 @pytest.fixture
@@ -29,14 +29,26 @@ def goto(at: AppTest, page: str) -> None:
     assert not at.exception, at.exception
 
 
-def compute_b80(at: AppTest, mode: str = "Standard") -> None:
-    goto(at, PAGES[1])
-    at.selectbox(key="p_boutique").set_value("B80").run()
-    at.date_input(key="p_delivery").set_value(date(2026, 10, 8)).run()
-    at.number_input(key="p_cover").set_value(9.0).run()
-    at.selectbox(key="p_mode").set_value(mode).run()
-    at.button(key="compute").click().run()
+def add_boutique(at: AppTest, boutique: str) -> None:
+    goto(at, ORDERS)
+    at.selectbox(key="add_boutique").set_value(boutique).run()
     assert not at.exception, at.exception
+
+
+def compute_b80(at: AppTest, mode: str = "Standard") -> None:
+    if "B80" not in at.session_state["orders"]:
+        add_boutique(at, "B80")
+    goto(at, ORDERS)
+    at.date_input(key="p_delivery_B80").set_value(date(2026, 10, 8)).run()
+    at.number_input(key="p_cover_B80").set_value(9.0).run()
+    at.selectbox(key="p_mode_B80").set_value(mode).run()
+    at.button(key="compute_B80").click().run()
+    assert not at.exception, at.exception
+
+
+def download(at: AppTest, label: str):  # noqa: ANN201
+    """Bouton de téléchargement dont le libellé commence par `label` (son état : .disabled)."""
+    return next(d.proto for d in at.get("download_button") if d.proto.label.startswith(label))
 
 
 def test_every_screen_renders(app: AppTest) -> None:
@@ -47,8 +59,8 @@ def test_every_screen_renders(app: AppTest) -> None:
 
 
 def test_order_requires_parameters_then_computes(app: AppTest) -> None:
-    goto(app, PAGES[1])
-    app.button(key="compute").click().run()
+    add_boutique(app, "B80")
+    app.button(key="compute_B80").click().run()
     assert any("Il manque" in e.value for e in app.error)
     compute_b80(app)
     res = app.session_state["base"]
@@ -69,7 +81,7 @@ def test_parity_mode_reproduces_excel_selection(app: AppTest) -> None:
 
 def test_export_needs_planner_name(app: AppTest) -> None:
     compute_b80(app)
-    goto(app, PAGES[3])
+    goto(app, EXPORT)
     assert any("Choisis ton prénom" in e.value for e in app.error)
     app.selectbox(key="author").set_value("Sami").run()
     assert not app.exception
@@ -77,12 +89,35 @@ def test_export_needs_planner_name(app: AppTest) -> None:
     assert app.session_state["saved_run_id"] == 1
 
 
-def test_day_requires_confirmed_date_and_cover(app: AppTest) -> None:
-    goto(app, PAGES[2])
-    pick = next(m for m in app.multiselect if m.key.startswith("day_btq_"))
-    pick.set_value(["B80"]).run()
-    app.button(key="day_compute").click().run()
-    assert any("date de livraison" in e.value for e in app.error)
+def test_orders_start_empty_without_schedule_preselection(app: AppTest) -> None:
+    goto(app, ORDERS)
+    assert app.session_state["orders"] == {}
+    assert app.selectbox(key="add_boutique").value is None
+    assert not [d for d in app.dataframe if d.key and d.key.startswith("grid_")]
+
+
+def test_second_boutique_takes_first_parameters_and_keeps_each_order(app: AppTest) -> None:
+    compute_b80(app)
+    app.button(key="confirm_shown").click().run()
+    confirmed = set(app.session_state["seen"])
+    other = next(o for o in app.selectbox(key="add_boutique").options if not o.startswith("B80"))
+    other = other.split(" — ")[0]
+    add_boutique(app, other)
+    params = app.session_state["orders"][other]["params"]
+    assert (params["delivery"], params["cover"]) == (date(2026, 10, 8), 9.0)  # repris, modifiables
+    assert app.session_state["active"] == "B80"  # l'onglet affiché ne change pas
+    app.button(key=f"tab_open_{other}").click().run()
+    assert app.session_state["active"] == other and app.session_state["base"] is None
+    app.button(key="tab_open_B80").click().run()
+    assert app.session_state["seen"] == confirmed  # la commande de B80 est gardée telle quelle
+    recap = next(d.value for d in app.dataframe if "Palettes" in d.value.columns)
+    assert list(recap["Boutique"]) == ["B80", other, "Total"]
+    # Le zip attend chaque boutique : celle qui n'est pas calculée est citée.
+    app.selectbox(key="author").set_value("Camille").run()
+    assert download(app, "Télécharger tous les LT").disabled
+    assert any(other in c.value and "à calculer" in c.value for c in app.caption)
+    app.button(key=f"tab_close_{other}").click().run()
+    assert other not in app.session_state["orders"]
 
 
 def test_referential_owner_is_saved(app: AppTest) -> None:
@@ -218,7 +253,7 @@ def test_personal_event_applies_only_to_its_planner_until_taken_over(app: AppTes
 
 def open_events_filter(at: AppTest) -> None:
     """Clic sur « Tous » dans le bandeau Événements actifs de la commande."""
-    goto(at, PAGES[1])
+    goto(at, ORDERS)
     next(b for b in at.button_group if b.key == "f_event").set_value("all").run()
     assert not at.exception, at.exception
 
@@ -226,24 +261,23 @@ def open_events_filter(at: AppTest) -> None:
 def test_export_is_refused_until_the_gate_is_green(app: AppTest) -> None:
     app.selectbox(key="author").set_value("Camille").run()
     compute_b80(app)
-    goto(app, PAGES[3])
-    assert app.get("download_button")[0].proto.disabled  # garde-fou rouge
+    assert download(app, "Télécharger le LT").disabled  # garde-fou rouge
+    assert download(app, "Télécharger tous les LT").disabled
     app.button(key="order_gate_blocks").click().run()  # confirme le blocage de 7928.70
     # Q-030 : « Marquer comme vus » inactif tant que le filtre « Événements » n'a pas été ouvert
     assert app.button(key="order_gate_seen").disabled
     open_events_filter(app)
-    goto(app, PAGES[3])
     assert not app.button(key="order_gate_seen").disabled
     app.button(key="order_gate_seen").click().run()
-    assert app.get("download_button")[0].proto.disabled  # reste : lancements / demandes
+    assert download(app, "Télécharger le LT").disabled  # reste : lancements / demandes
     next(c for c in app.checkbox if c.key.startswith("order_gate_include")).check().run()
     # D-039 : garde-fou vert, mais des lignes REVIEW / BLOCKED ne sont pas encore confirmées.
-    assert app.get("download_button")[0].proto.disabled
+    assert download(app, "Télécharger le LT").disabled
     assert any("à confirmer avant le fichier LT" in e.value for e in app.error)
-    goto(app, PAGES[1])
+    next(b for b in app.button_group if b.key == "f_event").set_value(None).run()
     app.button(key="confirm_shown").click().run()  # filtre « Tous » : toutes les lignes
-    goto(app, PAGES[3])
-    assert not app.get("download_button")[0].proto.disabled
+    assert not download(app, "Télécharger le LT").disabled
+    assert not download(app, "Télécharger tous les LT").disabled  # une boutique prête
     from app.storage import db
     from app.storage import events as store
 
@@ -254,7 +288,6 @@ def test_export_is_refused_until_the_gate_is_green(app: AppTest) -> None:
 def test_store_request_ends_after_export_with_confirmation(app: AppTest) -> None:
     app.selectbox(key="author").set_value("Camille").run()
     compute_b80(app)
-    goto(app, PAGES[3])
     app.session_state["requests_to_close"] = [4]  # ce que fait le clic sur « Télécharger »
     app.run()
     app.button(key="close_req_4").click().run()
@@ -265,45 +298,6 @@ def test_store_request_ends_after_export_with_confirmation(app: AppTest) -> None
     conn = db.connect()
     assert store.get_event(conn, 4).status is EventStatus.DONE
     assert store.event_history(conn, 4)[0]["action"] == "terminé (commande exportée)"
-
-
-def test_day_shows_events_and_gates_the_zip(app: AppTest) -> None:
-    """Journée : colonne Événements par boutique et même garde-fou pour le zip."""
-    from app.domain.models import ForecastMode, PlanningParameters
-    from app.ingestion.masters import build_inputs_for_boutique
-    from app.services.planning import EventContext, run_day
-    from app.storage import db
-    from app.storage import events as store
-
-    app.selectbox(key="author").set_value("Camille").run()
-    goto(app, PAGES[2])
-    data = app.session_state["day"]
-    params = PlanningParameters(boutique="B80", run_date=date(2026, 10, 5),
-                                delivery_date=date(2026, 10, 8), cover_days=9,
-                                coffee_cover_days=None)  # fmt: skip
-    # Même calcul que le bouton « Calculer toutes les commandes » (la grille de saisie de la
-    # Journée n'est pas pilotable dans AppTest).
-    app.session_state["day_outcomes"] = run_day(
-        [params], ForecastMode.STANDARD,
-        build_inputs=lambda b: build_inputs_for_boutique(
-            b, data.stock, data.movements, data.masters.products, data.masters.conversions,
-            data.masters.dc_mapping, portfolio=data.masters.portfolio.get(b, {}),
-            exclusions=data.exclusions),
-        business_inputs=data.business,
-        event_context=EventContext(tuple(store.list_events(db.connect())), "Camille"),
-    )  # fmt: skip
-    app.run()
-    assert not app.exception, app.exception
-    assert any(m.value == "● 5 · ○ 1" for m in app.markdown)  # SKU flagués équipe / personnel
-    assert app.get("download_button")[0].proto.disabled
-    app.button(key="day_gate_blocks").click().run()
-    assert app.button(key="day_gate_seen").disabled  # Q-030 : filtre Événements pas encore ouvert
-    app.button(key="open_0_B80").click().run()  # « Ouvrir » la boutique, puis son filtre
-    open_events_filter(app)
-    goto(app, PAGES[2])
-    app.button(key="day_gate_seen").click().run()
-    next(c for c in app.checkbox if c.key.startswith("day_gate_include")).check().run()
-    assert not app.get("download_button")[0].proto.disabled
 
 
 def test_quantity_change_counts_immediately_with_deduced_context(app: AppTest) -> None:
@@ -367,9 +361,7 @@ def test_changing_a_quantity_never_changes_the_status(app: AppTest) -> None:
     next(b for b in app.button_group if b.key == "f_status").set_value("REVIEW").run()
     app.button(key="why_seen").click().run()
     assert sku not in set(grid(app)["SKU"]) and len(grid(app)) == n_review - 1
-    goto(app, PAGES[3])
-    assert app.get("download_button")[0].proto.disabled  # d'autres REVIEW non confirmés
-    goto(app, PAGES[1])
+    assert download(app, "Télécharger le LT").disabled  # d'autres REVIEW non confirmés
     next(b for b in app.button_group if b.key == "f_status").set_value("Confirmé").run()
     row = grid(app).set_index("SKU").loc[sku]
     assert row["Statut"] == "● Confirmé · modifié" and row["Confirmé"]

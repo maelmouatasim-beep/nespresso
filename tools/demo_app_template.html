@@ -137,6 +137,10 @@ ul.list { margin: 4px 0; padding-left: 20px; }
 .tag { display: inline-flex; gap: 6px; align-items: center; font-size: 13.5px; background: var(--surface-2); border-radius: 6px; padding: 2px 4px 2px 8px; }
 .tag button { border: 0; background: none; color: var(--muted); cursor: pointer; font-size: 16px; line-height: 1; padding: 0 4px; }
 .sel-btq input { flex: 1 1 180px; border: 0; background: transparent; }
+.tabbar { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 8px; }
+.tabbar .tag { padding: 0 4px 0 0; border: 1px solid var(--border); background: var(--surface); }
+.tabbar .tag.on { border-color: var(--gold); background: var(--gold-soft); font-weight: 600; }
+.tabbar .tag > button.tb { border: 0; background: none; font: inherit; color: inherit; padding: 6px 10px; cursor: pointer; font-size: 13.5px; }
 #why { position: fixed; right: 0; top: 0; bottom: 0; width: min(500px, 100vw); background: var(--surface); border-left: 1px solid var(--border); padding: calc(18px + env(safe-area-inset-top, 0px)) 20px calc(18px + env(safe-area-inset-bottom, 0px)); overflow-y: auto; box-shadow: -12px 0 40px rgba(0,0,0,.2); z-index: 20; }
 #why h2 { font-size: 17px; margin: 0 0 6px; padding-right: 34px; }
 #why .x { position: absolute; right: 12px; top: calc(10px + env(safe-area-inset-top, 0px)); font-size: 24px; background: none; border: 0; color: var(--muted); cursor: pointer; }
@@ -242,7 +246,7 @@ table.ev tr.sel td { box-shadow: inset 0 2px 0 var(--gold), inset 0 -2px 0 var(-
 <script>
 const DATA = /*__DATA__*/null;
 const M = DATA.meta, L = DATA.lines, T = DATA.text;
-const PAGES = ["1. Dépôt du jour", "2. Commande boutique", "3. Journée", "4. Export", "5. Événements SKU", "6. Référentiels", "7. Historique"];
+const PAGES = ["1. Dépôt du jour", "2. Commandes", "3. Export", "4. Événements SKU", "5. Référentiels", "6. Historique"];
 const STATUS = { O: "OK", R: "REVIEW", B: "BLOCKED" };
 const SRC = { forecast: "Prévision", allocation: "Allocation", launch: "Lancement", target_stock: "Stock cible", dc_return: "Retour DC", exclusion: "Exclusion", event: "Événement", override: "Modifié" };
 // Événements SKU (démo : 4 événements fictifs, mêmes règles que l'outil installé).
@@ -262,11 +266,10 @@ const MODES = { "Standard": "standard", "Parité Excel": "excel_parity" };
 const MODE_LABEL = { standard: "Standard", excel_parity: "Parité Excel" };
 // Deux sources : la démo (calculée d'avance) et « Mes fichiers » (moteur Python dans le navigateur).
 const todayISO = () => { const d = new Date(); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); };
-const DEMO = { live: false, run_date: M.run_date, boutiques: DATA.boutiques, planned: DATA.planned, quality: DATA.quality, dq: DATA.dq, period: M.period };
-const LIVE = { live: true, run_date: todayISO(), boutiques: [], planned: [], quality: [], dq: null, period: null, files: {}, errors: false };
+const DEMO = { live: false, run_date: M.run_date, boutiques: DATA.boutiques, quality: DATA.quality, dq: DATA.dq, period: M.period };
+const LIVE = { live: true, run_date: todayISO(), boutiques: [], quality: [], dq: null, period: null, files: {}, errors: false };
 const DS = () => st.source === "live" ? LIVE : DEMO;
 const names = () => Object.fromEntries(DS().boutiques);
-const plannedMap = () => Object.fromEntries(DS().planned);
 const RUN = () => DS().run_date;
 const FR_DAYS = ["dim.", "lun.", "mar.", "mer.", "jeu.", "ven.", "sam."];
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -307,14 +310,14 @@ const store = { get(k, d) { try { const v = localStorage.getItem(k); return v ? 
 
 const st = {
   page: (p => PAGES.includes(p) ? p : PAGES[0])(store.get("spc2_page", PAGES[0])), author: store.get("spc_author", ""), examples: store.get("spc2_examples", true),
-  form: { boutique: "", delivery: "", cover: "", coffee: "", mode: "standard" }, order: null, err: "",
-  overrides: {}, roundNotes: [], seen: new Set(), f: { cat: "Tous", status: "Tous", qty: false }, sort: null, q: "", why: null, gear: false, savedId: null, xmsg: null,
-  day: null, refTab: 0, source: "demo", busy: "", depotErr: [],
+  // Commandes : une entrée par boutique ajoutée (onglet) ; la boutique affichée a son état dans st.* (ORDER_KEYS).
+  tabs: null, active: null, order: null,
+  overrides: {}, roundNotes: [], seen: new Set(), f: { cat: "Tous", status: "Tous", qty: false, ev: null }, sort: null, q: "", why: null, rowOrder: null, savedId: null, xmsg: null,
+  refTab: 0, source: "demo", busy: "", depotErr: [],
   // Événements : reprises (session seulement), demandes terminées, validations avant export.
   taken: new Set(), evDone: store.get("spc2_ev_done", {}), confirmed: new Set(), includeOk: false, evViewed: new Set(),
   validations: store.get("spc2_validations", []), toClose: [], evTab: "team", evStatus: "Actifs", evQ: "", evTypes: new Set(), evPlanner: null, evSel: null, evEdit: null, tbl: null,
 };
-st.f.ev = null;
 
 // Catégories : table du référentiel (modifiable dans Référentiels, gardée dans ce navigateur).
 function categories() { return store.get("spc2_categories", null) || DATA.category_map; }
@@ -331,8 +334,9 @@ const csvOf = t => [t.columns, ...t.rows].map(r => r.map(csvCell).join(",")).joi
 const tablesCsv = keys => Object.fromEntries(keys.map(k => [k, csvOf(EDIT.tables[k])]));
 // Une modification change le résultat : la commande affichée doit être recalculée.
 function invalidateOrder(why) {
-  st.overrides = {}; st.seen = new Set(); st.confirmed = new Set(); st.includeOk = false; st.savedId = null; st.day = null;
-  if (st.order) { st.order = null; st.err = why + " : recalcule la commande."; }
+  const t = tabs();
+  for (const b of t.list) { const s = b === st.active ? st : t.states[b]; if (s.order) t.errors[b] = why + " : recalcule la commande."; delete t.computed[b]; t.states[b] = emptyState(); }
+  if (st.active) Object.assign(st, emptyState());
 }
 
 // ---------- Résultat pré-calculé ----------
@@ -430,7 +434,7 @@ function gateCard(c, includeOk, onBlocks, onSeen, onInclude, toOpen) {
       c.blocked.length ? el("button", { class: "btn", id: "gate_blocks", title: "La quantité reste 0 (tracé). Pour envoyer quand même : modifier la ligne avec une raison.", onclick: onBlocks }, "Confirmer les blocages") : null),
     line(!c.unval.length, "todo", c.unval.length + " SKU flagué(s) par un événement non encore validé(s)", c.unval.join(", "),
       c.unval.length ? el("button", { class: "btn", id: "gate_seen", disabled: toOpen.length > 0, title: "Actif une fois le filtre « Événements » de la commande ouvert au moins une fois.", onclick: onSeen }, ic("check"), "Marquer comme vus") : null),
-    c.unval.length && toOpen.length ? el("p", "small muted", "Ouvre d'abord le filtre « Événements » de la commande" + (toOpen.length > 1 || c.multi ? " (" + toOpen.join(", ") + ")" : "") + " (Commande boutique) pour activer « Marquer comme vus ».") : null,
+    c.unval.length && toOpen.length ? el("p", "small muted", "Ouvre d'abord le filtre « Événements » de la commande" + (toOpen.length > 1 || c.multi ? " (" + toOpen.join(", ") + ")" : "") + " (page Commandes) pour activer « Marquer comme vus ».") : null,
     c.inc.length ? line(includeOk, "todo", "Lancements et demandes boutique à inclure", c.inc.join(", "), el("label", "chk", incBox, "J'ai vérifié : inclus"))
       : line(true, "", "Aucun lancement ni demande boutique à inclure", "", null),
     c.ok ? null : el("p", "small muted", "Le téléchargement est désactivé tant que ces points ne sont pas verts."));
@@ -454,7 +458,7 @@ function renderNav() {
 }
 function setSource(v) {
   if (st.source === v) return;
-  st.source = v; st.order = null; st.form.boutique = ""; st.form.delivery = ""; st.err = ""; st.overrides = {}; st.seen = new Set(); st.why = null; st.day = null;
+  st.source = v; st.tabs = null; st.active = null; Object.assign(st, emptyState());
   if (v === "live" && !(LIVE.files.stock_situation && LIVE.files.stock_movements)) st.page = PAGES[0];
   render();
 }
@@ -468,8 +472,8 @@ fillAuthors();
 $("author").onchange = e => {
   st.author = e.target.value; store.set("spc_author", st.author);
   // Le planner change les événements personnels appliqués : la commande est relue.
-  st.overrides = {}; st.seen = new Set(); st.confirmed = new Set(); st.includeOk = false; st.savedId = null; st.f.ev = null; st.evPlanner = null;
-  if (st.order && st.order.live) { st.order = null; st.err = "Planner changé : recalcule la commande pour appliquer ses événements personnels."; }
+  st.evPlanner = null;
+  invalidateOrder("Planner changé");
   render();
 };
 function needAuthor() { return st.author ? null : el("div", "msg err", "Choisis ton prénom (Planner, barre de gauche)."); }
@@ -577,7 +581,7 @@ async function depositFiles(files) {
     }
     const status = JSON.parse(bridge.status(LIVE.run_date));
     Object.assign(LIVE, status);
-    st.day = null;
+    st.tabs = null; st.active = null; Object.assign(st, emptyState());
   } catch (e) {
     st.depotErr.push("Le calcul dans le navigateur n'a pas pu démarrer ici (" + String((e && e.message) || e).slice(0, 160) + "). Utilise l'outil installé sur ton poste.");
   }
@@ -591,24 +595,20 @@ function livePlan(p) {
   return out;
 }
 async function computeLive(f) {
-  if (!ENGINE.bridge || !LIVE.files.stock_situation || !LIVE.files.stock_movements) { st.err = "Dépose d'abord tes deux exports (écran 1. Dépôt du jour)."; return render(); }
+  if (!ENGINE.bridge || !LIVE.files.stock_situation || !LIVE.files.stock_movements) return { error: "Dépose d'abord tes deux exports (écran 1. Dépôt du jour)." };
   st.busy = "Calcul de la commande " + f.boutique + "…"; render(); await pause();
   const out = livePlan(f);
   st.busy = "";
-  if (out.error) { st.err = out.error; return render(); }
-  st.order = { ...f, live: out, run_date: RUN() }; st.overrides = {}; st.seen = new Set(); st.savedId = null; st.why = null; st.xmsg = null;
-  render();
+  return out.error ? out : { ...f, live: out, run_date: RUN() };
 }
 
 async function computeDemoLive(f) {
   try { await demoEngine(m => { st.busy = m; render(); }); }
-  catch (e) { st.busy = ""; st.err = "Le moteur n'a pas pu démarrer ici (" + String((e && e.message) || e).slice(0, 160) + ")."; return render(); }
+  catch (e) { st.busy = ""; return { error: "Le moteur n'a pas pu démarrer ici (" + String((e && e.message) || e).slice(0, 160) + ")." }; }
   st.busy = "Calcul de la commande " + f.boutique + " avec tes modifications…"; render(); await pause();
   const out = livePlan(f);
   st.busy = "";
-  if (out.error) { st.err = out.error; return render(); }
-  st.order = { ...f, live: out, run_date: RUN() }; st.overrides = {}; st.seen = new Set(); st.savedId = null; st.why = null; st.xmsg = null;
-  render();
+  return out.error ? out : { ...f, live: out, run_date: RUN() };
 }
 
 // ---------- 1. Dépôt du jour ----------
@@ -670,7 +670,7 @@ function renderDepot() {
         : el("div", "msg info", "Aucun fichier déposé.")));
   }
   out.push(cards);
-  out.push(el("p", "small muted", "Tes fichiers restent dans ce navigateur : ils sont lus et calculés ici, rien n'est envoyé. Ils disparaissent quand tu fermes la page. Référentiels utilisés : ceux des données de test (multiples, conversions, DC, Schedule au 05/10/2026, portfolio de B80), avec tes modifications faites dans « 6. Référentiels »."));
+  out.push(el("p", "small muted", "Tes fichiers restent dans ce navigateur : ils sont lus et calculés ici, rien n'est envoyé. Ils disparaissent quand tu fermes la page. Référentiels utilisés : ceux des données de test (multiples, conversions, DC, Schedule au 05/10/2026, portfolio de B80), avec tes modifications faites dans « 5. Référentiels »."));
   if (LIVE.files.stock_situation && LIVE.files.stock_movements && LIVE.dq) out.push(...qualityBlock(LIVE));
   return out;
 }
@@ -680,67 +680,138 @@ function tableOf(head, rows, numCols = []) {
     el("tbody", "", rows.map(r => el("tr", "", r.map((c, i) => el("td", numCols.includes(i) ? "n" : "", c)))))));
 }
 
-// ---------- 2. Commande boutique ----------
+// ---------- 2. Commandes ----------
+// Une boutique = une commande simple, plusieurs = une journée. Rien n'est présélectionné (plus de
+// Schedule). La boutique affichée garde son état dans st.* ; les autres onglets dans st.tabs.states.
+const ORDER_KEYS = ["order", "overrides", "seen", "confirmed", "includeOk", "savedId", "why", "f", "sort", "q", "rowOrder", "roundNotes", "xmsg"];
+function emptyState() { return { order: null, overrides: {}, seen: new Set(), confirmed: new Set(), includeOk: false, savedId: null, why: null, f: { cat: "Tous", status: "Tous", qty: false, ev: null }, sort: null, q: "", rowOrder: null, roundNotes: [], xmsg: null }; }
+function tabs() { if (!st.tabs || st.tabs.source !== st.source) { st.tabs = { source: st.source, list: [], params: {}, states: {}, computed: {}, errors: {} }; st.active = null; Object.assign(st, emptyState()); } return st.tabs; }
+function parkActive() { const t = tabs(); if (st.active && t.list.includes(st.active)) t.states[st.active] = Object.fromEntries(ORDER_KEYS.map(k => [k, st[k]])); }
+function activate(b) { if (b === st.active) return; parkActive(); Object.assign(st, tabs().states[b] || emptyState()); st.active = b; render(); }
+function addBoutique(code) {
+  const t = tabs();
+  if (!code || t.list.includes(code) || !DS().boutiques.some(x => x[0] === code)) return;
+  const first = t.list[0];  // les paramètres de la première boutique sont proposés, modifiables
+  t.params[code] = first ? { ...t.params[first] } : { delivery: "", cover: "", coffee: "", mode: "standard" };
+  t.list.push(code); t.states[code] = emptyState();
+  if (!st.active) activate(code); else render();
+}
+function removeBoutique(code) {
+  const t = tabs();
+  t.list = t.list.filter(x => x !== code); delete t.params[code]; delete t.states[code]; delete t.computed[code]; delete t.errors[code];
+  if (st.active === code) { st.active = null; Object.assign(st, emptyState()); if (t.list.length) return activate(t.list[0]); }
+  render();
+}
+// Exécute fn avec l'état d'une autre boutique (résumé, zip), puis remet celui de la boutique affichée.
+function withState(b, fn) {
+  if (b === st.active) return fn();
+  const saved = Object.fromEntries(ORDER_KEYS.map(k => [k, st[k]])), s = tabs().states[b];
+  Object.assign(st, s); try { return fn(); } finally { Object.assign(st, saved); }
+}
+async function computeFor(b) {
+  const t = tabs(), p = t.params[b], missing = [];
+  delete t.errors[b];
+  if (!p.delivery) missing.push("la date de livraison");
+  if (p.cover === "") missing.push("le cover non-café");
+  if (missing.length) { t.errors[b] = "Il manque " + missing.join(", ") + "."; return false; }
+  if (p.delivery < RUN()) { t.errors[b] = "La date de livraison doit être le " + fdate(RUN()) + " ou après."; return false; }
+  const f = { boutique: b, delivery: p.delivery, cover: p.cover, coffee: p.coffee, mode: p.mode };
+  let order;
+  if (DS().live) order = await computeLive(f);
+  else if (b !== M.boutique) order = { error: "Calcul impossible : Aucune ligne de Stock Situation pour la boutique " + b + ". (Démo : seules les données de B80 sont fournies. Pour tes boutiques, dépose tes exports avec « Mes fichiers ».)" };
+  else if (customized()) order = await computeDemoLive(f);
+  else order = { ...f, run_date: RUN() };
+  if (order.error) { t.errors[b] = order.error; return false; }
+  t.computed[b] = JSON.stringify(p);
+  const s = emptyState(); s.order = order;
+  if (b === st.active) Object.assign(st, s); else t.states[b] = s;
+  return true;
+}
+async function computeOne(b) { if (await computeFor(b)) activate(b); render(); }
+async function computeAll() { for (const b of [...tabs().list]) await computeFor(b); if (!st.active && tabs().list.length) activate(tabs().list[0]); render(); }
+const READY_DOT = { "à calculer": "○", "calculé": "◐", "confirmé": "●" };
+// Où en est une boutique : lignes à confirmer, garde-fou des événements, ce qui bloque son LT.
+function readiness(b) {
+  const t = tabs(), s = b === st.active ? st : t.states[b];
+  if (!s.order) return { b, status: "à calculer", reason: "à calculer" };
+  if (t.computed[b] !== JSON.stringify(t.params[b])) return { b, status: "à calculer", reason: "paramètres modifiés, à recalculer" };
+  return withState(b, () => {
+    const ls = lines(), sum = summarize(ls), base = ls.map((_, j) => baseLine(j)), open = ls.filter(x => !isConf(x.m.sku));
+    const review = open.filter(x => x.s === "R").length, blocked = open.filter(x => x.s === "B").length, toTreat = open.filter(x => x.s !== "B").length;
+    const chk = evCheck(base, st.overrides, st.seen, st.confirmed, st.includeOk), reasons = [];
+    if (review || blocked) reasons.push(review + " REVIEW et " + blocked + " BLOCKED à confirmer");
+    if (!chk.ok) reasons.push("vérification des événements à terminer");
+    return { b, status: review || blocked ? "calculé" : "confirmé", ls, sum, base, chk, review, blocked, toTreat, delivery: st.order.delivery, reason: reasons.join(" · "), ready: !reasons.length };
+  });
+}
 function coverSelect(id, value, optional) {
   const s = el("select", { id }); s.append(new Option(optional ? "—" : "Choisir", ""));
   M.covers.forEach((c, i) => s.append(new Option(fmt1(c), String(i))));
   s.value = value; return s;
 }
-function boutiqueInput() {
-  const wrap = el("div", "f", "Boutique");
-  const dl = el("datalist", { id: "btqlist" }, DS().boutiques.map(([b]) => el("option", { value: btqLabel(b) })));
-  const inp = el("input", { type: "search", id: "p_boutique", placeholder: "Rechercher une boutique", value: st.form.boutique ? btqLabel(st.form.boutique) : "" });
+function addRow() {
+  const t = tabs();
+  const dl = el("datalist", { id: "btqlist" }, DS().boutiques.filter(([b]) => !t.list.includes(b)).map(([b]) => el("option", { value: btqLabel(b) })));
+  const inp = el("input", { type: "search", id: "add_boutique", placeholder: "Rechercher par code ou nom", value: "" });
   inp.setAttribute("list", "btqlist");
-  inp.onchange = () => { const v = inp.value.trim(), code = v.split(" — ")[0].trim().toUpperCase(); st.form.boutique = DS().boutiques.some(b => b[0] === code) ? code : ""; render(); };
-  wrap.append(inp, dl); return wrap;
+  inp.onchange = () => { const code = inp.value.split(" — ")[0].trim().toUpperCase(); inp.value = ""; addBoutique(code); };
+  return el("div", "row", { style: "align-items:flex-end" },
+    el("label", { class: "f", style: "flex:1 1 320px" }, "Ajouter une boutique", inp, dl),
+    el("button", { class: "btn", id: "compute_all", disabled: !t.list.length, onclick: computeAll }, "Tout calculer"));
 }
-function compute() {
-  const f = st.form, missing = [];
-  if (!f.boutique) missing.push("la boutique");
-  if (!f.delivery) missing.push("la date de livraison");
-  if (f.cover === "") missing.push("le cover");
-  st.err = "";
-  if (missing.length) { st.err = "Il manque " + missing.join(", ") + "."; return render(); }
-  if (f.delivery < RUN()) { st.err = "La date de livraison doit être le " + fdate(RUN()) + " ou après."; return render(); }
-  if (DS().live) return computeLive(f);
-  if (f.boutique !== M.boutique) { st.err = "Calcul impossible : Aucune ligne de Stock Situation pour la boutique " + f.boutique + ". (Démo : seules les données de B80 sont fournies. Pour tes boutiques, dépose tes exports avec « Mes fichiers ».)"; return render(); }
-  if (customized()) return computeDemoLive(f);
-  st.order = { ...f, run_date: RUN() }; st.overrides = {}; st.seen = new Set(); st.savedId = null; st.why = null; st.xmsg = null;
-  render();
-}
-function paramsRow() {
-  const f = st.form;
-  const delivery = el("input", { type: "date", id: "p_delivery", min: RUN(), value: f.delivery, onchange: e => { f.delivery = e.target.value; render(); } });
-  const cover = coverSelect("p_cover", f.cover); cover.onchange = e => { f.cover = e.target.value; };
-  const coffee = coverSelect("p_coffee", f.coffee, true); coffee.onchange = e => { f.coffee = e.target.value; }; coffee.title = "Facultatif : cover propre aux cafés (type C)";
-  const mode = el("select", { id: "p_mode", onchange: e => { f.mode = e.target.value; } }, Object.entries(MODES).map(([k, v]) => el("option", { value: v }, k))); mode.value = f.mode;
-  const gear = el("div", "gear", el("button", { class: "btn", title: "Options avancées", "aria-expanded": String(st.gear), onclick: () => { st.gear = !st.gear; render(); } }, ic("tune")));
-  if (st.gear) gear.append(el("div", "pop",
-    el("label", "f", "Semaines de secours (SKU dormants)", el("input", { type: "number", value: 4, disabled: true, title: "Démo : 4 semaines" })),
-    el("div", "f", "Codes de mouvement comptés", el("span", "small", { style: "font-weight:400" }, M.codes.join(", ") || "—"), el("span", { class: "small muted", style: "font-weight:400" }, "Tous inclus (ventes et déstockages).")),
-    el("label", { style: "display:flex;gap:8px;align-items:center;font-size:14px" }, el("input", { type: "checkbox", checked: st.examples, onchange: e => setExamples(e.target.checked) }), "Exemples d'allocation, lancement, stock cible")));
-  const row = el("div", "params",
-    boutiqueInput(),
-    el("label", "f", "Livraison", delivery),
-    el("label", "f", "Cover (j)", cover),
-    el("label", "f", "Cover café", coffee),
-    el("label", "f", "Historique (j)", el("input", { type: "number", id: "p_hist", value: 7, disabled: true, title: "7 jours de mouvements" })),
-    el("label", "f", "Mode", mode),
-    gear,
-    el("div", "bt", el("button", { class: "btn primary", id: "compute", onclick: compute, style: "width:100%" }, "Calculer")));
-  const out = [row];
-  if (f.boutique) {
-    const slot = plannedMap()[f.boutique];
-    if (slot && slot !== f.delivery) out.push(el("div", { style: "margin-top:8px" }, el("button", { class: "btn", onclick: () => { f.delivery = slot; render(); } }, "Livraison selon le Schedule : " + frday(slot))));
-    else if (!slot) out.push(el("p", "small muted", "Pas de commande prévue au Schedule le " + frday(RUN()) + " pour cette boutique."));
+function paramsTable() {
+  const t = tabs(), rows = t.list.map(b => {
+    const p = t.params[b];
+    const dt = el("input", { type: "date", min: RUN(), value: p.delivery, onchange: e => { p.delivery = e.target.value; render(); } });
+    const cv = coverSelect("p_cover_" + b, p.cover); cv.onchange = e => { p.cover = e.target.value; render(); };
+    const cf = coverSelect("p_coffee_" + b, p.coffee, true); cf.onchange = e => { p.coffee = e.target.value; render(); }; cf.title = "Facultatif : cover propre aux cafés (type C)";
+    const mode = el("select", { onchange: e => { p.mode = e.target.value; render(); } }, Object.entries(MODES).map(([k, v]) => el("option", { value: v }, k))); mode.value = p.mode;
+    const stale = t.computed[b] && t.computed[b] !== JSON.stringify(p);
+    return [el("span", "mono", btqLabel(b)), dt, cv, cf, el("input", { type: "number", value: 7, disabled: true, title: "7 jours de mouvements" }), mode,
+      el("button", { class: "btn" + (t.computed[b] && !stale ? "" : " primary"), id: "compute_" + b, onclick: () => computeOne(b) }, "Calculer")];
+  });
+  const out = [tableOf(["Boutique", "Livraison", "Cover non-café (j)", "Cover café (j)", "Historique (j)", "Mode", ""], rows)];
+  for (const b of t.list) {
+    if (t.errors[b]) out.push(el("div", "msg err", b + " : " + t.errors[b]));
+    else if (t.computed[b] && t.computed[b] !== JSON.stringify(t.params[b])) out.push(el("p", "small", { style: "color:#94600F;margin:4px 0" }, "⚠ " + b + " : paramètres modifiés depuis le calcul, recalcule pour les appliquer."));
   }
+  out.push(el("div", "row small muted", { style: "margin:4px 0 10px" },
+    el("label", { style: "display:flex;gap:8px;align-items:center" }, el("input", { type: "checkbox", checked: st.examples, onchange: e => setExamples(e.target.checked) }), "Exemples d'allocation, lancement, stock cible"),
+    el("span", "", "Codes de mouvement comptés : " + (M.codes.join(", ") || "—") + " (tous, ventes et déstockages) · semaines de secours : 4")));
   if (st.busy) out.push(el("div", "msg info busy", st.busy));
-  if (st.err) out.push(el("div", "msg err", st.err));
+  return out;
+}
+function tabBar(states) {
+  return el("div", "tabbar", tabs().list.map(b => {
+    const r = states[b];
+    return el("span", "tag" + (b === st.active ? " on" : ""),
+      el("button", { class: "tb", id: "tab_open_" + b, onclick: () => activate(b) }, READY_DOT[r.status] + " " + b + " · " + r.status + (r.ls ? " · REVIEW " + r.review + " · BLOCKED " + r.blocked : "")),
+      el("button", { "aria-label": "Retirer " + b, id: "tab_close_" + b, title: "Retirer " + b, onclick: () => removeBoutique(b) }, "×"));
+  }));
+}
+function recapTable(states) {
+  const list = tabs().list, done = list.map(b => states[b]).filter(r => r.ls);
+  const rows = list.map(b => { const r = states[b]; return [el("span", "mono", b), r.status, r.ls ? fdate(r.delivery) : "—", r.ls ? fmt(r.sum.units) : "—", r.ls ? fmt1(r.sum.palTotal) : "—", r.ls ? fmt(r.toTreat) : "—", r.ls ? el("span", "st R", String(r.review)) : "—", r.ls ? el("span", "st B", String(r.blocked)) : "—"]; });
+  rows.push([el("b", "", "Total"), done.length + " / " + list.length + " calculée(s)", "", el("b", "", fmt(done.reduce((a, r) => a + r.sum.units, 0))), el("b", "", fmt1(done.reduce((a, r) => a + r.sum.palTotal, 0))),
+    el("b", "", fmt(done.reduce((a, r) => a + r.toTreat, 0))), el("b", "", fmt(done.reduce((a, r) => a + r.review, 0))), el("b", "", fmt(done.reduce((a, r) => a + r.blocked, 0)))]);
+  return tableOf(["Boutique", "Statut", "Livraison", "Unités", "Palettes", "À traiter", "REVIEW", "BLOCKED"], rows, [3, 4, 5, 6, 7]);
+}
+function renderOrders() {
+  const t = tabs(), out = [el("h1", "", "Commandes"), addRow()];
+  if (!t.list.length) { out.push(el("p", "small muted", "Ajoute une boutique pour une commande simple, plusieurs pour une journée. Rien n'est présélectionné.")); return out; }
+  out.push(...paramsTable());
+  const states = Object.fromEntries(t.list.map(b => [b, readiness(b)]));
+  out.push(tabBar(states), recapTable(states));
+  if (!st.active) return out;
+  if (!st.order) { out.push(el("div", "msg info", st.active + " : saisis la date de livraison et le cover, puis « Calculer ».")); return out; }
+  out.push(el("hr", { style: "border:0;border-top:1px solid var(--border);margin:14px 0" }));
+  out.push(...orderBody(), ...ltBlock(states));
   return out;
 }
 function setExamples(on) {
-  st.examples = on; store.set("spc2_examples", on); st.overrides = {}; st.savedId = null;
-  if (st.order && st.order.live) { st.order = null; st.err = "Entrées métier changées : recalcule la commande."; }
+  st.examples = on; store.set("spc2_examples", on);
+  const t = tabs(), live = t.list.some(b => { const s = b === st.active ? st : t.states[b]; return s.order && s.order.live; });
+  if (live) invalidateOrder("Entrées métier changées"); else { t.list.forEach(b => { (b === st.active ? st : t.states[b]).overrides = {}; }); st.savedId = null; }
   render();
 }
 function categoryOf(m) { return categories()[(m.type || "").trim().toUpperCase()] || "Autres"; }
@@ -840,10 +911,8 @@ function orderTable(rows, baseQty) {
 function segmented(label, options, value, counts, onpick) {
   return el("div", "f", label, el("div", "seg", options.map(o => el("button", { class: value === o ? "on" : "", onclick: () => onpick(o) }, o, el("b", "", String(counts[o] || 0))))));
 }
-function renderOrder() {
-  const out = [el("h1", "", "Commande boutique"), ...paramsRow()];
-  if (!st.order) return out;
-  const o = st.order, ls = lines(), s = summarize(ls), v = V(o);
+function orderBody() {
+  const out = [], o = st.order, ls = lines(), s = summarize(ls), v = V(o);
   const baseQty = {}; for (let j = 0; j < ls.length; j++) baseQty[ls[j].m.sku] = baseLine(j).qty;
   out.push(el("div", "ctx", el("b", "", btqLabel(o.boutique)), " · DC " + v.dc + " · livraison ", el("b", "", fdate(o.delivery)),
     " · cover " + fmt1(M.covers[+o.cover]) + " j" + (o.coffee !== "" ? " (café " + fmt1(M.covers[+o.coffee]) + " j)" : "") + " · historique " + v.hd + " j · " + MODE_LABEL[o.mode] + (st.examples ? " · entrées métier" : "") + (o.live ? (st.source === "live" ? " · tes fichiers" : " · démo recalculée avec tes modifications") : " · démo")));
@@ -873,8 +942,47 @@ function renderOrder() {
   out.push(shown.length ? orderTable(shown, baseQty) : el("div", "msg info", "Aucune ligne pour ces filtres."));
   out.push(el("div", "row", { style: "justify-content:space-between;margin-top:8px" },
     el("span", "small muted", shown.length + " ligne(s) affichée(s) sur " + ls.length + " · lignes confirmées : " + ls.filter(x => isConf(x.m.sku)).length + " / " + ls.length + " · clic sur un en-tête pour trier, sur une ligne pour le détail"),
-    el("span", "row", el("button", { class: "btn", onclick: () => go(PAGES[4]) }, "Événements SKU"), el("button", { class: "btn primary", onclick: () => go(PAGES[3]) }, "Continuer vers l'export"))));
+    el("span", "row", el("button", { class: "btn", onclick: () => go(PAGES[3]) }, "Événements SKU"), el("button", { class: "btn", onclick: () => go(PAGES[2]) }, "Récap et Excel détaillé"))));
   return out;
+}
+// Fichiers LT : la boutique affichée, ou toutes (zip). Chaque téléchargement passe par le garde-fou :
+// lignes REVIEW et BLOCKED confirmées (D-039) et les 3 points des événements SKU.
+function ltBlock(states) {
+  const out = [el("h3", "", "Fichiers LT")], ls = lines(), s = summarize(ls), now = new Date(), b0 = st.order.boutique, name = ltName(b0, now);
+  const na = needAuthor(); if (na) out.push(na);
+  const mine = states[b0], todo = mine.review + mine.blocked;
+  if (todo) out.push(el("div", "msg err", todo + " ligne(s) à confirmer avant le fichier LT de " + b0 + " (" + mine.review + " REVIEW, " + mine.blocked + " BLOCKED). Coche « Confirmé » dans la table, ligne par ligne ou avec « Confirmer les lignes affichées »."));
+  const base = mine.base || [], chk = evCheck(base, st.overrides, st.seen, st.confirmed, st.includeOk);
+  if (chk.blocked.length || chk.unval.length || chk.inc.length) out.push(gateCard(chk, st.includeOk,
+    () => { chk.blocked.forEach(k => st.confirmed.add(k)); logValidation("confirm_block", b0, chk.blocked); render(); },
+    () => { chk.unval.forEach(k => st.seen.add(k)); logValidation("seen", b0, chk.unval); render(); },
+    on => { st.includeOk = on; logValidation("include", b0, chk.inc, on ? "coché" : "décoché"); render(); },
+    chk.unval.length && !st.evViewed.has(viewKey(b0, st.order.delivery)) ? [b0] : []));
+  const box = el("div");
+  if (st.xmsg) box.append(st.xmsg);
+  const requests = [...new Set(base.flatMap(x => x.ev.filter(e => e.type === "store_request").map(e => e.id)))];
+  const list = tabs().list, waiting = list.filter(b => !states[b].ready);
+  out.push(el("div", "row",
+    el("button", { class: "btn primary", id: "dl_lt", disabled: !st.author || !chk.ok || todo > 0, onclick: async () => {
+      const text = ltText(ls); if (!text) return box.replaceChildren(el("div", "msg info", "Aucune ligne à commander : pas de fichier LT."));
+      if (await offer(name, text, box, "Fichier « " + name + " » téléchargé (" + s.ordered + " lignes).")) { saveRun(ls, name); st.toClose = [...new Set([...st.toClose, ...requests])]; st.xmsg = box.firstChild; render(); }
+    } }, "Télécharger le LT de " + b0),
+    el("button", { class: "btn", id: "dl_zip", disabled: !st.author || waiting.length > 0, onclick: () => zipAll(states, box) }, "Télécharger tous les LT (zip, " + list.length + " boutique(s))")));
+  if (waiting.length) out.push(el("p", "small muted", "Le zip attend que chaque boutique soit prête. Encore bloquée(s) : " + waiting.map(b => b + " : " + states[b].reason).join(" · ")));
+  out.push(box, ...closeRequestsPrompt());
+  out.push(el("p", "small muted", "Le fichier LT s'importe à la main dans Nessoft : l'outil n'y écrit jamais."));
+  return out;
+}
+async function zipAll(states, box) {
+  const now = new Date(), files = [];
+  for (const b of tabs().list) withState(b, () => {
+    const ls = lines(), text = ltText(ls), name = ltName(b, now);
+    states[b].base.forEach(x => x.ev.forEach(e => { if (e.type === "store_request" && !st.toClose.includes(e.id)) st.toClose.push(e.id); }));
+    if (text) { files.push([name, text]); saveRun(ls, name); }
+  });
+  if (!files.length) return box.replaceChildren(el("div", "msg info", "Aucune ligne à commander."));
+  await offer("LT " + now.getFullYear() + "-" + pad(now.getMonth() + 1) + "-" + pad(now.getDate()) + " " + pad(now.getHours()) + "_" + pad(now.getMinutes()) + ".zip", zipStore(files), box, files.length + " fichier(s) LT dans le zip.");
+  render();
 }
 
 function eventBanner(o, ls) {
@@ -889,7 +997,7 @@ function eventBanner(o, ls) {
     out.push(el("p", "small muted", { style: "margin:2px 0 0" }, "Clic sur un événement pour filtrer la table." + (o.live ? "" : " Démo : événements évalués pour une livraison le " + fdate(DATA.demo_delivery) + ".")));
   }
   const others = evAll().filter(e => e.scope === "personal" && e.status === "active" && !appliesToMe(e) && targets(e, o.boutique, V(o).dc) && inWindow(e, evDay(o)));
-  if (others.length) out.push(el("div", "msg info", "Événements personnels d'autres planners pour cette boutique, non appliqués : " + others.map(e => "« " + e.title + " » (" + e.planner + ")").join(", ") + ". Ouvre « 5. Événements SKU » → « Reprendre » pour les appliquer."));
+  if (others.length) out.push(el("div", "msg info", "Événements personnels d'autres planners pour cette boutique, non appliqués : " + others.map(e => "« " + e.title + " » (" + e.planner + ")").join(", ") + ". Ouvre « 4. Événements SKU » → « Reprendre » pour les appliquer."));
   return out;
 }
 
@@ -981,109 +1089,7 @@ function renderWhy() {
     msg].filter(Boolean));
 }
 
-// ---------- 3. Journée ----------
-function dayState() {
-  if (!st.day || st.day.source !== st.source) st.day = { source: st.source, chosen: DS().planned.map(p => p[0]).filter(b => DS().boutiques.some(x => x[0] === b)), rows: {}, mode: "standard", outcomes: null, err: "" };
-  for (const b of st.day.chosen) if (!st.day.rows[b]) st.day.rows[b] = { delivery: plannedMap()[b] || "", confirmed: false, cover: "", coffee: "" };
-  return st.day;
-}
-function renderDay() {
-  const d = dayState(), out = [el("h1", "", "Journée")];
-  const add = el("input", { type: "search", id: "day_add", placeholder: "Ajouter une boutique" }); add.setAttribute("list", "btqlist2");
-  add.onchange = () => { const code = add.value.split(" — ")[0].trim().toUpperCase(); if (DS().boutiques.some(x => x[0] === code) && !d.chosen.includes(code)) { d.chosen.push(code); render(); $("day_add")?.focus(); } };
-  out.push(el("div", "row", { style: "align-items:flex-start" },
-    el("div", { class: "f", style: "flex:1 1 420px" }, "Boutiques", el("div", "sel-btq", d.chosen.map(b => el("span", "tag", b, el("button", { "aria-label": "Retirer " + b, onclick: () => { d.chosen = d.chosen.filter(x => x !== b); render(); } }, "×"))), add,
-      el("datalist", { id: "btqlist2" }, DS().boutiques.map(([b]) => el("option", { value: btqLabel(b) }))))),
-    el("label", { class: "f", style: "width:110px" }, "Historique (j)", el("input", { type: "number", value: 7, disabled: true })),
-    el("label", { class: "f", style: "width:150px" }, "Mode", (() => { const s = el("select", { onchange: e => { d.mode = e.target.value; } }, Object.entries(MODES).map(([k, v]) => el("option", { value: v }, k))); s.value = d.mode; return s; })())));
-  out.push(el("p", "small muted", "Présélection du Schedule pour le " + fdate(RUN()) + " : " + DS().planned.length + " boutique(s), modifiable."));
-  const rows = d.chosen.map(b => {
-    const r = d.rows[b];
-    const dt = el("input", { type: "date", min: RUN(), value: r.delivery, onchange: e => { r.delivery = e.target.value; } });
-    const ok = el("input", { type: "checkbox", checked: r.confirmed, onchange: e => { r.confirmed = e.target.checked; } });
-    const cv = coverSelect("dc_" + b, r.cover); cv.onchange = e => { r.cover = e.target.value; };
-    const cf = coverSelect("df_" + b, r.coffee, true); cf.onchange = e => { r.coffee = e.target.value; };
-    return [el("span", "mono", b), names()[b] || "", dt, ok, cv, cf];
-  });
-  out.push(tableOf(["Boutique", "Nom", "Livraison", "Date confirmée", "Cover (j)", "Cover café (j)"], rows));
-  out.push(el("div", "row", { style: "margin-top:10px" },
-    el("button", { class: "btn", disabled: !d.chosen.length, onclick: () => { d.chosen.forEach(b => { if (d.rows[b].delivery) d.rows[b].confirmed = true; }); render(); } }, "Confirmer les dates suggérées"),
-    el("button", { class: "btn primary", id: "day_compute", onclick: async () => {
-      d.err = ""; const errors = [];
-      if (!d.chosen.length) d.err = "Choisis au moins une boutique.";
-      for (const b of d.chosen) { const r = d.rows[b]; if (!r.delivery || !r.confirmed) errors.push(b + " : date de livraison à saisir ou confirmer"); else if (r.cover === "") errors.push(b + " : cover manquant"); }
-      if (errors.length) d.err = errors.join(" · ");
-      if (d.err) { d.outcomes = null; return render(); }
-      if (!DS().live && !customized()) {
-        d.outcomes = d.chosen.map(b => b === M.boutique ? { b, r: { ...d.rows[b] } } : { b, error: "Aucune ligne de Stock Situation pour la boutique " + b + " (démo : B80 seulement)" });
-        return render();
-      }
-      if (!DS().live) {
-        try { await demoEngine(m => { st.busy = m; render(); }); }
-        catch (e) { st.busy = ""; d.err = "Le moteur n'a pas pu démarrer ici (" + String((e && e.message) || e).slice(0, 160) + ")."; return render(); }
-      }
-      const outs = [];
-      for (const [i, b] of d.chosen.entries()) {
-        st.busy = "Calcul " + (i + 1) + " / " + d.chosen.length + " : " + b + "…"; render(); await new Promise(r => setTimeout(r, 0));
-        const r = { ...d.rows[b] }, out = livePlan({ boutique: b, delivery: r.delivery, cover: r.cover, coffee: r.coffee, mode: d.mode });
-        outs.push(out.error ? { b, error: out.error.replace("Calcul impossible : ", "") } : { b, r, live: out });
-      }
-      st.busy = ""; d.outcomes = outs; render();
-    } }, "Calculer toutes les commandes")));
-  if (d.err) out.push(el("div", "msg err", d.err));
-  if (d.outcomes) {
-    const prev = st.order, res = [], checks = [];
-    d.checks = d.checks || {};
-    for (const o of d.outcomes) {
-      if (o.error) { res.push([btqLabel(o.b), "—", "", "", "", "", "", "", el("span", "st B", o.error), ""]); continue; }
-      st.order = { boutique: o.b, delivery: o.r.delivery, cover: o.r.cover, coffee: o.r.coffee, mode: d.mode, live: o.live || null, run_date: RUN() };
-      const saveOv = st.overrides; st.overrides = {}; const ls0 = lines(), s = summarize(ls0); st.overrides = saveOv;
-      const order = st.order, base = ls0.map((_, j) => baseLine(j));
-      const ck = d.checks[o.b] = d.checks[o.b] || { seen: new Set(), blocks: new Set(), include: false };
-      checks.push([o.b, evCheck(base, {}, ck.seen, ck.blocks, ck.include), ck, o.r.delivery]);
-      const teamN = new Set(base.filter(x => x.ev.some(e => e.scope === "t")).map(x => x.m.sku)).size, persN = new Set(base.filter(x => x.ev.some(e => e.scope === "p")).map(x => x.m.sku)).size;
-      res.push([btqLabel(o.b), frday(o.r.delivery), fmt(s.ordered), fmt(s.units), fmt1(s.palTotal), el("span", "st R", String(s.by.R)), el("span", "st B", String(s.by.B)),
-        teamN || persN ? el("span", { title: "SKU flagués : ● équipe · ○ personnel" }, "● " + teamN + " · ○ " + persN) : "—", V(order).warnings.join(" | ") || "—",
-        el("button", { class: "btn", onclick: () => { st.form = { ...order }; st.order = { ...order }; st.overrides = {}; st.seen = new Set(); st.savedId = null; go(PAGES[1]); } }, "Ouvrir")]);
-    }
-    st.order = prev;
-    out.push(el("h3", "", "Résultats"), tableOf(["Boutique", "Livraison", "Lignes", "Unités", "Palettes", "REVIEW", "BLOCKED", "Événements", "Alertes", ""], res, [2, 3, 4]));
-    const okOnes = d.outcomes.filter(o => !o.error);
-    const pre = (b, list) => checks.length > 1 ? list.map(x => b + " " + x) : list;
-    const all = { blocked: checks.flatMap(([b, c]) => pre(b, c.blocked)), unval: checks.flatMap(([b, c]) => pre(b, c.unval)), inc: checks.flatMap(([b, c]) => pre(b, c.inc)) };
-    const incOk = checks.every(([, c, k]) => !c.inc.length || k.include);
-    all.ok = !all.blocked.length && !all.unval.length && (!all.inc.length || incOk); all.multi = checks.length > 1;
-    const toOpen = checks.filter(([b, c, , dl]) => c.unval.length && !st.evViewed.has(viewKey(b, dl))).map(([b]) => b);
-    if (all.blocked.length || all.unval.length || all.inc.length) out.push(gateCard(all, incOk,
-      () => { checks.forEach(([b, c, k]) => { if (c.blocked.length) { c.blocked.forEach(x => k.blocks.add(x)); logValidation("confirm_block", b, c.blocked); } }); render(); },
-      () => { checks.forEach(([b, c, k]) => { if (c.unval.length) { c.unval.forEach(x => k.seen.add(x)); logValidation("seen", b, c.unval); } }); render(); },
-      on => { checks.forEach(([b, c, k]) => { if (c.inc.length) { k.include = on; logValidation("include", b, c.inc, on ? "coché" : "décoché"); } }); render(); }, toOpen));
-    if (okOnes.length) {
-      const m2 = el("div");
-      out.push(el("div", { style: "margin-top:10px" }, el("button", { class: "btn primary", id: "day_zip", disabled: !st.author || !all.ok, onclick: () => dayZip(okOnes, m2) }, okOnes.length === 1 ? "Télécharger le fichier LT (zip)" : "Télécharger les " + okOnes.length + " fichiers LT (zip)")), m2);
-      if (!st.author) out.push(el("p", "small muted", "Choisis ton prénom (Planner, barre de gauche) pour télécharger."));
-    }
-  }
-  out.push(...closeRequestsPrompt());
-  return out;
-}
-async function dayZip(okOnes, box) {
-  const now = new Date(), files = [];
-  const prev = st.order, prevOv = st.overrides;
-  for (const o of okOnes) {
-    st.order = { boutique: o.b, delivery: o.r.delivery, cover: o.r.cover, coffee: o.r.coffee, mode: st.day.mode, live: o.live || null, run_date: RUN() }; st.overrides = {};
-    const ls = lines(), text = ltText(ls);
-    ls.forEach((_, j) => baseLine(j).ev.forEach(e => { if (e.type === "store_request" && !st.toClose.includes(e.id)) st.toClose.push(e.id); }));
-    if (text) { files.push([ltName(o.b, now), text]); saveRun(ls, ltName(o.b, now), true); }
-    st.order = prev; st.overrides = prevOv;
-  }
-  st.order = prev; st.overrides = prevOv;
-  if (!files.length) return box.replaceChildren(el("div", "msg info", "Aucune ligne à commander."));
-  await offer("LT " + now.getFullYear() + "-" + pad(now.getMonth() + 1) + "-" + pad(now.getDate()) + " " + pad(now.getHours()) + "_" + pad(now.getMinutes()) + ".zip", zipStore(files), box, files.length + " fichier(s) LT dans le zip.");
-  box.append(...closeRequestsPrompt());
-}
-
-// ---------- 4. Export ----------
+// ---------- 3. Export ----------
 function ltName(b, d) { return b + " " + pad(d.getDate()) + "-" + MONTHS[d.getMonth()] + "-" + d.getFullYear() + "-" + pad(d.getHours()) + "_" + pad(d.getMinutes()) + ".csv"; }
 function ltText(ls) { return ls.filter(x => x.qty > 0).map(x => x.m.sku + ";" + x.qty + "\r\n").join(""); }
 function recapText(ls, s) {
@@ -1097,49 +1103,33 @@ function recapText(ls, s) {
   if (s.noPal.length) out.push("Sans taille de palette;" + q(s.noPal.join(", ")));
   return out.join("\r\n") + "\r\n";
 }
-function saveRun(ls, lt, fromDay) {
+function saveRun(ls, lt) {
   if (!st.author) return null;
-  if (!fromDay && st.savedId) { if (lt) { const runs = store.get("spc2_runs", []); const r = runs.find(x => x.id === st.savedId); if (r) { r.lt = lt; store.set("spc2_runs", runs); } } return st.savedId; }
+  if (st.savedId) { if (lt) { const runs = store.get("spc2_runs", []); const r = runs.find(x => x.id === st.savedId); if (r) { r.lt = lt; store.set("spc2_runs", runs); } } return st.savedId; }
   const runs = store.get("spc2_runs", []), s = summarize(ls), id = runs.reduce((m, r) => Math.max(m, r.id), 0) + 1, qty = {};
   ls.forEach(x => { if (x.qty > 0) qty[x.m.sku] = x.qty; });
-  const ovs = fromDay ? [] : Object.entries(st.overrides).map(([sku, o]) => ({ sku, ...o }));
+  const ovs = Object.entries(st.overrides).map(([sku, o]) => ({ sku, ...o }));
   runs.unshift({ id, created: new Date().toISOString(), author: st.author, boutique: st.order.boutique, delivery: st.order.delivery, cover: M.covers[+st.order.cover],
                  mode: st.order.mode, lines: s.ordered, units: s.units, qty, overrides: ovs, lt: lt || "" });
   if (!store.set("spc2_runs", runs)) return null;
-  if (!fromDay) st.savedId = id;
+  st.savedId = id;
   return id;
 }
 function renderExport() {
   const out = [el("h1", "", "Export")];
-  if (!st.order) return [...out, el("div", "msg info", "Calcule d'abord une commande."), el("button", { class: "btn", onclick: () => go(PAGES[1]) }, "Aller à la commande boutique")];
+  if (!st.order) return [...out, el("div", "msg info", "Calcule d'abord une commande."), el("button", { class: "btn", onclick: () => go(PAGES[1]) }, "Aller aux commandes")];
   const ls = lines(), s = summarize(ls), now = new Date(), name = ltName(st.order.boutique, now);
   out.push(el("p", "", el("b", "", btqLabel(st.order.boutique)), " · livraison ", el("b", "", fdate(st.order.delivery)), " · " + fmt(s.ordered) + " lignes · " + fmt(s.units) + " unités · " + fmt1(s.palTotal) + " palettes"));
-  out.push(el("p", "", "Fichier LT : ", el("span", "mono", name), " · généré le " + pad(now.getDate()) + "/" + pad(now.getMonth() + 1) + "/" + now.getFullYear() + " à " + pad(now.getHours()) + ":" + pad(now.getMinutes())));
-  // D-039 : le fichier LT attend que chaque ligne REVIEW ou BLOCKED soit confirmée.
-  const todo = ls.filter(x => x.s !== "O" && !isConf(x.m.sku)), nRev = todo.filter(x => x.s === "R").length;
-  if (todo.length) out.push(el("div", "msg err", todo.length + " ligne(s) à confirmer avant le fichier LT (" + nRev + " REVIEW, " + (todo.length - nRev) + " BLOCKED). Coche « Confirmé » dans la commande, ligne par ligne ou avec « Confirmer les lignes affichées ». ",
-    el("button", { class: "btn", onclick: () => go(PAGES[1]) }, "Retour à la commande")));
+  out.push(el("p", "", "Nom de base des fichiers : ", el("span", "mono", name.slice(0, -4)), " · " + pad(now.getDate()) + "/" + pad(now.getMonth() + 1) + "/" + now.getFullYear() + " à " + pad(now.getHours()) + ":" + pad(now.getMinutes())));
+  out.push(el("p", "small muted", "Le fichier LT se télécharge dans la page Commandes, sous la table de la boutique."));
   const na = needAuthor(); if (na) out.push(na);
-  const base = []; for (let j = 0; j < ls.length; j++) base.push(baseLine(j));
-  const chk = evCheck(base, st.overrides, st.seen, st.confirmed, st.includeOk), b0 = st.order.boutique;
-  if (chk.blocked.length || chk.unval.length || chk.inc.length) out.push(gateCard(chk, st.includeOk,
-    () => { chk.blocked.forEach(k => st.confirmed.add(k)); logValidation("confirm_block", b0, chk.blocked); render(); },
-    () => { chk.unval.forEach(k => st.seen.add(k)); logValidation("seen", b0, chk.unval); render(); },
-    on => { st.includeOk = on; logValidation("include", b0, chk.inc, on ? "coché" : "décoché"); render(); },
-    chk.unval.length && !st.evViewed.has(viewKey(b0, st.order.delivery)) ? [b0] : []));
   const box = el("div");
   if (st.xmsg) box.append(st.xmsg);
-  const requests = [...new Set(base.flatMap(x => x.ev.filter(e => e.type === "store_request").map(e => e.id)))];
   out.push(el("div", "row",
-    el("button", { class: "btn primary", id: "dl_lt", disabled: !st.author || !chk.ok || todo.length > 0, onclick: async () => {
-      const text = ltText(ls); if (!text) return box.replaceChildren(el("div", "msg info", "Aucune ligne à commander : pas de fichier LT."));
-      if (await offer(name, text, box, "Fichier « " + name + " » téléchargé (" + s.ordered + " lignes).")) { saveRun(ls, name); st.toClose = [...new Set([...st.toClose, ...requests])]; st.xmsg = box.firstChild; render(); }
-    } }, "Télécharger le fichier LT (SKU;QTY)"),
     el("button", { class: "btn", disabled: !st.author, onclick: () => offer("Recap " + name, recapText(ls, s), box, "Récapitulatif téléchargé.") }, "Récapitulatif boutique"),
     el("button", { class: "btn", disabled: true, title: "Disponible dans l'outil installé" }, "Export Excel détaillé"),
-    el("button", { class: "btn", id: "save_run", disabled: !st.author, onclick: () => { const id = saveRun(ls); st.xmsg = id ? el("div", "msg ok", "Commande n° " + id + " enregistrée (7. Historique).") : el("div", "msg err", "Ton navigateur bloque l'enregistrement local."); render(); } }, "Enregistrer sans exporter")));
+    el("button", { class: "btn", id: "save_run", disabled: !st.author, onclick: () => { const id = saveRun(ls); st.xmsg = id ? el("div", "msg ok", "Commande n° " + id + " enregistrée (6. Historique).") : el("div", "msg err", "Ton navigateur bloque l'enregistrement local."); render(); } }, "Enregistrer sans exporter")));
   out.push(box);
-  out.push(...closeRequestsPrompt());
   if (st.validations.length) out.push(el("details", "", el("summary", "", "Validations tracées (" + st.validations.length + ")"),
     tableOf(["Quand", "Qui", "Boutique", "Validation", "SKU", "Note"], st.validations.slice(0, 60).map(v => [v.at.slice(0, 16).replace("T", " "), v.who, v.boutique, { seen: "Vu", confirm_block: "Blocage confirmé", include: "Inclusion vérifiée", close_request: "Demande terminée", takeover: "Repris" }[v.kind] || v.kind, (v.skus || []).join(", "), v.note]))));
   out.push(el("p", "small muted", "Importe le fichier LT dans Nessoft à la main : l'outil n'y écrit jamais. L'export Excel détaillé est disponible dans l'outil installé."));
@@ -1189,7 +1179,7 @@ function zipStore(files) {
   return out;
 }
 
-// ---------- 5. Événements SKU ----------
+// ---------- 4. Événements SKU ----------
 // Démo : 4 événements fictifs au départ. Créer, modifier, dupliquer, terminer ou annuler :
 // l'événement est vérifié par le moteur Python (mêmes règles que l'outil installé), gardé
 // dans ce navigateur, et la commande B80 est recalculée avec lui.
@@ -1279,8 +1269,7 @@ function takeOver(e, on) {
   if (!st.author) { st.evMsg = "Choisis ton prénom (Planner, barre de gauche) pour reprendre."; return render(); }
   on ? st.taken.add(e.id) : st.taken.delete(e.id);
   if (on) logValidation("takeover", e.boutiques[0] || "", e.skus.map(x => x.sku), "« " + e.title + " » de " + e.planner);
-  st.overrides = {}; st.seen = new Set(); st.confirmed = new Set(); st.includeOk = false; st.f.ev = null;
-  if (st.order && st.order.live) { st.order = null; st.err = "Événement repris : recalcule la commande."; }
+  invalidateOrder("Événement repris");
   render();
 }
 function evPanel(e, day) {
@@ -1367,7 +1356,7 @@ function renderEvents() {
   return out;
 }
 
-// ---------- 6. Référentiels ----------
+// ---------- 5. Référentiels ----------
 // Chaque table est modifiable : cellules, lignes ajoutées ou retirées, puis « Enregistrer ».
 // La table est relue par le moteur Python avec les mêmes lecteurs qu'à l'import : une
 // erreur bloque l'enregistrement avec sa raison. Gardée dans ce navigateur.
@@ -1480,7 +1469,7 @@ function categoriesEditor() {
     el("div", { id: "catmsg" }, msg)];
 }
 
-// ---------- 7. Historique ----------
+// ---------- 6. Historique ----------
 function renderHistory() {
   const out = [el("h1", "", "Historique")], runs = store.get("spc2_runs", []);
   if (!runs.length) return [...out, el("div", "msg info", "Aucune commande enregistrée pour l'instant."), el("p", "small muted", "Dans cette démo, les commandes restent dans ton navigateur. Dans l'outil installé, elles vont dans la base locale.")];
@@ -1512,7 +1501,7 @@ function renderHistory() {
   return out;
 }
 
-const SCREENS = { [PAGES[0]]: renderDepot, [PAGES[1]]: renderOrder, [PAGES[2]]: renderDay, [PAGES[3]]: renderExport, [PAGES[4]]: renderEvents, [PAGES[5]]: renderRefs, [PAGES[6]]: renderHistory };
+const SCREENS = { [PAGES[0]]: renderDepot, [PAGES[1]]: renderOrders, [PAGES[2]]: renderExport, [PAGES[3]]: renderEvents, [PAGES[4]]: renderRefs, [PAGES[5]]: renderHistory };
 let rendering = false;
 function render() {
   // Un champ retiré pendant le rendu peut déclencher « change » : on reporte ce rendu-là.

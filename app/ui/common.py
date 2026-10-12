@@ -27,14 +27,13 @@ from app.ui.workspace import DEMO_EXTRACTION, DayData, Workspace, demo_workspace
 
 PAGES = (
     "1. Dépôt du jour",
-    "2. Commande boutique",
-    "3. Journée",
-    "4. Export",
-    "5. Événements SKU",
-    "6. Référentiels",
-    "7. Historique",
+    "2. Commandes",
+    "3. Export",
+    "4. Événements SKU",
+    "5. Référentiels",
+    "6. Historique",
 )
-DEPOT, ORDER, DAY, EXPORT, EVENTS, REFS, HISTORY = PAGES
+DEPOT, ORDER, EXPORT, EVENTS, REFS, HISTORY = PAGES
 
 MODES = {"Standard": ForecastMode.STANDARD, "Parité Excel": ForecastMode.EXCEL_PARITY}
 MODE_LABEL = {v.value: k for k, v in MODES.items()} | {"safe": "Standard"}
@@ -87,7 +86,8 @@ def init_state() -> None:
         "overrides": {},  # sku -> Override
         "seen": set(),  # SKU vérifiés par le planner
         "saved_run_id": None,
-        "day_outcomes": None,
+        "orders": {},  # Commandes : boutique -> paramètres, résultat et validations (ordre d'ajout)
+        "active": None,  # boutique affichée dans la page Commandes
         "nonce": 0,
         "why_sku": None,
         "author": None,
@@ -95,7 +95,6 @@ def init_state() -> None:
         "confirmed_blocks": set(),  # SKU bloqués par un événement, blocage confirmé
         "include_ok": False,  # lancements / demandes à inclure confirmés
         "requests_to_close": [],  # demandes boutique à terminer après l'export
-        "day_checks": {},  # Journée : validations par boutique
         "events_viewed": set(),  # (boutique, livraison) dont le filtre « Événements » a été ouvert
         "ev_edit": None,  # Événements : panneau ouvert (id, "new" ou "request")
         "ev_nonce": 0,
@@ -137,9 +136,52 @@ def reset_order() -> None:
     ss.nonce += 1
 
 
+# État de la commande affichée. Une seule boutique est ouverte à la fois : ses clés vivent
+# dans la session (la grille les lit directement), celles des autres boutiques sont rangées
+# dans ss.orders[boutique]["state"] et reprises quand on clique sur leur onglet.
+ORDER_KEYS = (
+    "base",
+    "overrides",
+    "seen",
+    "confirmed_blocks",
+    "include_ok",
+    "saved_run_id",
+    "why_sku",
+)
+
+
+def order_state(boutique: str) -> dict | None:
+    """Résultat et validations d'une boutique ajoutée (None tant qu'elle n'est pas calculée)."""
+    if boutique == ss.active:
+        return {k: ss[k] for k in ORDER_KEYS} if ss.base is not None else None
+    slot = ss.orders.get(boutique)
+    return slot.get("state") if slot else None
+
+
+def park_active() -> None:
+    """Range l'état de la commande affichée dans son onglet."""
+    if ss.active in ss.orders:
+        ss.orders[ss.active]["state"] = order_state(ss.active)
+
+
+def activate(boutique: str | None) -> None:
+    """Affiche la commande d'une boutique (onglet) : l'état de l'ancienne est gardé."""
+    if boutique == ss.active:
+        return
+    park_active()
+    reset_order()
+    ss.active = boutique
+    saved = ss.orders[boutique].get("state") if boutique in ss.orders else None
+    if saved:
+        for k, v in saved.items():
+            ss[k] = v
+    ss.pop("f_event", None)  # les événements diffèrent d'une boutique à l'autre
+
+
 def reset_all() -> None:
     reset_order()
-    ss.day, ss.day_error, ss.day_outcomes = None, None, None
+    ss.day, ss.day_error = None, None
+    ss.orders, ss.active = {}, None
 
 
 @st.cache_resource(max_entries=4, show_spinner="Lecture des exports du jour…")

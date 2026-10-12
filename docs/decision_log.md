@@ -279,3 +279,14 @@ Format : contexte → décision → conséquence.
 - Export : le fichier LT reste désactivé tant qu'une ligne REVIEW ou BLOCKED n'est pas confirmée (le nombre est affiché, avec un retour à la commande). Le garde-fou en 3 points des événements ne change pas. L'écran Journée (zip de plusieurs boutiques) garde son garde-fou actuel : il n'a pas de confirmation ligne par ligne.
 - Pas de re-tri après une saisie : la grille garde la même identité tant que les lignes affichées ne changent pas, donc la ligne reste en place et le tri choisi au clic est gardé. Le tri par défaut se calcule sur le statut et la qty du calcul, jamais sur la qty saisie. Exception : une saisie hors multiple recrée la grille pour afficher la qty arrondie.
 - Même règle dans la démo web.
+
+## D-040 — Une seule page « Commandes » (remplace « Commande boutique » et « Journée ») (2026-10-12)
+
+- Décision du planner : les pages « Commande boutique » et « Journée » fusionnent en une page « 2. Commandes ». La page « Journée » disparaît, ainsi que toute présélection depuis le Schedule (plus de boutiques pré-cochées ni de date suggérée). Le Schedule reste un référentiel, il ne pilote plus la commande.
+- En haut, un champ « Ajouter une boutique » (recherche par code ou nom), vide au départ. Chaque boutique ajoutée devient un onglet avec une croix pour la retirer. Une boutique = une commande simple, plusieurs = une journée.
+- Une ligne de paramètres par boutique : livraison, cover non-café, cover café (facultatif), historique, mode (et options avancées). Les paramètres de la première boutique sont proposés aux suivantes, modifiables. « Calculer » par boutique et « Tout calculer ». Des paramètres modifiés après un calcul remettent la boutique « à calculer » jusqu'au recalcul.
+- L'onglet montre : code, statut (à calculer / calculé / confirmé), REVIEW et BLOCKED restants (non confirmés). Un clic affiche la table de commande existante (filtres, Qty finale, Confirmé, « Pourquoi », événements). L'état de chaque boutique (résultat, modifications, confirmations, filtres) est gardé quand on change d'onglet.
+- Barre récapitulative sous les onglets : livraison, unités, palettes, lignes à traiter, REVIEW, BLOCKED par boutique et au total.
+- Export depuis la page : « Télécharger le LT » de la boutique affichée et « Télécharger tous les LT (zip) ». Chacun passe par le garde-fou de D-039 (REVIEW et BLOCKED confirmés) et les 3 points des événements (D-031). Le zip attend que chaque boutique soit prête et cite celles qui bloquent encore avec la raison (hypothèse retenue, le message du planner s'arrêtant à « chacun avec le garde-fou »). Chaque boutique du zip est enregistrée dans l'historique avec ses modifications.
+- La page « 3. Export » garde le récapitulatif boutique, l'export Excel détaillé et « Enregistrer sans exporter » pour la boutique affichée.
+- Même fonctionnement dans la démo web. Parité 416/416 inchangée (le moteur n'a pas bougé).
