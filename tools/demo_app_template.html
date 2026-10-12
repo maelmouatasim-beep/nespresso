@@ -109,8 +109,6 @@ table.order tbody tr:hover td { background: var(--surface-2); }
 table.order tr.mod td { background: var(--mod-bg); }
 table.order tr.pend td.q input { border-color: var(--mod); box-shadow: 0 0 0 1px var(--mod); }
 td.q input { width: 100%; text-align: right; padding: 3px 6px; font-variant-numeric: tabular-nums; }
-td.q select.rowcat { width: 100%; padding: 3px 4px; font-size: 13px; }
-td.q select.rowcat.need { border-color: var(--review, #B7791F); box-shadow: 0 0 0 1px var(--review, #B7791F); }
 td.vu { text-align: center; }
 .st { display: inline-block; font-size: 12px; font-weight: 700; padding: 1px 8px; border-radius: 999px; letter-spacing: .02em; }
 .st.O { color: var(--ok); background: var(--ok-bg); }
@@ -254,7 +252,7 @@ const DOT = { t: "●", p: "○", team: "●", personal: "○" };
 const EV_CLS = { "Actif": "G", "À venir": "Y", "Bloqué": "X", "Terminé": "U", "Annulé": "U", "Brouillon": "M" };
 const EV_FILTERS = ["Actifs", "À venir", "Terminés", "Brouillons", "Tous"];
 const MSRC = { multiple_list: "Multiple list", multiple_list_family: "famille (deux multiples)", inferred_family: "inféré (famille)", excel_default_1: "absent → 1 (Excel)", missing_default_1: "absent" };
-const CAT = Object.fromEntries(M.categories);
+const CAT = Object.fromEntries(M.categories);  // anciennes catégories (D-036), pour l'historique
 const CATEGORY_FILTERS = ["Tous", ...DATA.category_names];
 const STATUS_FILTERS = ["Tous", "OK", "REVIEW", "BLOCKED", "Modifié"];
 const MODES = { "Standard": "standard", "Parité Excel": "excel_parity" };
@@ -307,7 +305,7 @@ const store = { get(k, d) { try { const v = localStorage.getItem(k); return v ? 
 const st = {
   page: (p => PAGES.includes(p) ? p : PAGES[0])(store.get("spc2_page", PAGES[0])), author: store.get("spc_author", ""), examples: store.get("spc2_examples", true),
   form: { boutique: "", delivery: "", cover: "", coffee: "", mode: "standard" }, order: null, err: "",
-  overrides: {}, pending: {}, seen: new Set(), f: { cat: "Tous", status: "Tous", qty: false }, sort: null, q: "", why: null, gear: false, savedId: null, xmsg: null,
+  overrides: {}, roundNotes: [], seen: new Set(), f: { cat: "Tous", status: "Tous", qty: false }, sort: null, q: "", why: null, gear: false, savedId: null, xmsg: null,
   day: null, refTab: 0, source: "demo", busy: "", depotErr: [],
   // Événements : reprises (session seulement), demandes terminées, validations avant export.
   taken: new Set(), evDone: store.get("spc2_ev_done", {}), confirmed: new Set(), includeOk: false, evViewed: new Set(),
@@ -330,7 +328,7 @@ const csvOf = t => [t.columns, ...t.rows].map(r => r.map(csvCell).join(",")).joi
 const tablesCsv = keys => Object.fromEntries(keys.map(k => [k, csvOf(EDIT.tables[k])]));
 // Une modification change le résultat : la commande affichée doit être recalculée.
 function invalidateOrder(why) {
-  st.overrides = {}; st.pending = {}; st.seen = new Set(); st.confirmed = new Set(); st.includeOk = false; st.savedId = null; st.day = null;
+  st.overrides = {}; st.seen = new Set(); st.confirmed = new Set(); st.includeOk = false; st.savedId = null; st.day = null;
   if (st.order) { st.order = null; st.err = why + " : recalcule la commande."; }
 }
 
@@ -355,9 +353,9 @@ function baseLine(j) {
 function finalLine(j) {
   const b = baseLine(j), ov = st.overrides[b.m.sku];
   if (!ov) return b;
-  const why = [ov.cat ? CAT[ov.cat] : "", ov.reason].filter(Boolean).join(" : ");
-  const reasons = [...b.reasons, "Modifié par " + ov.author + " : " + ov.before + " → " + ov.final + (why ? " (" + why + ")" : "")];
-  if (ov.final !== ov.after) reasons.push("Saisie " + ov.after + " arrondie au multiple de " + (b.multiple || 1) + " : " + ov.final);
+  // Le contexte déduit reste hors des raisons (affichées dans la table) : « Pourquoi » et Historique seulement (D-038).
+  const reasons = [...b.reasons, "Modifié par " + ov.author + " : " + ov.before + " → " + ov.final + (ov.reason ? " (" + ov.reason + ")" : "")];
+  if (ov.final !== ov.after) reasons.push("⚠ Saisie " + ov.after + " arrondie au multiple de " + (b.multiple || 1) + " : " + ov.final);
   let s = b.s;
   if (b.s === "B" && ov.after > 0) { s = "R"; reasons.push("Override sur une ligne bloquée : à vérifier"); }
   return { ...b, qty: ov.final, s, reasons, source: "override", fq: b.fq ?? b.qty, ov };
@@ -453,7 +451,7 @@ function renderNav() {
 }
 function setSource(v) {
   if (st.source === v) return;
-  st.source = v; st.order = null; st.form.boutique = ""; st.form.delivery = ""; st.err = ""; st.overrides = {}; st.pending = {}; st.seen = new Set(); st.why = null; st.day = null;
+  st.source = v; st.order = null; st.form.boutique = ""; st.form.delivery = ""; st.err = ""; st.overrides = {}; st.seen = new Set(); st.why = null; st.day = null;
   if (v === "live" && !(LIVE.files.stock_situation && LIVE.files.stock_movements)) st.page = PAGES[0];
   render();
 }
@@ -467,7 +465,7 @@ fillAuthors();
 $("author").onchange = e => {
   st.author = e.target.value; store.set("spc_author", st.author);
   // Le planner change les événements personnels appliqués : la commande est relue.
-  st.overrides = {}; st.pending = {}; st.seen = new Set(); st.confirmed = new Set(); st.includeOk = false; st.savedId = null; st.f.ev = null; st.evPlanner = null;
+  st.overrides = {}; st.seen = new Set(); st.confirmed = new Set(); st.includeOk = false; st.savedId = null; st.f.ev = null; st.evPlanner = null;
   if (st.order && st.order.live) { st.order = null; st.err = "Planner changé : recalcule la commande pour appliquer ses événements personnels."; }
   render();
 };
@@ -595,7 +593,7 @@ async function computeLive(f) {
   const out = livePlan(f);
   st.busy = "";
   if (out.error) { st.err = out.error; return render(); }
-  st.order = { ...f, live: out, run_date: RUN() }; st.overrides = {}; st.pending = {}; st.seen = new Set(); st.savedId = null; st.why = null; st.xmsg = null;
+  st.order = { ...f, live: out, run_date: RUN() }; st.overrides = {}; st.seen = new Set(); st.savedId = null; st.why = null; st.xmsg = null;
   render();
 }
 
@@ -606,7 +604,7 @@ async function computeDemoLive(f) {
   const out = livePlan(f);
   st.busy = "";
   if (out.error) { st.err = out.error; return render(); }
-  st.order = { ...f, live: out, run_date: RUN() }; st.overrides = {}; st.pending = {}; st.seen = new Set(); st.savedId = null; st.why = null; st.xmsg = null;
+  st.order = { ...f, live: out, run_date: RUN() }; st.overrides = {}; st.seen = new Set(); st.savedId = null; st.why = null; st.xmsg = null;
   render();
 }
 
@@ -704,7 +702,7 @@ function compute() {
   if (DS().live) return computeLive(f);
   if (f.boutique !== M.boutique) { st.err = "Calcul impossible : Aucune ligne de Stock Situation pour la boutique " + f.boutique + ". (Démo : seules les données de B80 sont fournies. Pour tes boutiques, dépose tes exports avec « Mes fichiers ».)"; return render(); }
   if (customized()) return computeDemoLive(f);
-  st.order = { ...f, run_date: RUN() }; st.overrides = {}; st.pending = {}; st.seen = new Set(); st.savedId = null; st.why = null; st.xmsg = null;
+  st.order = { ...f, run_date: RUN() }; st.overrides = {}; st.seen = new Set(); st.savedId = null; st.why = null; st.xmsg = null;
   render();
 }
 function paramsRow() {
@@ -738,16 +736,12 @@ function paramsRow() {
   return out;
 }
 function setExamples(on) {
-  st.examples = on; store.set("spc2_examples", on); st.overrides = {}; st.pending = {}; st.savedId = null;
+  st.examples = on; store.set("spc2_examples", on); st.overrides = {}; st.savedId = null;
   if (st.order && st.order.live) { st.order = null; st.err = "Entrées métier changées : recalcule la commande."; }
   render();
 }
 function categoryOf(m) { return categories()[(m.type || "").trim().toUpperCase()] || "Autres"; }
 function statusKey(x) { return x.ov ? "Modifié" : STATUS[x.s]; }
-// D-036 : quantité saisie sans catégorie → « À catégoriser », pas encore appliquée.
-const pendingQty = sku => (st.pending[sku] && st.pending[sku].qty !== null && st.pending[sku].qty !== undefined) ? st.pending[sku].qty : null;
-const pendingCount = () => Object.keys(st.pending).filter(k => pendingQty(k) !== null).length;
-const ovCat = x => x.ov ? x.ov.cat : (st.pending[x.m.sku] ? st.pending[x.m.sku].cat : "");
 function matches(x) {
   const f = st.f;
   if (f.cat !== "Tous" && categoryOf(x.m) !== f.cat) return false;
@@ -760,7 +754,7 @@ function matches(x) {
 const COLS = [
   ["Statut", 112, 0, x => statusKey(x)], ["SKU", 96, 0, x => x.m.sku], ["Description", 210, 0, x => x.m.desc],
   ["Catégorie", 130, 0, x => categoryOf(x.m)], ["Événement", 170, 0, x => evCell(x)], ["Expected", 86, 1, x => x.m.exp], ["Ventes", 68, 1, x => x.m.sales],
-  ["Couv. act.", 72, 1, x => x.m.cur], ["Proposée", 78, 1, (x, b) => b[x.m.sku]], ["Qty finale", 92, 1, x => pendingQty(x.m.sku) ?? x.qty], ["Catégorie modif.", 140, 0, x => CAT[ovCat(x)] || null],
+  ["Couv. act.", 72, 1, x => x.m.cur], ["Proposée", 78, 1, (x, b) => b[x.m.sku]], ["Qty finale", 92, 1, x => x.qty],
   ["Couv. après", 80, 1, x => postCover(x.m, x.qty)], ["Multiple", 68, 1, x => x.multiple], ["Stock DC", 80, 1, x => x.m.dc],
   ["Source", 92, 0, x => SRC[x.source]], ["Raisons", 300, 0, x => x.reasons.join(" | ")]];
 function defaultCmp(baseQty) { return (a, b) => ((a.s === "O") - (b.s === "O")) || (baseQty[b.m.sku] - baseQty[a.m.sku]) || a.m.sku.localeCompare(b.m.sku); }
@@ -793,17 +787,15 @@ function orderTable(rows, baseQty) {
     const tr = el("tr", (x.ov ? "mod" : "") + (st.why === sku ? " sel" : ""));
     tr.onclick = e => { if (e.target.closest("input,select")) return; openWhy(sku); };
     const seen = st.seen.has(sku) ? " ✓" : "";
-    const waiting = pendingQty(sku), shownQty = waiting ?? x.qty;
-    const stCell = waiting !== null ? el("span", "st R", "À catégoriser") : x.ov ? el("span", "st M", "Modifié" + seen) : el("span", "st " + x.s, STATUS[x.s] + seen);
+    const shownQty = x.qty;
+    const stCell = x.ov ? el("span", "st M", "Modifié" + seen) : el("span", "st " + x.s, STATUS[x.s] + seen);
     const qi = el("input", { type: "number", min: 0, step: x.multiple || 1, value: shownQty, "aria-label": "Qty finale " + sku });
-    qi.onchange = () => { const v = Math.round(Number(qi.value)); if (!Number.isFinite(v) || v < 0) { qi.value = shownQty; return; } if (v !== shownQty) { editQty(sku, v, ovCat(x)); render(); } };
-    const cs = catSelect(null, ovCat(x)); cs.setAttribute("aria-label", "Catégorie de la modification " + sku); cs.className = "rowcat" + (waiting !== null ? " need" : "");
-    cs.onchange = () => { editCat(sku, cs.value, x); render(); };
+    qi.onchange = () => { const v = Math.round(Number(qi.value)); if (!Number.isFinite(v) || v < 0) { qi.value = shownQty; return; } if (v !== shownQty) { applyOverride(sku, v); render(); } };
     const reasons = x.reasons.join(" | ");
     const evText = evCell(x);
     tr.append(el("td", "", stCell), el("td", "mono", sku), el("td", { title: m.desc }, m.desc || "—"), el("td", "", categoryOf(m)), el("td", { class: "evcell", title: evText }, evText),
       el("td", "n", fmt(m.exp)), el("td", "n", fmt(m.sales)), el("td", "n", fmt1(m.cur)), el("td", "n", fmt(baseQty[sku])),
-      el("td", "n q", qi), el("td", "q", cs), el("td", "n", fmt1(postCover(m, x.qty))), el("td", "n", fmt(x.multiple)),
+      el("td", "n q", qi), el("td", "n", fmt1(postCover(m, x.qty))), el("td", "n", fmt(x.multiple)),
       el("td", "n", m.dc === null ? "—" : fmt(m.dc)), el("td", "", SRC[x.source]), el("td", { title: reasons, class: "small" }, reasons || ""));
     body.append(tr);
   }
@@ -836,7 +828,7 @@ function renderOrder() {
     el("label", "chk", el("input", { type: "checkbox", id: "f_qty", checked: st.f.qty, onchange: e => { st.f.qty = e.target.checked; render(); } }), "Qty > 0 seulement"),
     el("div", "grow", search),
     el("button", { class: "btn", id: "accept_ok", onclick: () => { ls.forEach(x => { if (x.s === "O" && !x.ov) st.seen.add(x.m.sku); }); render(); } }, ic("checks"), "Accepter toutes les lignes OK")));
-  if (pendingCount()) out.push(el("div", "msg warn", pendingCount() + " quantité(s) modifiée(s) sans catégorie : pas encore prises en compte. Choisis la catégorie dans la colonne « Catégorie modif. » de la ligne (un clic)."));
+  if (st.roundNotes.length) { st.roundNotes.forEach(n => out.push(el("div", "small", { style: "color:#94600F;margin:4px 0" }, "⚠ " + n))); st.roundNotes = []; }
   const shown = sortRows(ls.filter(matches), baseQty);
   out.push(shown.length ? orderTable(shown, baseQty) : el("div", "msg info", "Aucune ligne pour ces filtres."));
   out.push(el("div", "row", { style: "justify-content:space-between;margin-top:8px" },
@@ -862,29 +854,26 @@ function eventBanner(o, ls) {
 }
 
 // ---------- Modifications ----------
-function catSelect(id, value) { const s = el("select", id ? { id } : {}); s.append(new Option("—", "")); M.categories.forEach(([v, t]) => s.append(new Option(t, v))); s.value = value || ""; return s; }
-// Modification du planner (D-036) : catégorie obligatoire, choisie en un clic dans la ligne ;
-// raison facultative ; auteur et heure toujours gardés. Arrondi au multiple comme le moteur.
-// Une quantité sans catégorie attend (« À catégoriser ») et ne compte pas encore.
-function editQty(sku, qty, cat) {
-  const b = baseLine(indexOfSku(sku));
-  if (qty === b.qty) { delete st.overrides[sku]; delete st.pending[sku]; st.savedId = null; return; }
-  if (cat) { applyOverride(sku, qty, cat); delete st.pending[sku]; return; }
-  st.pending[sku] = { qty, cat: "" };
+// Modification du planner (D-038) : comptée tout de suite, rien n'est demandé. Gardés
+// automatiquement : avant, après, planner, heure et contexte déduit. Arrondi au multiple comme le moteur.
+function deduceContext(b, qty) {
+  const m = b.m, q = roundToMultiple(qty, b.multiple), found = [];
+  if (b.ev.length) found.push(["event", "Événement actif : " + [...new Set(b.ev.map(e => "« " + e.title + " »"))].join(", ")]);
+  if (q > 0 && (m.dc === null || m.dc < q)) found.push(["dc_short", "Stock DC insuffisant (" + (m.dc === null ? "SKU absent du stock DC" : m.dc + " < " + q) + ")"]);
+  if (b.dcr || (m.sales === 0 && m.exp === 0)) found.push(["dormant", "SKU dormant (ni stock ni ventes)"]);
+  if (!found.length) return { ctx: "unspecified", ctxDetail: "Non précisé" };
+  return { ctx: found[0][0], ctxDetail: found.map(f => f[1]).join(" · ") };
 }
-function editCat(sku, cat, x) {
-  const waiting = pendingQty(sku);
-  if (x.ov && cat) { applyOverride(sku, x.ov.after, cat); return; }
-  if (x.ov) return;  // une modification garde toujours sa catégorie
-  if (waiting !== null && cat) { applyOverride(sku, waiting, cat); delete st.pending[sku]; return; }
-  st.pending[sku] = { qty: waiting, cat };  // catégorie choisie avant la quantité
-}
-function applyOverride(sku, qty, cat, reason) {
+const CTX = { event: "Événement actif", dc_short: "Stock DC insuffisant", dormant: "SKU dormant", unspecified: "Non précisé" };
+function ctxLabel(o) { return o.ctx ? CTX[o.ctx] : o.cat ? "Catégorie : " + CAT[o.cat] : CTX.unspecified; }
+function applyOverride(sku, qty, reason) {
   const j = indexOfSku(sku), b = baseLine(j), old = st.overrides[sku];
   st.savedId = null;
   if (qty === b.qty) { delete st.overrides[sku]; return; }
-  st.overrides[sku] = { before: b.qty, after: qty, final: roundToMultiple(qty, b.multiple),
-    cat: cat ?? (old ? old.cat : ""), reason: (reason ?? (old ? old.reason : "")).trim(),
+  const final = roundToMultiple(qty, b.multiple);
+  if (final !== qty) st.roundNotes = [sku + " : " + qty + " n'est pas un multiple de " + (b.multiple || 1) + ", arrondi à " + final + "."];
+  st.overrides[sku] = { before: b.qty, after: qty, final, ...deduceContext(b, qty),
+    reason: (reason ?? (old ? old.reason : "")).trim(),
     author: st.author || "Planner non renseigné", ts: new Date().toISOString() };
 }
 // ---------- Panneau « Pourquoi » ----------
@@ -906,7 +895,11 @@ function steps(x) {
   } else out.push(["Pas de calcul : la ligne est bloquée (voir les raisons)"]);
   if (x.fb) out.push([x.fb]);
   if (x.biz) out.push([x.biz]);
-  if (x.ov) out.push(["Modifié par " + x.ov.author + " : " + fmt(x.ov.before) + " → " + fmt(x.ov.final) + " (" + [CAT[x.ov.cat], x.ov.reason].filter(Boolean).join(" : ") + ")"]);
+  if (x.ov) {
+    out.push(["Modifié par " + x.ov.author + " le " + x.ov.ts.slice(0, 16).replace("T", " ") + " : " + fmt(x.ov.before) + " → " + fmt(x.ov.final) + (x.ov.reason ? " (" + x.ov.reason + ")" : "")]);
+    if (x.ov.final !== x.ov.after) out.push(["Saisie " + fmt(x.ov.after) + " arrondie au multiple : ", fmt(x.ov.final)]);
+    out.push(["Contexte déduit : ", x.ov.ctxDetail || "Non précisé"]);
+  }
   return out;
 }
 function renderWhy() {
@@ -919,8 +912,8 @@ function renderWhy() {
   const x = finalLine(j), b = baseLine(j), m = x.m;
   const days = Math.round((parseIso(st.order.delivery) - parseIso(st.order.run_date || RUN())) / 86400000);
   const proj = m.sales ? m.exp - m.sales / V().hd * days : m.exp;
-  const qty = el("input", { type: "number", id: "dlg_qty", min: 0, step: x.multiple || 1, value: pendingQty(m.sku) ?? x.qty });
-  const cat = catSelect("dlg_cat", ovCat(x)), reason = el("input", { type: "text", id: "dlg_reason", placeholder: "Raison", value: x.ov ? x.ov.reason : "" });
+  const qty = el("input", { type: "number", id: "dlg_qty", min: 0, step: x.multiple || 1, value: x.qty });
+  const reason = el("input", { type: "text", id: "dlg_reason", placeholder: "Raison", value: x.ov ? x.ov.reason : "" });
   const msg = el("div");
   p.hidden = false;
   p.replaceChildren(...[
@@ -939,13 +932,12 @@ function renderWhy() {
       st.confirmed.has(m.sku) ? "Retirer la confirmation du blocage" : "Confirmer le blocage (qty 0)") : null,
     el("button", { class: "btn", style: "width:100%;margin-top:6px", onclick: () => { const on = !st.seen.has(m.sku); on ? st.seen.add(m.sku) : st.seen.delete(m.sku); if (b.ev.length) logValidation("seen", st.order.boutique, [m.sku], on ? "" : "retiré"); render(); } }, st.seen.has(m.sku) ? ic("undo") : ic("check"), st.seen.has(m.sku) ? "Retirer la validation" : "Marquer comme vérifiée"),
     el("h3", "", "Modifier la quantité"),
-    el("div", "form3", el("label", "f", "Qty finale", qty), el("label", "f", "Catégorie (obligatoire)", cat), el("label", "f wide", "Raison (facultatif)", reason)),
+    el("div", "form3", el("label", "f", "Qty finale", qty), el("label", "f wide", "Raison (facultatif)", reason)),
     el("div", "row", { style: "margin-top:10px" }, el("button", { class: "btn primary", id: "dlg_save", onclick: () => {
       const q = Math.round(Number(qty.value));
       if (!Number.isFinite(q) || q < 0) return msg.replaceChildren(el("div", "msg err", "Quantité entière ≥ 0 attendue."));
-      if (q !== b.qty && !cat.value) return msg.replaceChildren(el("div", "msg err", "Choisis la catégorie de la modification (obligatoire)."));
-      applyOverride(m.sku, q, cat.value, reason.value); delete st.pending[m.sku]; render();
-    } }, "Enregistrer"), b.qty !== x.qty || pendingQty(m.sku) !== null ? el("button", { class: "btn", onclick: () => { delete st.overrides[m.sku]; delete st.pending[m.sku]; render(); } }, "Revenir à " + fmt(b.qty)) : null),
+      applyOverride(m.sku, q, reason.value); render();
+    } }, "Enregistrer"), b.qty !== x.qty ? el("button", { class: "btn", onclick: () => { delete st.overrides[m.sku]; render(); } }, "Revenir à " + fmt(b.qty)) : null),
     msg].filter(Boolean));
 }
 
@@ -1012,7 +1004,7 @@ function renderDay() {
       const teamN = new Set(base.filter(x => x.ev.some(e => e.scope === "t")).map(x => x.m.sku)).size, persN = new Set(base.filter(x => x.ev.some(e => e.scope === "p")).map(x => x.m.sku)).size;
       res.push([btqLabel(o.b), frday(o.r.delivery), fmt(s.ordered), fmt(s.units), fmt1(s.palTotal), el("span", "st R", String(s.by.R)), el("span", "st B", String(s.by.B)),
         teamN || persN ? el("span", { title: "SKU flagués : ● équipe · ○ personnel" }, "● " + teamN + " · ○ " + persN) : "—", V(order).warnings.join(" | ") || "—",
-        el("button", { class: "btn", onclick: () => { st.form = { ...order }; st.order = { ...order }; st.overrides = {}; st.pending = {}; st.seen = new Set(); st.savedId = null; go(PAGES[1]); } }, "Ouvrir")]);
+        el("button", { class: "btn", onclick: () => { st.form = { ...order }; st.order = { ...order }; st.overrides = {}; st.seen = new Set(); st.savedId = null; go(PAGES[1]); } }, "Ouvrir")]);
     }
     st.order = prev;
     out.push(el("h3", "", "Résultats"), tableOf(["Boutique", "Livraison", "Lignes", "Unités", "Palettes", "REVIEW", "BLOCKED", "Événements", "Alertes", ""], res, [2, 3, 4]));
@@ -1039,7 +1031,7 @@ async function dayZip(okOnes, box) {
   const now = new Date(), files = [];
   const prev = st.order, prevOv = st.overrides;
   for (const o of okOnes) {
-    st.order = { boutique: o.b, delivery: o.r.delivery, cover: o.r.cover, coffee: o.r.coffee, mode: st.day.mode, live: o.live || null, run_date: RUN() }; st.overrides = {}; st.pending = {};
+    st.order = { boutique: o.b, delivery: o.r.delivery, cover: o.r.cover, coffee: o.r.coffee, mode: st.day.mode, live: o.live || null, run_date: RUN() }; st.overrides = {};
     const ls = lines(), text = ltText(ls);
     ls.forEach((_, j) => baseLine(j).ev.forEach(e => { if (e.type === "store_request" && !st.toClose.includes(e.id)) st.toClose.push(e.id); }));
     if (text) { files.push([ltName(o.b, now), text]); saveRun(ls, ltName(o.b, now), true); }
@@ -1088,7 +1080,6 @@ function renderExport() {
   const na = needAuthor(); if (na) out.push(na);
   const base = []; for (let j = 0; j < ls.length; j++) base.push(baseLine(j));
   const chk = evCheck(base, st.overrides, st.seen, st.confirmed, st.includeOk), b0 = st.order.boutique;
-  if (pendingCount()) out.push(el("div", "msg err", pendingCount() + " quantité(s) modifiée(s) sans catégorie : choisis la catégorie dans la ligne (Commande boutique) avant d'exporter."));
   if (chk.blocked.length || chk.unval.length || chk.inc.length) out.push(gateCard(chk, st.includeOk,
     () => { chk.blocked.forEach(k => st.confirmed.add(k)); logValidation("confirm_block", b0, chk.blocked); render(); },
     () => { chk.unval.forEach(k => st.seen.add(k)); logValidation("seen", b0, chk.unval); render(); },
@@ -1098,7 +1089,7 @@ function renderExport() {
   if (st.xmsg) box.append(st.xmsg);
   const requests = [...new Set(base.flatMap(x => x.ev.filter(e => e.type === "store_request").map(e => e.id)))];
   out.push(el("div", "row",
-    el("button", { class: "btn primary", id: "dl_lt", disabled: !st.author || !chk.ok || pendingCount() > 0, onclick: async () => {
+    el("button", { class: "btn primary", id: "dl_lt", disabled: !st.author || !chk.ok, onclick: async () => {
       const text = ltText(ls); if (!text) return box.replaceChildren(el("div", "msg info", "Aucune ligne à commander : pas de fichier LT."));
       if (await offer(name, text, box, "Fichier « " + name + " » téléchargé (" + s.ordered + " lignes).")) { saveRun(ls, name); st.toClose = [...new Set([...st.toClose, ...requests])]; st.xmsg = box.firstChild; render(); }
     } }, "Télécharger le fichier LT (SKU;QTY)"),
@@ -1120,7 +1111,7 @@ function closeRequestsPrompt() {
     el("span", "row", el("button", { class: "btn primary", id: "close_req_" + e.id, onclick: () => {
       st.evDone[e.id] = { by: st.author || "Planner non renseigné", at: new Date().toISOString() }; store.set("spc2_ev_done", st.evDone);
       logValidation("close_request", e.boutiques[0] || "", e.skus.map(x => x.sku), "commande exportée");
-      st.toClose = st.toClose.filter(i => i !== e.id); st.overrides = {}; st.pending = {}; st.seen = new Set(); st.confirmed = new Set(); render(); } }, "Terminer"),
+      st.toClose = st.toClose.filter(i => i !== e.id); st.overrides = {}; st.seen = new Set(); st.confirmed = new Set(); render(); } }, "Terminer"),
       el("button", { class: "btn", onclick: () => { st.toClose = st.toClose.filter(i => i !== e.id); render(); } }, "Garder active"))));
 }
 let downloads = null;
@@ -1246,7 +1237,7 @@ function takeOver(e, on) {
   if (!st.author) { st.evMsg = "Choisis ton prénom (Planner, barre de gauche) pour reprendre."; return render(); }
   on ? st.taken.add(e.id) : st.taken.delete(e.id);
   if (on) logValidation("takeover", e.boutiques[0] || "", e.skus.map(x => x.sku), "« " + e.title + " » de " + e.planner);
-  st.overrides = {}; st.pending = {}; st.seen = new Set(); st.confirmed = new Set(); st.includeOk = false; st.f.ev = null;
+  st.overrides = {}; st.seen = new Set(); st.confirmed = new Set(); st.includeOk = false; st.f.ev = null;
   if (st.order && st.order.live) { st.order = null; st.err = "Événement repris : recalcule la commande."; }
   render();
 }
@@ -1269,7 +1260,7 @@ function evPanel(e, day) {
   } else if (e.type === "store_request" && e.status === "active") {
     out.push(el("button", { class: "btn", id: "ev_done", style: "width:100%", onclick: () => {
       st.evDone[e.id] = { by: st.author || "Planner non renseigné", at: new Date().toISOString() }; store.set("spc2_ev_done", st.evDone);
-      logValidation("close_request", e.boutiques[0] || "", e.skus.map(x => x.sku), "terminée depuis Événements SKU"); st.overrides = {}; st.pending = {}; render(); } }, "Terminer la demande"));
+      logValidation("close_request", e.boutiques[0] || "", e.skus.map(x => x.sku), "terminée depuis Événements SKU"); st.overrides = {}; render(); } }, "Terminer la demande"));
   }
   if (mine) out.push(el("div", "two", { style: "margin-top:8px" },
     el("button", { class: "btn primary", id: "ev_edit", onclick: () => { st.evEdit = JSON.parse(JSON.stringify(e)); render(); } }, "Modifier"),
@@ -1458,10 +1449,10 @@ function renderHistory() {
   if (!ovs.length) out.push(el("div", "msg info", "Aucune modification enregistrée."));
   else {
     const count = key => Object.entries(ovs.reduce((a, o) => { const k = key(o); a[k] = (a[k] || 0) + 1; return a; }, {})).sort((a, b) => b[1] - a[1]);
-    out.push(el("div", "two", tableOf(["Catégorie", "Modifications"], count(o => CAT[o.cat]).map(([k, v]) => [k, fmt(v)]), [1]),
+    out.push(el("div", "two", tableOf(["Contexte déduit", "Modifications"], count(ctxLabel).map(([k, v]) => [k, fmt(v)]), [1]),
       tableOf(["SKU le plus modifié", "Fois"], count(o => o.sku).slice(0, 15).map(([k, v]) => [el("span", "mono", k), fmt(v)]), [1])));
     out.push(el("details", { style: "margin-top:8px" }, el("summary", "", "Détail (" + ovs.length + ")"),
-      tableOf(["Boutique", "SKU", "Avant", "Après", "Catégorie", "Raison", "Par", "Quand"], ovs.map(o => [o.boutique, el("span", "mono", o.sku), fmt(o.before), fmt(o.final), CAT[o.cat], o.reason, o.author, o.ts.slice(0, 16).replace("T", " ")]), [2, 3])));
+      tableOf(["Boutique", "SKU", "Avant", "Après", "Contexte déduit", "Détail du contexte", "Raison", "Par", "Quand"], ovs.map(o => [o.boutique, el("span", "mono", o.sku), fmt(o.before), fmt(o.final), ctxLabel(o), o.ctxDetail || "", o.reason, o.author, o.ts.slice(0, 16).replace("T", " ")]), [2, 3])));
   }
   out.push(el("h3", "", "Comparer deux commandes"));
   const lab = r => "n° " + r.id + " · " + r.boutique + " · " + r.created.slice(0, 16).replace("T", " ");

@@ -176,7 +176,7 @@ Format : contexte → décision → conséquence.
 - **Référentiels** : ceux des données de test (multiples, conversions, DC, Schedule du 05/10/2026, portfolio de B80). Le portfolio des autres boutiques n'est pas encore disponible dans la version web.
 - **Publication** : Pyodide et ses bibliothèques sont vérifiés par empreinte (`tools/fetch_pyodide.py`) ; les archives (.zip, .whl), refusées par la plateforme, sont publiées en base64 et décodées par la page.
 
-## D-028 — Modifications sans justification obligatoire (2026-10-08) — catégorie rétablie par D-036
+## D-028 — Modifications sans justification obligatoire (2026-10-08) — remplacée par D-038
 
 - Décision du planner : une quantité modifiée compte tout de suite, sans bloc « Modifications à justifier ». La règle 6 de CLAUDE.md est modifiée en conséquence ; remplace D-006 (partie raison) et D-017.
 - Toujours gardés : la quantité d'avant, la quantité saisie (arrondie au multiple supérieur), l'auteur (nom du planner, sinon « Planner non renseigné ») et l'heure. La ligne passe en « Modifié » et la raison « Modifié par … : avant → après » reste visible.
@@ -238,7 +238,7 @@ Format : contexte → décision → conséquence.
 - Q-031 fermée : « Reprendre » un événement personnel reste limité à la session (D-032 inchangée).
 - Même règle dans la démo web.
 
-## D-036 — Catégorie de modification obligatoire, en un clic dans la ligne (révise D-028) (2026-10-11)
+## D-036 — Catégorie de modification obligatoire, en un clic dans la ligne (révise D-028) (2026-10-11) — annulée par D-038
 
 - Décision du planner : toute modification de quantité exige une **catégorie**, choisie en un clic dans la ligne du tableau (colonne « Catégorie modif. »), parmi : Promo, Lancement, Rupture, Surstock, Stock DC, Donnée erronée, Demande boutique, Autre. « Demande boutique » est nouvelle. La raison libre reste facultative (panneau « Pourquoi »). Règle 6 de CLAUDE.md mise à jour.
 - Le modèle `Override` refuse une modification sans catégorie. Auteur et heure restent toujours gardés.
@@ -257,3 +257,15 @@ Format : contexte → décision → conséquence.
 - Lecteurs CSV des tables maîtres réécrits sans pandas (module `csv`) pour tourner aussi dans la page ; parité 416/416 inchangée.
 - Exemple : dans la démo, mettre le multiple de `7005.70` à 1000 sur la première ligne laisse 240 : le SKU a alors deux multiples (240 et 1000) et la règle A9 garde le multiple de la famille, ligne en REVIEW « Deux multiples ». Pour changer vraiment un multiple en double, il faut modifier toutes ses lignes.
 - Événements Personnels d'un collègue : réglage `PERSONAL_EDITABLE_BY_OTHERS` (`app/domain/events.py`), en attente de la réponse du planner.
+
+## D-038 — Modification de quantité immédiate, contexte déduit par l'outil (remplace D-028 et D-036) (2026-10-12)
+
+- Décision du planner : la colonne « Catégorie modif. » est supprimée de la table de commande (outil installé et démo web). Plus de statut « À catégoriser », plus de bandeau jaune, plus de blocage de l'export. Règle 6 de CLAUDE.md mise à jour.
+- Une Qty finale tapée compte **tout de suite** : totaux, palettes, export. La ligne passe en « Modifié » (bleu). Revenir à la quantité proposée retire la modification.
+- Enregistré automatiquement, sans rien demander : ancienne qty, nouvelle qty, planner, heure, et un **contexte déduit** par une fonction pure (`deduce_context`, `app/engines/overrides.py`), lu sur la ligne avant modification. Priorité : événement actif sur le SKU > stock DC insuffisant pour la qty saisie (arrondie) > SKU dormant (ni Expected ni ventes, ou règle A6) > « Non précisé ». Le détail cite tout ce qui a été trouvé (ex. « Événement actif : « Promo AOS » · Stock DC insuffisant (0 < 240) »).
+- Le contexte n'apparaît **que** dans le panneau « Pourquoi » et dans l'Historique, jamais dans la table (il n'entre pas dans la colonne « Raisons »). L'export Excel détaillé (onglet Overrides) le reprend dans « Contexte déduit ».
+- Arrondi au multiple supérieur gardé (A3) : si la qty tapée n'est pas un multiple, un petit avertissement s'affiche une fois sous les filtres et la raison « ⚠ Saisie X arrondie au multiple de M : Y » reste sur la ligne.
+- Historique : modifications comptées par contexte déduit, SKU les plus modifiés, détail avec le contexte. Les modifications enregistrées avant cette décision gardent leur ancienne catégorie (« Catégorie : Promo », etc.).
+- Base locale : deux colonnes ajoutées à la table `overrides` (`context`, `context_detail`), sans toucher aux lignes existantes. Le champ `category` reste lisible mais n'est plus demandé.
+- Inchangé : la raison libre reste facultative dans « Pourquoi » ; une ligne BLOCKED par un événement demande toujours une confirmation ou une modification avec raison avant l'export LT (garde-fou D-031, distinct de cette règle).
+- Même règle dans la démo web.

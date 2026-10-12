@@ -197,7 +197,8 @@ class TargetStock(_Frozen):
 
 
 class OverrideCategory(StrEnum):
-    """Catégorie de la raison d'un override, pour analyser les décisions des planners."""
+    """Ancienne catégorie choisie par le planner (D-036). Plus demandée depuis D-038 : gardée
+    seulement pour relire les modifications déjà enregistrées."""
 
     PROMO = "promo"
     LAUNCH = "launch"
@@ -209,7 +210,6 @@ class OverrideCategory(StrEnum):
     OTHER = "other"
 
 
-# Libellés courts : la catégorie se choisit en un clic dans la ligne du tableau (D-036).
 OVERRIDE_CATEGORY_LABELS = {
     OverrideCategory.PROMO: "Promo",
     OverrideCategory.LAUNCH: "Lancement",
@@ -222,17 +222,37 @@ OVERRIDE_CATEGORY_LABELS = {
 }
 
 
+class OverrideContext(StrEnum):
+    """Contexte d'une modification, déduit par l'outil sans rien demander (D-038)."""
+
+    EVENT = "event"
+    DC_SHORT = "dc_short"
+    DORMANT = "dormant"
+    UNSPECIFIED = "unspecified"
+
+
+OVERRIDE_CONTEXT_LABELS = {
+    OverrideContext.EVENT: "Événement actif",
+    OverrideContext.DC_SHORT: "Stock DC insuffisant",
+    OverrideContext.DORMANT: "SKU dormant",
+    OverrideContext.UNSPECIFIED: "Non précisé",
+}
+
+
 class Override(_Frozen):
     """Modification manuelle d'une quantité par un planner (règle 6).
 
-    Auteur, horodatage et catégorie sont obligatoires ; la raison libre est facultative
-    (décision du planner du 11-oct-2026, D-036, qui révise D-028).
+    Auteur et horodatage sont obligatoires. Le contexte est déduit par l'outil (D-038) ;
+    rien n'est demandé au planner. `category` ne sert plus qu'aux modifications anciennes
+    (D-036) ; la raison libre reste facultative.
     """
 
     sku: Sku
     qty_before: int = Field(ge=0)
     qty_after: int = Field(ge=0)
-    category: OverrideCategory
+    context: OverrideContext = OverrideContext.UNSPECIFIED
+    context_detail: str = ""
+    category: OverrideCategory | None = None
     reason: str = ""
     author: str = Field(min_length=1)
     timestamp: datetime

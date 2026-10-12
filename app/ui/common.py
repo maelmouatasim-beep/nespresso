@@ -12,7 +12,6 @@ import streamlit as st
 
 from app.domain.events import SkuEvent
 from app.domain.models import (
-    OVERRIDE_CATEGORY_LABELS,
     ForecastMode,
     Override,
     RecommendationLine,
@@ -20,6 +19,7 @@ from app.domain.models import (
 )
 from app.engines.categories import category_of
 from app.engines.events import event_tags
+from app.engines.overrides import deduce_context
 from app.services.planning import EventContext, PlanningResult, with_overrides
 from app.storage import db
 from app.storage import events as event_store
@@ -41,7 +41,6 @@ MODE_LABEL = {v.value: k for k, v in MODES.items()} | {"safe": "Standard"}
 # Statuts : pastille + texte. Couleurs de la charte (docs/charte_visuelle.md), contraste ≥ 4,5:1.
 STATUS_ICON = {"OK": "● OK", "REVIEW": "● REVIEW", "BLOCKED": "● BLOCKED"}  # grille
 MODIFIED = "● Modifié"
-PENDING = "● À catégoriser"  # quantité saisie, catégorie pas encore choisie (D-036)
 STATUS_MD = {"OK": ":green[● OK]", "REVIEW": ":orange[● REVIEW]", "BLOCKED": ":red[● BLOCKED]"}
 MODIFIED_MD = ":blue[● Modifié]"
 STATUS_COLORS = {  # texte, fond
@@ -49,7 +48,6 @@ STATUS_COLORS = {  # texte, fond
     "REVIEW": ("#94600F", "#FFF4DF"),
     "BLOCKED": ("#B23A3A", "#FBE9E7"),
     "Modifié": ("#2F5F9E", "#E8F0FA"),
-    "À catégoriser": ("#94600F", "#FFF4DF"),
 }
 ZEBRA = "#FBF8F3"  # lignes alternées très légères
 SOURCE_LABEL = {
@@ -64,7 +62,6 @@ SOURCE_LABEL = {
 }
 # Puce pleine = événement d'équipe, cerclée = événement personnel.
 EVENT_DOT = {"team": "●", "personal": "○"}
-CATEGORY_BY_LABEL = {label: cat for cat, label in OVERRIDE_CATEGORY_LABELS.items()}
 FRESH_ICON = {
     "green": ":green[:material/check_circle:]",
     "orange": ":orange[:material/schedule:]",
@@ -94,7 +91,6 @@ def init_state() -> None:
         "include_ok": False,  # lancements / demandes à inclure confirmés
         "requests_to_close": [],  # demandes boutique à terminer après l'export
         "day_checks": {},  # Journée : validations par boutique
-        "pending_edits": {},  # sku -> {"qty", "cat"} : modification sans catégorie (D-036)
         "events_viewed": set(),  # (boutique, livraison) dont le filtre « Événements » a été ouvert
         "ev_edit": None,  # Événements : panneau ouvert (id, "new" ou "request")
         "ev_nonce": 0,
@@ -130,7 +126,7 @@ def events_viewed(boutique: str, delivery: date) -> bool:
 
 
 def reset_order() -> None:
-    ss.base, ss.overrides, ss.seen, ss.pending_edits = None, {}, set(), {}
+    ss.base, ss.overrides, ss.seen = None, {}, set()
     ss.confirmed_blocks, ss.include_ok = set(), False
     ss.saved_run_id, ss.why_sku = None, None
     ss.nonce += 1
@@ -261,44 +257,38 @@ def num(x: float | None) -> float:
 
 
 def status_cell(line: RecommendationLine) -> str:
-    """Statut affiché : « À catégoriser » puis « Modifié » priment ; « ✓ » = ligne validée."""
-    if pending_qty(line.sku) is not None:
-        return PENDING
+    """Statut affiché : « Modifié » prime ; « ✓ » quand le planner a validé la ligne."""
     label = MODIFIED if line.sku in ss.overrides else STATUS_ICON[line.status.value]
     return f"{label} ✓" if line.sku in ss.seen else label
 
 
-def pending_qty(sku: str) -> int | None:
-    """Quantité saisie dans la grille mais pas encore appliquée faute de catégorie."""
-    return (ss.get("pending_edits") or {}).get(sku, {}).get("qty")
+def make_override(base_line: RecommendationLine, after: int, reason: str = "") -> Override:
+    """Modification du planner, appliquée tout de suite (D-038) : rien n'est demandé.
 
-
-def pending_count() -> int:
-    return sum(1 for p in (ss.get("pending_edits") or {}).values() if p.get("qty") is not None)
-
-
-def override_label(sku: str) -> str | None:
-    """Catégorie affichée dans la ligne : celle de la modification, sinon celle choisie d'avance."""
-    ov = ss.overrides.get(sku)
-    if ov is not None:
-        return OVERRIDE_CATEGORY_LABELS[ov.category]
-    return (ss.get("pending_edits") or {}).get(sku, {}).get("cat")
-
-
-def make_override(
-    sku: str, before: int, after: int, category_label: str, reason: str = ""
-) -> Override:
-    """Modification du planner : catégorie obligatoire (D-036), auteur et heure toujours gardés,
-    raison libre facultative."""
+    Gardés automatiquement : quantité d'avant, quantité saisie, planner, heure et le contexte
+    déduit de la ligne (événement actif, stock DC insuffisant, SKU dormant, sinon « non
+    précisé »). La raison libre reste facultative (panneau « Pourquoi »).
+    """
+    context, detail = deduce_context(base_line, after)
     return Override(
-        sku=sku,
-        qty_before=before,
+        sku=base_line.sku,
+        qty_before=base_line.qty,
         qty_after=after,
-        category=CATEGORY_BY_LABEL[category_label],
+        context=context,
+        context_detail=detail,
         reason=reason.strip(),
         author=author() or "Planner non renseigné",
         timestamp=datetime.now(),
     )
+
+
+def rounding_note(line: RecommendationLine, typed: int) -> str | None:
+    """Petit avertissement quand la qty tapée n'est pas un multiple (elle est arrondie)."""
+    multiple = int(line.explanation.get("multiple") or 1)
+    if multiple <= 1 or typed % multiple == 0:
+        return None
+    rounded = -(-typed // multiple) * multiple
+    return f"{line.sku} : {typed} n'est pas un multiple de {multiple}, arrondi à {rounded}."
 
 
 def category_of_line(line: RecommendationLine, mapping: dict[str, str]) -> str:
@@ -331,8 +321,7 @@ def order_frame(
                 "Ventes": num(sales),
                 "Couv. actuelle": num(_round1(e["current_cover_days"])),
                 "Qty proposée": base_qty.get(x.sku, x.qty),
-                "Qty finale": pending_qty(x.sku) if pending_qty(x.sku) is not None else x.qty,
-                "Catégorie modif.": override_label(x.sku),
+                "Qty finale": x.qty,
                 "Couv. après": num(_round1(after)),
                 "Multiple": num(e["multiple"]),
                 "Stock DC": num(inp["dc_available"]),
@@ -346,7 +335,7 @@ def order_frame(
 ORDER_COLUMNS = [
     "Détail", "Statut", "SKU", "Description", "Catégorie", "Événement", "Expected", "Ventes",
     "Couv. actuelle",
-    "Qty proposée", "Qty finale", "Catégorie modif.", "Couv. après", "Multiple", "Stock DC", "Source", "Raisons",
+    "Qty proposée", "Qty finale", "Couv. après", "Multiple", "Stock DC", "Source", "Raisons",
 ]  # fmt: skip
 
 _INT = {"format": "localized"}
@@ -368,20 +357,13 @@ ORDER_COLUMN_CONFIG = {
     "Qty finale": st.column_config.NumberColumn(
         "Qty finale", width=90, min_value=0, step=1, help="Modifiable", **_INT
     ),
-    "Catégorie modif.": st.column_config.SelectboxColumn(
-        "Catégorie modif.",
-        width=135,
-        options=list(OVERRIDE_CATEGORY_LABELS.values()),
-        help="Obligatoire pour une quantité modifiée : un clic (D-036). Raison libre "
-        "facultative dans « Pourquoi ».",
-    ),  # fmt: skip
     "Couv. après": st.column_config.NumberColumn("Couv. après", width=80, format="%.1f"),
     "Multiple": st.column_config.NumberColumn(width=70, **_INT),
     "Stock DC": st.column_config.NumberColumn(width=85, **_INT),
     "Source": st.column_config.TextColumn(width=95),
     "Raisons": st.column_config.TextColumn(width=340),
 }
-EDITABLE_COLUMNS = ("Détail", "Qty finale", "Catégorie modif.")
+EDITABLE_COLUMNS = ("Détail", "Qty finale")
 
 
 def _status_style(value: str) -> str:
@@ -476,7 +458,12 @@ def explain_steps(line: RecommendationLine) -> list[str]:
         steps.append(f"**Événement(s)** {titles} : voir les raisons ci-dessous")
     if e.get("override"):
         o = e["override"]
-        steps.append(f"**Modifié** par {o['author']} : {fmt_int(o['qty_before'])} → "
-                     f"{fmt_int(o['qty_final'])} ({o['reason']})")  # fmt: skip
+        when = str(o["timestamp"])[:16].replace("T", " ")
+        steps.append(f"**Modifié** par {o['author']} le {when} : {fmt_int(o['qty_before'])} → "
+                     f"{fmt_int(o['qty_final'])}" + (f" ({o['reason']})" if o["reason"] else ""))  # fmt: skip
+        if o["qty_final"] != o["qty_after"]:
+            steps.append(f"Saisie {fmt_int(o['qty_after'])} arrondie au multiple : "
+                         f"**{fmt_int(o['qty_final'])}**")  # fmt: skip
+        steps.append(f"**Contexte déduit** : {o.get('context_detail') or 'Non précisé'}")
     steps.append(f"**Quantité finale : {fmt_int(line.qty)}**")
     return steps

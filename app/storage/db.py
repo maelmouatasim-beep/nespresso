@@ -60,6 +60,8 @@ CREATE TABLE IF NOT EXISTS overrides (
     qty_after INTEGER NOT NULL,
     category TEXT,
     reason TEXT NOT NULL DEFAULT '',
+    context TEXT,
+    context_detail TEXT NOT NULL DEFAULT '',
     author TEXT NOT NULL CHECK (length(trim(author)) >= 1),
     timestamp TEXT NOT NULL
 );
@@ -144,6 +146,13 @@ def _migrate(conn: sqlite3.Connection) -> None:
             conn.execute("DROP TABLE overrides")
             conn.execute("ALTER TABLE overrides_new RENAME TO overrides")
         conn.execute("PRAGMA foreign_keys = ON")
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(overrides)")}
+    if "context" not in cols:
+        # D-038 : contexte déduit par l'outil. Ajout de colonnes seulement, aucune ligne touchée ;
+        # les modifications plus anciennes gardent leur catégorie et un contexte vide.
+        with conn:
+            conn.execute("ALTER TABLE overrides ADD COLUMN context TEXT")
+            conn.execute("ALTER TABLE overrides ADD COLUMN context_detail TEXT NOT NULL DEFAULT ''")
 
 
 def _now() -> str:
@@ -216,7 +225,8 @@ def save_run(
         )
         conn.executemany(
             """INSERT INTO overrides (run_id, sku, qty_before, qty_after, category, reason,
-                author, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                context, context_detail, author, timestamp)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             [
                 (
                     run_id,
@@ -225,6 +235,8 @@ def save_run(
                     o.qty_after,
                     o.category.value if o.category else None,
                     o.reason.strip(),
+                    o.context.value,
+                    o.context_detail,
                     o.author.strip(),
                     o.timestamp.isoformat(),
                 )  # fmt: skip

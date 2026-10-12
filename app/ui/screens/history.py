@@ -1,4 +1,4 @@
-"""Écran 7 — Historique : runs, modifications par catégorie, comparaison de deux runs."""
+"""Écran 7 — Historique : runs, modifications par contexte déduit, comparaison de deux runs."""
 
 from __future__ import annotations
 
@@ -7,10 +7,22 @@ from collections import Counter
 import pandas as pd
 import streamlit as st
 
-from app.domain.models import OVERRIDE_CATEGORY_LABELS
+from app.domain.models import OVERRIDE_CATEGORY_LABELS, OVERRIDE_CONTEXT_LABELS
 from app.engines.compare import compare_orders
 from app.storage import db
 from app.ui.common import MODE_LABEL, workspace
+
+_CONTEXT = {c.value: label for c, label in OVERRIDE_CONTEXT_LABELS.items()}
+_OLD_CATEGORY = {c.value: label for c, label in OVERRIDE_CATEGORY_LABELS.items()}
+
+
+def _context(o: dict) -> str:
+    """Contexte déduit (D-038) ; les modifications d'avant gardent leur ancienne catégorie."""
+    if o.get("context"):
+        return _CONTEXT.get(o["context"], o["context"])
+    if o.get("category"):
+        return f"Catégorie : {_OLD_CATEGORY.get(o['category'], o['category'])}"
+    return _CONTEXT["unspecified"]
 
 
 def render() -> None:
@@ -36,14 +48,13 @@ def render() -> None:
         )  # fmt: skip
 
         st.subheader("Modifications des planners")
-        labels = {c.value: label for c, label in OVERRIDE_CATEGORY_LABELS.items()}
         stats = [o for o in db.override_stats(conn) if not pick or o["boutique"] in pick]
         if not stats:
             st.info("Aucune modification enregistrée.")
         else:
             c1, c2 = st.columns(2)
-            by_cat = Counter(labels.get(o["category"], "Sans catégorie") for o in stats)
-            c1.dataframe(pd.DataFrame(by_cat.most_common(), columns=["Catégorie", "Modifications"]),
+            by_ctx = Counter(_context(o) for o in stats)
+            c1.dataframe(pd.DataFrame(by_ctx.most_common(), columns=["Contexte déduit", "Modifications"]),
                          hide_index=True, width="stretch")  # fmt: skip
             by_sku = Counter(o["sku"] for o in stats)
             c2.dataframe(pd.DataFrame(by_sku.most_common(15), columns=["SKU le plus modifié", "Fois"]),
@@ -51,7 +62,8 @@ def render() -> None:
             with st.expander(f"Détail ({len(stats)})"):
                 st.dataframe(pd.DataFrame([{
                     "Boutique": o["boutique"], "SKU": o["sku"], "Avant": o["qty_before"],
-                    "Après": o["qty_after"], "Catégorie": labels.get(o["category"], "Sans catégorie"),
+                    "Après": o["qty_after"], "Contexte déduit": _context(o),
+                    "Détail du contexte": o.get("context_detail") or "",
                     "Raison": o["reason"], "Par": o["author"], "Quand": o["timestamp"][:16],
                 } for o in stats]), hide_index=True, width="stretch")  # fmt: skip
 

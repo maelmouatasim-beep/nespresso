@@ -20,7 +20,6 @@ from app.ui.common import (
     fmt_date,
     fmt_int,
     go,
-    pending_count,
     ss,
     workspace,
 )
@@ -101,16 +100,10 @@ def render() -> None:
     if not author():
         st.error("Choisis ton prénom (Planner, barre de gauche) pour exporter.")
     gate_ok = gate_for_order(res)
-    waiting = pending_count()
-    if waiting:
-        # D-036 : catégorie obligatoire. Rien n'est exporté tant qu'une quantité saisie attend.
-        st.error(f"{waiting} quantité(s) modifiée(s) sans catégorie : choisis la catégorie dans "
-                 "la ligne (Commande boutique) avant d'exporter.")  # fmt: skip
     c = st.columns(3)
     c[0].download_button("Télécharger le fichier LT (SKU;QTY)", data=lt_content(res.lines),
                          file_name=name, mime="text/csv", type="primary", key="dl_lt",
-                         disabled=not author() or not gate_ok or bool(waiting), on_click=_on_lt,
-                         args=(res, name),
+                         disabled=not author() or not gate_ok, on_click=_on_lt, args=(res, name),
                          width="stretch")  # fmt: skip
     c[1].download_button("Récapitulatif boutique",
                          data=recap_csv(p.boutique, p.delivery_date.isoformat(), res.lines, res.pallets),

@@ -179,13 +179,36 @@ def test_order_workbook_and_zip(b80) -> None:
 # --- Base : catégories et migration -----------------------------------------------------------
 
 
-def test_override_category_is_required_reason_optional() -> None:
-    """D-036 : la catégorie est obligatoire, la raison libre reste facultative."""
-    with pytest.raises(ValidationError):
-        Override(sku="A", qty_before=1, qty_after=2, author="A", timestamp=datetime(2026, 1, 1))
-    o = Override(sku="A", qty_before=1, qty_after=2, category="store_request", author="A",
-                 timestamp=datetime(2026, 1, 1))  # fmt: skip
-    assert o.category.value == "store_request" and o.reason == ""
+def test_override_needs_neither_category_nor_reason() -> None:
+    """D-038 : ni catégorie ni raison demandées ; le contexte est déduit par l'outil."""
+    o = Override(sku="A", qty_before=1, qty_after=2, author="A", timestamp=datetime(2026, 1, 1))
+    assert o.category is None and o.reason == "" and o.context.value == "unspecified"
+
+
+def test_storage_keeps_deduced_context(tmp_path: Path, b80) -> None:
+    """Base d'avant D-038 (sans colonne contexte) : colonnes ajoutées, lignes gardées."""
+    path = tmp_path / "v3.db"
+    data, inputs, dc, params = b80
+    old_ov = Override(sku="7005.70", qty_before=3120, qty_after=3600, category="promo",
+                      author="A", timestamp=datetime(2026, 10, 5))  # fmt: skip
+    res = run_planning(inputs, params, ForecastMode.STANDARD, dc=dc, portfolio=data.portfolio,
+                       overrides=[old_ov])  # fmt: skip
+    conn = db.connect(path)
+    first = db.save_run(conn, res, author="A", sources={}, overrides=[old_ov])
+    with conn:  # retour au schéma D-036 : sans les colonnes du contexte
+        conn.execute("UPDATE overrides SET context = NULL")
+        conn.execute("ALTER TABLE overrides DROP COLUMN context_detail")
+        conn.execute("ALTER TABLE overrides DROP COLUMN context")
+    conn.close()
+    conn = db.connect(path)  # migration D-038
+    new_ov = Override(sku="7005.70", qty_before=3120, qty_after=3600, context="event",
+                      context_detail="Événement actif : « Promo AOS »", author="B",
+                      timestamp=datetime(2026, 10, 12))  # fmt: skip
+    second = db.save_run(conn, res, author="B", sources={}, overrides=[new_ov])
+    old_row = db.run_overrides(conn, first)[0]
+    assert old_row["category"] == "promo" and old_row["context"] is None
+    got = db.run_overrides(conn, second)[0]
+    assert (got["context"], got["context_detail"]) == ("event", "Événement actif : « Promo AOS »")
 
 
 def test_storage_migrates_old_overrides_table(tmp_path: Path, b80) -> None:
@@ -212,7 +235,13 @@ def test_storage_migrates_old_overrides_table(tmp_path: Path, b80) -> None:
 def test_storage_migrates_reason_constraint_and_keeps_rows(tmp_path: Path, b80) -> None:
     """Base d'avant D-028 (raison obligatoire en base) : lignes gardées, raison vide acceptée."""
     path = tmp_path / "v2.db"
+    data, inputs, dc, params = b80
+    old_ov = Override(sku="7005.70", qty_before=3120, qty_after=3600, category="promo",
+                      reason="Promo AOS", author="A", timestamp=datetime(2026, 10, 5))  # fmt: skip
+    res = run_planning(inputs, params, ForecastMode.STANDARD, dc=dc, portfolio=data.portfolio,
+                       overrides=[old_ov])  # fmt: skip
     conn = db.connect(path)
+    first = db.save_run(conn, res, author="A", sources={})
     with conn:
         conn.execute("DROP TABLE overrides")
         conn.execute(
@@ -223,12 +252,10 @@ def test_storage_migrates_reason_constraint_and_keeps_rows(tmp_path: Path, b80) 
                reason TEXT NOT NULL CHECK (length(trim(reason)) >= 3),
                author TEXT NOT NULL CHECK (length(trim(author)) >= 1), timestamp TEXT NOT NULL)"""
         )
-    data, inputs, dc, params = b80
-    old_ov = Override(sku="7005.70", qty_before=3120, qty_after=3600, category="promo",
-                      reason="Promo AOS", author="A", timestamp=datetime(2026, 10, 5))  # fmt: skip
-    res = run_planning(inputs, params, ForecastMode.STANDARD, dc=dc, portfolio=data.portfolio,
-                       overrides=[old_ov])  # fmt: skip
-    first = db.save_run(conn, res, author="A", sources={}, overrides=[old_ov])
+    with conn:  # ligne écrite par l'ancienne version (sans colonnes du contexte)
+        conn.execute("INSERT INTO overrides (run_id, sku, qty_before, qty_after, category, reason, "
+                     "author, timestamp) VALUES (?, '7005.70', 3120, 3600, 'promo', 'Promo AOS', "
+                     "'A', '2026-10-05')", (first,))  # fmt: skip
     conn.close()
     conn = db.connect(path)  # migration
     bare = Override(sku="7005.70", qty_before=3120, qty_after=3840, category="stockout",

@@ -132,13 +132,14 @@ def order_workbook(
     _sheet(
         wb,
         "Overrides",
-        ["SKU", "Avant", "Après", "Catégorie", "Raison", "Auteur", "Horodatage"],
+        ["SKU", "Avant", "Après", "Contexte déduit", "Raison", "Auteur", "Horodatage"],
         [
             [
                 o.sku,
                 o.qty_before,
                 o.qty_after,
-                OVERRIDE_CATEGORY_LABELS[OverrideCategory(o.category)] if o.category else "",
+                o.context_detail
+                or (OVERRIDE_CATEGORY_LABELS[OverrideCategory(o.category)] if o.category else ""),
                 o.reason,
                 o.author,
                 o.timestamp.isoformat(timespec="minutes"),

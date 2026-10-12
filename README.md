@@ -40,11 +40,11 @@ la première fois, prénom seulement), choisis « Mes données »
    (facultatif), jours d'historique, mode, puis « Calculer ». Toutes les lignes sont dans une seule
    grille, comme dans le calculateur Excel : filtres Catégorie et Statut, « Qty > 0 seulement »,
    recherche, tri au clic sur un en-tête. Coche 🔍 sur une ligne pour voir « Pourquoi cette quantité ? »
-   à droite. Tape la « Qty finale » directement dans la cellule, puis choisis la catégorie dans la
-   colonne « Catégorie modif. » de la même ligne (un clic, obligatoire : promo, lancement, rupture,
-   surstock, stock DC, donnée erronée, demande boutique, autre). Tant que la catégorie manque, la
-   ligne est « À catégoriser » et la quantité ne compte pas encore. La raison libre reste facultative
-   (panneau « Pourquoi »). Les SKU concernés par
+   à droite. Tape la « Qty finale » directement dans la cellule : elle compte tout de suite (totaux,
+   palettes, export) et la ligne passe en « Modifié ». Rien n'est demandé : l'outil garde l'ancienne
+   et la nouvelle qty, ton prénom, l'heure et un contexte déduit (événement actif, stock DC
+   insuffisant, SKU dormant ou « non précisé »), visible dans « Pourquoi » et l'Historique. Une qty
+   qui n'est pas un multiple est arrondie au multiple supérieur, avec un petit avertissement. Les SKU concernés par
    un événement ont une puce dans la colonne « Événement » (● équipe, ○ personnel) ; le bandeau
    « Événements actifs » filtre la table d'un clic.
 3. **Journée** : plusieurs boutiques d'un coup (présélection du Schedule, modifiable), un cover par
@@ -53,7 +53,6 @@ la première fois, prénom seulement), choisis « Mes données »
    Avant le fichier LT, une vérification en 3 points (lignes bloquées par un événement, SKU flagués
    non vus, lancements et demandes boutique à inclure) doit être verte ; chaque validation est tracée.
    « Marquer comme vus » ne s'active qu'après avoir ouvert une fois le filtre « Événements » de la
-   commande. Aucune quantité modifiée ne doit rester « À catégoriser ».
    L'outil n'écrit jamais dans Nessoft : tu importes le fichier toi-même.
 5. **Événements SKU** : promotions, lancements, arrêts, interdictions, conversions, urgences,
    demandes boutique et SKU à surveiller. Onglets « Équipe » et « Mes événements », table triable,
@@ -63,7 +62,7 @@ la première fois, prénom seulement), choisis « Mes données »
 6. **Référentiels** : multiples, conversions, portfolio, boutiques/DC, Schedule, exclusions,
    catégories (type produit → catégorie du filtre), allocations, lancements, stocks cibles, règles boutique. Propriétaire, date de mise à jour,
    anomalies, import depuis un modèle.
-7. **Historique** : commandes enregistrées, modifications par catégorie, SKU les plus modifiés,
+7. **Historique** : commandes enregistrées, modifications par contexte déduit, SKU les plus modifiés,
    comparaison de deux commandes.
 
 Les fichiers déposés et la base locale restent dans `data/` (jamais versionné).

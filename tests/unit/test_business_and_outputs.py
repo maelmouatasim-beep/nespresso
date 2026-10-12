@@ -12,6 +12,7 @@ from app.domain.models import (
     ForecastMode,
     Launch,
     Override,
+    OverrideContext,
     PlanningParameters,
     Product,
     QtySource,
@@ -24,7 +25,7 @@ from app.engines.business import BusinessInputError, allocation_due, apply_busin
 from app.engines.compare import compare_orders
 from app.engines.conversion import build_conversion_index
 from app.engines.export import lt_content, lt_filename, lt_lines, recap_csv
-from app.engines.overrides import OverrideError, apply_overrides
+from app.engines.overrides import OverrideError, apply_overrides, deduce_context
 from app.engines.pallets import MACHINES, OL, OTHERS, VL, estimate_pallets
 from app.engines.portfolio import PortfolioIndex
 from app.engines.sales import SalesSummary
@@ -162,18 +163,46 @@ def ov(**kw) -> Override:
     return Override(**{**base, **kw})
 
 
-def test_override_requires_author_and_category_but_not_reason() -> None:
-    """D-036 : catégorie obligatoire, raison libre facultative, auteur et heure gardés."""
-    bare = ov(reason="", category="store_request")
+def test_override_needs_no_category_and_counts_immediately() -> None:
+    """D-038 : aucune catégorie demandée ; auteur et heure gardés ; le contexte déduit reste
+    dans l'explication et n'apparaît pas dans les raisons (affichées dans la table)."""
+    bare = Override(sku="7005.70", qty_before=3120, qty_after=3600, context="dc_short",
+                    context_detail="Stock DC insuffisant (100 < 3600)", author="Planner A",
+                    timestamp=datetime(2026, 10, 5, 11, 51))  # fmt: skip
     out = apply_overrides([line("7005.70", 3120)], [bare])
-    assert out[0].qty == 3600
-    assert out[0].reasons[-1] == "Modifié par Planner A : 3120 → 3600 (Demande boutique)"
-    assert out[0].explanation["override"]["author"] == "Planner A"
-    assert out[0].explanation["override"]["category"] == "store_request"
+    assert out[0].qty == 3600 and out[0].status is Status.OK
+    assert out[0].reasons == ["Modifié par Planner A : 3120 → 3600"]
+    o = out[0].explanation["override"]
+    assert (o["author"], o["context"], o["category"]) == ("Planner A", "dc_short", None)
+    assert o["context_detail"] == "Stock DC insuffisant (100 < 3600)"
+    plain = Override(sku="A", qty_before=1, qty_after=2, author="A", timestamp=datetime(2026, 1, 1))
+    assert plain.context is OverrideContext.UNSPECIFIED
     with pytest.raises(ValidationError):
         ov(author="")
-    with pytest.raises(ValidationError):
-        ov(category=None)
+
+
+def _ctx_line(**inputs) -> RecommendationLine:  # noqa: ANN003
+    base = {"sales_total": 50.0, "expected_total": 400.0, "dc_available": 10_000}
+    return line("7005.70", 3120).model_copy(
+        update={"explanation": {"inputs": {**base, **inputs}, "multiple": 240}}
+    )
+
+
+def test_context_is_deduced_from_the_line() -> None:
+    """D-038 : événement > stock DC insuffisant > SKU dormant > non précisé."""
+    assert deduce_context(_ctx_line(), 3600) == (OverrideContext.UNSPECIFIED, "Non précisé")
+    ctx, detail = deduce_context(_ctx_line(dc_available=3500), 3500)  # arrondi à 3600 > 3500
+    assert ctx is OverrideContext.DC_SHORT and detail == "Stock DC insuffisant (3500 < 3600)"
+    ctx, detail = deduce_context(_ctx_line(dc_available=None), 240)
+    assert detail == "Stock DC insuffisant (SKU absent du stock DC)"
+    assert deduce_context(_ctx_line(dc_available=None), 0)[0] is OverrideContext.UNSPECIFIED
+    ctx, _ = deduce_context(_ctx_line(sales_total=0.0, expected_total=0.0), 240)
+    assert ctx is OverrideContext.DORMANT
+    ev = _ctx_line(dc_available=0).model_copy()
+    ev.explanation["events"] = {"applied": [{"title": "Promo AOS"}, {"title": "Promo AOS"}]}
+    ctx, detail = deduce_context(ev, 240)
+    assert ctx is OverrideContext.EVENT
+    assert detail == "Événement actif : « Promo AOS » · Stock DC insuffisant (0 < 240)"
 
 
 def test_override_applied_with_trace() -> None:

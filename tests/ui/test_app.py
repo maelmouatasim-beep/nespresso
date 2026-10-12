@@ -296,34 +296,27 @@ def test_day_shows_events_and_gates_the_zip(app: AppTest) -> None:
     assert not app.get("download_button")[0].proto.disabled
 
 
-def test_quantity_change_waits_for_its_category(app: AppTest) -> None:
-    """D-036 : une quantité saisie sans catégorie reste « À catégoriser », non appliquée."""
+def test_quantity_change_counts_immediately_with_deduced_context(app: AppTest) -> None:
+    """D-038 : pas de catégorie ; la qty saisie compte tout de suite, arrondie au multiple avec
+    un avertissement ; le contexte déduit n'apparaît que dans « Pourquoi »."""
     app.selectbox(key="author").set_value("Camille").run()
     compute_b80(app)
-    # Ce que produit la saisie de 3360 dans la cellule « Qty finale », catégorie vide.
-    app.session_state["pending_edits"] = {"7005.70": {"qty": 3360, "cat": None}}
-    app.run()
-    row = grid(app).set_index("SKU").loc["7005.70"]
-    assert (row["Statut"], row["Qty finale"]) == ("● À catégoriser", 3360)
-    assert "7005.70" not in app.session_state["overrides"]
-    assert any("sans catégorie" in w.value for w in app.warning)
-    goto(app, PAGES[3])
-    assert any("sans catégorie" in e.value for e in app.error)
-    assert app.get("download_button")[0].proto.disabled
-    # Panneau « Pourquoi » : Enregistrer sans catégorie est refusé, puis un clic sur « Promo ».
-    goto(app, PAGES[1])
+    assert "Catégorie modif." not in grid(app).columns
     app.session_state["why_sku"] = "7005.70"
     app.run()
-    assert app.number_input(key="dlg_qty_7005.70").value == 3360
-    app.button(key="dlg_save").click().run()
-    assert any("obligatoire" in e.value for e in app.error)
-    app.selectbox(key="dlg_cat_7005.70").set_value("Promo").run()
+    assert not [s for s in app.selectbox if s.key.startswith("dlg_cat")]
+    app.number_input(key="dlg_qty_7005.70").set_value(3350).run()
     app.button(key="dlg_save").click().run()
     ov = app.session_state["overrides"]["7005.70"]
-    assert (ov.qty_after, ov.category.value, ov.reason, ov.author) == (3360, "promo", "", "Camille")
-    assert app.session_state["pending_edits"] == {}
+    assert (ov.qty_before, ov.qty_after, ov.author, ov.category) == (3120, 3350, "Camille", None)
+    assert ov.context_detail  # déduit, jamais demandé
+    assert any("n'est pas un multiple de 240, arrondi à 3360" in c.value for c in app.caption)
     row = grid(app).set_index("SKU").loc["7005.70"]
-    assert (row["Statut"], row["Catégorie modif."]) == ("● Modifié", "Promo")
+    assert (row["Statut"], row["Qty finale"]) == ("● Modifié", 3360)
+    assert ov.context_detail not in row["Raisons"]
+    assert any("Contexte déduit" in m.value for m in app.markdown)
+    app.run()  # l'avertissement d'arrondi ne s'affiche qu'une fois
+    assert not any("pas un multiple" in c.value for c in app.caption)
 
 
 def test_every_referential_is_editable_and_saved(app: AppTest) -> None:
