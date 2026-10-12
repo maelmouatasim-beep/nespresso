@@ -187,6 +187,37 @@ def test_two_contradictory_events_block_the_line() -> None:
     assert plan(a, c)[1]["7005.70"].qty == 480
 
 
+def test_two_added_quantities_are_summed_in_review() -> None:
+    """Q-027 : promo + demande boutique qui ajoutent chacune → additionnées, REVIEW."""
+    promo = ev(effect=EventEffect.ADD_QTY, quantities=qty((ALL, ALL, 100)))
+    demande = ev(id=2, title="Demande B80", type=EventType.STORE_REQUEST, scope=EventScope.PERSONAL,
+                 boutiques=("B80",),
+                 effect=EventEffect.ADD_QTY, quantities=qty((ALL, ALL, 240)))  # fmt: skip
+    line = plan(promo, demande)[1]["7005.70"]
+    # 720 calculé + 100 arrondi à 240 + 240 = 1200
+    assert (line.qty, line.status, line.source) == (1200, Status.REVIEW, QtySource.EVENT)
+    assert line.explanation["events"]["decision"] == "add_qty_sum"
+    assert not any(r.startswith(REASON_CONFLICT) for r in line.reasons)
+    assert any("Festive AOS" in r and "100 ajouté" in r for r in line.reasons)
+    assert any("Demande B80" in r and "240 ajouté" in r for r in line.reasons)
+    assert any("720 calculé + 240 + 240 = 1200" in r for r in line.reasons)
+    # Même quantité ajoutée par deux événements : additionnée aussi (240 + 240).
+    same = demande.model_copy(update={"quantities": promo.quantities})
+    assert plan(promo, same)[1]["7005.70"].qty == 1200
+
+
+def test_other_quantity_conflicts_stay_blocked() -> None:
+    """Q-027 : imposée contre imposée (différentes), imposée contre ajoutée → BLOCKED."""
+    a = ev(effect=EventEffect.SET_QTY, quantities=qty((ALL, ALL, 480)))
+    b = ev(id=2, title="Autre", effect=EventEffect.SET_QTY, quantities=qty((ALL, ALL, 960)))
+    line = plan(a, b)[1]["7005.70"]
+    assert (line.qty, line.status) == (0, Status.BLOCKED)
+    assert any(r.startswith(REASON_CONFLICT) for r in line.reasons)
+    add = ev(id=3, title="Ajout", effect=EventEffect.ADD_QTY, quantities=qty((ALL, ALL, 240)))
+    ban = ev(id=4, type=EventType.BAN, title="Rappel", effect=EventEffect.BLOCK, end=None)
+    assert plan(add, add.model_copy(update={"id": 5}), ban)[1]["7005.70"].status is Status.BLOCKED
+
+
 def test_conversion_blocks_old_and_aggregates_history_on_new() -> None:
     e = ev(type=EventType.CONVERSION, title="Melozio nouvelle recette",
            effect=EventEffect.REPLACE,
@@ -268,7 +299,7 @@ def test_export_refused_until_blocked_lines_are_treated() -> None:
     assert check.blocked == ("7005.70",) and check.unvalidated == ("7921.70",)
     assert check.to_include == (("7921.70", "Advent"),) and not check.ok
     # override SANS raison : pas « justifié »
-    ov = Override(sku="7005.70", qty_before=0, qty_after=240, author="Camille",
+    ov = Override(sku="7005.70", qty_before=0, qty_after=240, category="other", author="Camille",
                   timestamp=datetime(2026, 10, 5, 9))  # fmt: skip
     check = export_check(res.base_lines, overrides={"7005.70": ov}, seen={"7921.70"},
                          confirmed_blocks=set(), include_confirmed=True)  # fmt: skip

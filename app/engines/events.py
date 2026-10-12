@@ -6,8 +6,10 @@ Ordre de priorité sur un même SKU :
    Une interdiction gagne toujours : la quantité d'un autre événement est ignorée,
    ce qui est écrit dans les raisons.
 3. Quantité imposée ou ajoutée → remplace / complète la prévision, arrondie au multiple
-   supérieur, REVIEW. Deux quantités différentes sur le même SKU → BLOCKED « deux
-   événements contradictoires » : jamais de choix silencieux.
+   supérieur, REVIEW. Plusieurs quantités AJOUTÉES s'additionnent (chacune arrondie),
+   REVIEW, chaque événement cité (Q-027). Deux quantités imposées différentes, ou une
+   imposée et une ajoutée → BLOCKED « deux événements contradictoires » : jamais de
+   choix silencieux.
 4. Flag → REVIEW, la quantité du moteur reste.
 
 Une allocation officielle n'est jamais écrasée (règle 5) et une ligne déjà bloquée par
@@ -37,7 +39,7 @@ from app.engines.conversion import ConversionError, ConversionIndex, build_conve
 from app.engines.forecast import ceiling_to_multiple
 from app.engines.portfolio import numeric_key
 
-RULE_VERSION = "events-1.0.0"
+RULE_VERSION = "events-1.1.0"
 REASON_CONFLICT = "Deux événements contradictoires"
 _SOURCE_FR = {"launch": "lancement du référentiel", "target_stock": "stock cible",
               "dc_return": "retour DC (historique de secours)"}  # fmt: skip
@@ -236,6 +238,18 @@ def _multiple(line: RecommendationLine, hits: Sequence[_Hit]) -> tuple[int, list
     return m, notes, False
 
 
+def _one_per_event(given: list[tuple[_Hit, int]]) -> list[tuple[_Hit, int]]:
+    """Une quantité par événement : un SKU listé deux fois dans un événement compte une fois."""
+    seen: set[int] = set()
+    out = []
+    for h, q in given:
+        key = h.event.id if h.event.id is not None else id(h.event)
+        if key not in seen:
+            seen.add(key)
+            out.append((h, q))
+    return out
+
+
 def _qty_text(effect: EventEffect, qty: int) -> str:
     return f"imposée {qty}" if effect is EventEffect.SET_QTY else f"ajoutée {qty}"
 
@@ -321,7 +335,9 @@ def _apply_line(
                 f"{h.event.label} ({_who(h.event)}) : quantité non définie pour {boutique}, "
                 f"quantité du moteur gardée ({line.qty}){lead(h.event)}"
             )
-        distinct = {(h.event.effect, q) for h, q in given}
+        given = _one_per_event(given)
+        sets = [(h, q) for h, q in given if h.event.effect is EventEffect.SET_QTY]
+        adds = [(h, q) for h, q in given if h.event.effect is EventEffect.ADD_QTY]
         if not given:
             decision = "missing_qty"
         elif line.source is QtySource.ALLOCATION:
@@ -338,38 +354,54 @@ def _apply_line(
                     f"{h.event.label} : quantité {_qty_text(h.event.effect, q)} demandée mais la "
                     "ligne est bloquée par le moteur : à trancher par une modification"
                 )
-        elif len(distinct) > 1:
+        elif (sets and adds) or len({q for _, q in sets}) > 1:
+            # Imposée contre ajoutée, ou deux quantités imposées différentes (Q-027).
             qty, source, decision = 0, QtySource.EVENT, "conflict"
             raise_to(Status.BLOCKED)
             listed = " ; ".join(f"{h.event.label} ({_qty_text(h.event.effect, q)})"
                                 for h, q in given)  # fmt: skip
             reasons.append(f"{REASON_CONFLICT} : {listed} → quantité 0, à trancher")
         else:
-            h, q = given[0]
             multiple, notes, changed = _multiple(line, hits)
             reasons.extend(notes)
             if changed:
                 explanation["multiple"] = multiple
                 explanation["multiple_source"] = "event"
-            rounded = ceiling_to_multiple(Fraction(q), multiple)
-            if h.event.effect is EventEffect.SET_QTY:
+            if sets:
+                h, q = sets[0]
+                rounded = ceiling_to_multiple(Fraction(q), multiple)
                 qty, decision = rounded, "set_qty"
                 text = f"quantité imposée {q}"
+                if rounded != q:
+                    text += f" (arrondi au multiple de {multiple} : {rounded})"
+                reasons.append(f"{h.event.label} ({_who(h.event)}) : {text} → {qty}"
+                               f"{lead(h.event)} ; prévision {line.qty}")  # fmt: skip
+                if len(sets) > 1:
+                    reasons.append(
+                        "Plusieurs événements imposent la même quantité : appliquée une fois"
+                    )
             else:
-                qty, decision = line.qty + rounded, "add_qty"
-                text = f"{line.qty} calculé + {q} ajouté"
-            if rounded != q:
-                text += f" (arrondi au multiple de {multiple} : {rounded})"
+                # Q-027 : plusieurs quantités ajoutées s'additionnent (chacune arrondie au
+                # multiple supérieur, comme si elle était seule), REVIEW, chaque événement cité.
+                rounded_adds = [ceiling_to_multiple(Fraction(q), multiple) for _, q in adds]
+                qty = line.qty + sum(rounded_adds)
+                decision = "add_qty" if len(adds) == 1 else "add_qty_sum"
+                for (h, q), rounded in zip(adds, rounded_adds, strict=True):
+                    text = f"{line.qty} calculé + {q} ajouté" if len(adds) == 1 else f"{q} ajouté"
+                    if rounded != q:
+                        text += f" (arrondi au multiple de {multiple} : {rounded})"
+                    end = f" → {qty}" if len(adds) == 1 else ""
+                    reasons.append(
+                        f"{h.event.label} ({_who(h.event)}) : {text}{end}{lead(h.event)}"
+                    )
+                if len(adds) > 1:
+                    parts = " + ".join(map(str, rounded_adds))
+                    reasons.append(f"Quantités ajoutées additionnées : {line.qty} calculé + "
+                                   f"{parts} = {qty}")  # fmt: skip
             source = QtySource.EVENT
-            reasons.append(
-                f"{h.event.label} ({_who(h.event)}) : {text} → {qty}{lead(h.event)}"
-                + (f" ; prévision {line.qty}" if h.event.effect is EventEffect.SET_QTY else "")
-            )
             if line.source is not QtySource.FORECAST:
                 was = _SOURCE_FR.get(line.source.value, line.source.value)
                 reasons.append(f"La quantité de l'événement remplace : {was} ({line.qty})")
-            if len(given) > 1:
-                reasons.append("Plusieurs événements donnent la même quantité : appliquée une fois")
 
     explanation["events"] = {
         "rule_version": RULE_VERSION,

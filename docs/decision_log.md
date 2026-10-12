@@ -176,7 +176,7 @@ Format : contexte → décision → conséquence.
 - **Référentiels** : ceux des données de test (multiples, conversions, DC, Schedule du 05/10/2026, portfolio de B80). Le portfolio des autres boutiques n'est pas encore disponible dans la version web.
 - **Publication** : Pyodide et ses bibliothèques sont vérifiés par empreinte (`tools/fetch_pyodide.py`) ; les archives (.zip, .whl), refusées par la plateforme, sont publiées en base64 et décodées par la page.
 
-## D-028 — Modifications sans justification obligatoire (2026-10-08)
+## D-028 — Modifications sans justification obligatoire (2026-10-08) — catégorie rétablie par D-036
 
 - Décision du planner : une quantité modifiée compte tout de suite, sans bloc « Modifications à justifier ». La règle 6 de CLAUDE.md est modifiée en conséquence ; remplace D-006 (partie raison) et D-017.
 - Toujours gardés : la quantité d'avant, la quantité saisie (arrondie au multiple supérieur), l'auteur (nom du planner, sinon « Planner non renseigné ») et l'heure. La ligne passe en « Modifié » et la raison « Modifié par … : avant → après » reste visible.
@@ -197,7 +197,7 @@ Format : contexte → décision → conséquence.
 
 1. Problème de conversion (contradiction avec SKU Conversion, chaîne A → B → C) → BLOCKED.
 2. Bloquer l'envoi (Interdiction, Arrêt) → BLOCKED, quantité 0. Une interdiction gagne toujours : si un autre événement donnait une quantité, la raison « Le blocage prime sur … » est écrite.
-3. Quantité imposée ou ajoutée → REVIEW, source « Événement », arrondie au multiple supérieur. Deux quantités différentes sur le même SKU (deux imposées différentes, imposée + ajoutée, deux ajoutées) → BLOCKED « Deux événements contradictoires », quantité 0, à trancher par une modification. Deux quantités identiques : appliquée une fois.
+3. Quantité imposée ou ajoutée → REVIEW, source « Événement », arrondie au multiple supérieur. Deux quantités imposées différentes, ou une imposée + une ajoutée → BLOCKED « Deux événements contradictoires », quantité 0, à trancher par une modification. Deux quantités imposées identiques : appliquée une fois. Plusieurs quantités ajoutées : additionnées (remplacé par D-034).
 4. Flag → REVIEW, la quantité du moteur reste.
 - Une **allocation officielle n'est jamais écrasée** (règle 5) : la ligne garde l'allocation et passe en REVIEW avec la quantité que proposait l'événement.
 - Une ligne déjà **bloquée par le moteur** (exclusion, portfolio, ancien SKU) reste bloquée ; la demande de l'événement est écrite dans les raisons.
@@ -222,3 +222,29 @@ Format : contexte → décision → conséquence.
 
 - La démo web contient les 4 événements fictifs de B80 (promotion, lancement absent de la Stock Situation, arrêt, demande boutique personnelle de Camille). La page « Événements SKU » est en lecture seule (filtres, détail, « Reprendre », terminer une demande) : création, modification, duplication et import Excel sont dans l'outil installé.
 - Démo : la commande B80 est calculée d'avance avec les événements évalués pour la livraison du 08/10/2026 ; « Mes fichiers » envoie les événements au moteur Python du navigateur, qui choisit lui-même ceux actifs à la date saisie (mêmes quantités que l'outil installé, test `test_web_bridge.py`).
+
+## D-034 — Quantités ajoutées additionnées (Q-027) (2026-10-11)
+
+- Décision du planner : deux (ou plus) événements qui **ajoutent** une quantité au même SKU (ex. promo + demande boutique) s'additionnent. La ligne passe en REVIEW (plus de BLOCKED dans ce cas) et chaque événement est cité dans « Pourquoi », suivi du total (« 720 calculé + 240 + 240 = 1200 »).
+- Chaque quantité ajoutée est arrondie au multiple supérieur séparément, puis les quantités arrondies sont additionnées : le total est la somme de ce que chaque événement aurait ajouté seul. Même quantité ajoutée par deux événements : comptée deux fois. Un SKU listé deux fois dans le même événement compte une fois.
+- Les autres conflits restent BLOCKED « Deux événements contradictoires » : deux quantités imposées différentes, une imposée + une ajoutée, et blocage contre quantité (le blocage gagne).
+- Version de règle : `events-1.1.0`.
+
+## D-035 — Garde-fou : « Marquer comme vus » après le filtre Événements ; « Reprendre » limité à la session (Q-030, Q-031) (2026-10-11)
+
+- Décision du planner : la validation globale en un clic est gardée (« Confirmer les blocages », « Marquer comme vus »), mais **« Marquer comme vus » n'est actif que si le planner a ouvert au moins une fois le filtre « Événements »** (bandeau « Événements actifs ») de la commande en cours. Une commande = boutique + date de livraison ; l'ouverture est retenue pour la session.
+- Tant que ce n'est pas fait, le bouton est grisé et une phrase dit quoi faire. Dans la Journée, la phrase nomme les boutiques à « Ouvrir » d'abord ; le bouton s'active quand toutes les boutiques avec des flags non vus ont été regardées.
+- « Confirmer les blocages » ne change pas. Valider une ligne à la fois (« Marquer comme vérifiée » dans « Pourquoi ») reste toujours possible.
+- Q-031 fermée : « Reprendre » un événement personnel reste limité à la session (D-032 inchangée).
+- Même règle dans la démo web.
+
+## D-036 — Catégorie de modification obligatoire, en un clic dans la ligne (révise D-028) (2026-10-11)
+
+- Décision du planner : toute modification de quantité exige une **catégorie**, choisie en un clic dans la ligne du tableau (colonne « Catégorie modif. »), parmi : Promo, Lancement, Rupture, Surstock, Stock DC, Donnée erronée, Demande boutique, Autre. « Demande boutique » est nouvelle. La raison libre reste facultative (panneau « Pourquoi »). Règle 6 de CLAUDE.md mise à jour.
+- Le modèle `Override` refuse une modification sans catégorie. Auteur et heure restent toujours gardés.
+- Une quantité tapée sans catégorie n'est **pas appliquée** : la ligne affiche la quantité saisie avec le statut « À catégoriser » et un bandeau compte les lignes en attente. L'export du fichier LT est bloqué tant qu'il en reste (rien de silencieux). La catégorie peut aussi être choisie avant la quantité.
+- Revenir à la quantité proposée retire la modification, sans catégorie à donner.
+- Lignes BLOCKED par un événement : une modification doit toujours avoir **une raison** pour lever le blocage (D-031 inchangée).
+- Base locale : la colonne `category` reste nullable pour garder les modifications passées enregistrées sans catégorie ; l'Historique les classe sous « Sans catégorie ». Pas de migration.
+- Libellés courts pour tenir dans la cellule (« Promo » au lieu de « Promo / événement », etc.) ; les valeurs stockées ne changent pas.
+- Même règle dans la démo web.

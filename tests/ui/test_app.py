@@ -212,12 +212,24 @@ def test_personal_event_applies_only_to_its_planner_until_taken_over(app: AppTes
     assert "○ Demande B80" in grid(app).set_index("SKU").loc["7042.70", "Événement"]
 
 
+def open_events_filter(at: AppTest) -> None:
+    """Clic sur « Tous » dans le bandeau Événements actifs de la commande."""
+    goto(at, PAGES[1])
+    next(b for b in at.button_group if b.key == "f_event").set_value("all").run()
+    assert not at.exception, at.exception
+
+
 def test_export_is_refused_until_the_gate_is_green(app: AppTest) -> None:
     app.selectbox(key="author").set_value("Camille").run()
     compute_b80(app)
     goto(app, PAGES[3])
     assert app.get("download_button")[0].proto.disabled  # garde-fou rouge
     app.button(key="order_gate_blocks").click().run()  # confirme le blocage de 7928.70
+    # Q-030 : « Marquer comme vus » inactif tant que le filtre « Événements » n'a pas été ouvert
+    assert app.button(key="order_gate_seen").disabled
+    open_events_filter(app)
+    goto(app, PAGES[3])
+    assert not app.button(key="order_gate_seen").disabled
     app.button(key="order_gate_seen").click().run()
     assert app.get("download_button")[0].proto.disabled  # reste : lancements / demandes
     next(c for c in app.checkbox if c.key.startswith("order_gate_include")).check().run()
@@ -275,6 +287,40 @@ def test_day_shows_events_and_gates_the_zip(app: AppTest) -> None:
     assert any(m.value == "● 5 · ○ 1" for m in app.markdown)  # SKU flagués équipe / personnel
     assert app.get("download_button")[0].proto.disabled
     app.button(key="day_gate_blocks").click().run()
+    assert app.button(key="day_gate_seen").disabled  # Q-030 : filtre Événements pas encore ouvert
+    app.button(key="open_0_B80").click().run()  # « Ouvrir » la boutique, puis son filtre
+    open_events_filter(app)
+    goto(app, PAGES[2])
     app.button(key="day_gate_seen").click().run()
     next(c for c in app.checkbox if c.key.startswith("day_gate_include")).check().run()
     assert not app.get("download_button")[0].proto.disabled
+
+
+def test_quantity_change_waits_for_its_category(app: AppTest) -> None:
+    """D-036 : une quantité saisie sans catégorie reste « À catégoriser », non appliquée."""
+    app.selectbox(key="author").set_value("Camille").run()
+    compute_b80(app)
+    # Ce que produit la saisie de 3360 dans la cellule « Qty finale », catégorie vide.
+    app.session_state["pending_edits"] = {"7005.70": {"qty": 3360, "cat": None}}
+    app.run()
+    row = grid(app).set_index("SKU").loc["7005.70"]
+    assert (row["Statut"], row["Qty finale"]) == ("● À catégoriser", 3360)
+    assert "7005.70" not in app.session_state["overrides"]
+    assert any("sans catégorie" in w.value for w in app.warning)
+    goto(app, PAGES[3])
+    assert any("sans catégorie" in e.value for e in app.error)
+    assert app.get("download_button")[0].proto.disabled
+    # Panneau « Pourquoi » : Enregistrer sans catégorie est refusé, puis un clic sur « Promo ».
+    goto(app, PAGES[1])
+    app.session_state["why_sku"] = "7005.70"
+    app.run()
+    assert app.number_input(key="dlg_qty_7005.70").value == 3360
+    app.button(key="dlg_save").click().run()
+    assert any("obligatoire" in e.value for e in app.error)
+    app.selectbox(key="dlg_cat_7005.70").set_value("Promo").run()
+    app.button(key="dlg_save").click().run()
+    ov = app.session_state["overrides"]["7005.70"]
+    assert (ov.qty_after, ov.category.value, ov.reason, ov.author) == (3360, "promo", "", "Camille")
+    assert app.session_state["pending_edits"] == {}
+    row = grid(app).set_index("SKU").loc["7005.70"]
+    assert (row["Statut"], row["Catégorie modif."]) == ("● Modifié", "Promo")

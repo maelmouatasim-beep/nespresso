@@ -109,6 +109,8 @@ table.order tbody tr:hover td { background: var(--surface-2); }
 table.order tr.mod td { background: var(--mod-bg); }
 table.order tr.pend td.q input { border-color: var(--mod); box-shadow: 0 0 0 1px var(--mod); }
 td.q input { width: 100%; text-align: right; padding: 3px 6px; font-variant-numeric: tabular-nums; }
+td.q select.rowcat { width: 100%; padding: 3px 4px; font-size: 13px; }
+td.q select.rowcat.need { border-color: var(--review, #B7791F); box-shadow: 0 0 0 1px var(--review, #B7791F); }
 td.vu { text-align: center; }
 .st { display: inline-block; font-size: 12px; font-weight: 700; padding: 1px 8px; border-radius: 999px; letter-spacing: .02em; }
 .st.O { color: var(--ok); background: var(--ok-bg); }
@@ -305,10 +307,10 @@ const store = { get(k, d) { try { const v = localStorage.getItem(k); return v ? 
 const st = {
   page: (p => PAGES.includes(p) ? p : PAGES[0])(store.get("spc2_page", PAGES[0])), author: store.get("spc_author", ""), examples: store.get("spc2_examples", true),
   form: { boutique: "", delivery: "", cover: "", coffee: "", mode: "standard" }, order: null, err: "",
-  overrides: {}, seen: new Set(), f: { cat: "Tous", status: "Tous", qty: false }, sort: null, q: "", why: null, gear: false, savedId: null, xmsg: null,
+  overrides: {}, pending: {}, seen: new Set(), f: { cat: "Tous", status: "Tous", qty: false }, sort: null, q: "", why: null, gear: false, savedId: null, xmsg: null,
   day: null, refTab: 0, source: "demo", busy: "", depotErr: [],
   // Événements : reprises (session seulement), demandes terminées, validations avant export.
-  taken: new Set(), evDone: store.get("spc2_ev_done", {}), confirmed: new Set(), includeOk: false,
+  taken: new Set(), evDone: store.get("spc2_ev_done", {}), confirmed: new Set(), includeOk: false, evViewed: new Set(),
   validations: store.get("spc2_validations", []), toClose: [], evTab: "team", evStatus: "Actifs", evQ: "", evTypes: new Set(), evPlanner: null, evSel: null,
 };
 st.f.ev = null;
@@ -398,7 +400,11 @@ function evCheck(baseRows, ovs, seen, confirmed, includeOk) {
   }
   return { blocked, unval, inc, ok: !blocked.length && !unval.length && (!inc.length || includeOk) };
 }
-function gateCard(c, includeOk, onBlocks, onSeen, onInclude) {
+// Q-030 : « Marquer comme vus » n'est actif qu'après un premier clic sur le filtre
+// « Événements » de la commande (boutique + livraison).
+const viewKey = (b, d) => b + "|" + d;
+function gateCard(c, includeOk, onBlocks, onSeen, onInclude, toOpen) {
+  toOpen = toOpen || [];
   const line = (ok, cls, title, detail, btn) => el("div", "g", el("div", "t", el("span", "ico " + (ok ? "ok" : cls), ok ? "✓" : (cls === "ko" ? "⦸" : "…")), el("b", "", title), detail ? el("small", "", detail) : null), btn);
   const incBox = el("input", { type: "checkbox", id: "gate_include", checked: includeOk, onchange: e => onInclude(e.target.checked) });
   return el("div", "gate",
@@ -406,7 +412,8 @@ function gateCard(c, includeOk, onBlocks, onSeen, onInclude) {
     line(!c.blocked.length, "ko", c.blocked.length + " ligne(s) BLOCKED par un événement", c.blocked.join(", "),
       c.blocked.length ? el("button", { class: "btn", id: "gate_blocks", title: "La quantité reste 0 (tracé). Pour envoyer quand même : modifier la ligne avec une raison.", onclick: onBlocks }, "Confirmer les blocages") : null),
     line(!c.unval.length, "todo", c.unval.length + " SKU flagué(s) par un événement non encore validé(s)", c.unval.join(", "),
-      c.unval.length ? el("button", { class: "btn", id: "gate_seen", onclick: onSeen }, ic("check"), "Marquer comme vus") : null),
+      c.unval.length ? el("button", { class: "btn", id: "gate_seen", disabled: toOpen.length > 0, title: "Actif une fois le filtre « Événements » de la commande ouvert au moins une fois.", onclick: onSeen }, ic("check"), "Marquer comme vus") : null),
+    c.unval.length && toOpen.length ? el("p", "small muted", "Ouvre d'abord le filtre « Événements » de la commande" + (toOpen.length > 1 || c.multi ? " (" + toOpen.join(", ") + ")" : "") + " (Commande boutique) pour activer « Marquer comme vus ».") : null,
     c.inc.length ? line(includeOk, "todo", "Lancements et demandes boutique à inclure", c.inc.join(", "), el("label", "chk", incBox, "J'ai vérifié : inclus"))
       : line(true, "", "Aucun lancement ni demande boutique à inclure", "", null),
     c.ok ? null : el("p", "small muted", "Le téléchargement est désactivé tant que ces points ne sont pas verts."));
@@ -430,7 +437,7 @@ function renderNav() {
 }
 function setSource(v) {
   if (st.source === v) return;
-  st.source = v; st.order = null; st.form.boutique = ""; st.form.delivery = ""; st.err = ""; st.overrides = {}; st.seen = new Set(); st.why = null; st.day = null;
+  st.source = v; st.order = null; st.form.boutique = ""; st.form.delivery = ""; st.err = ""; st.overrides = {}; st.pending = {}; st.seen = new Set(); st.why = null; st.day = null;
   if (v === "live" && !(LIVE.files.stock_situation && LIVE.files.stock_movements)) st.page = PAGES[0];
   render();
 }
@@ -444,7 +451,7 @@ fillAuthors();
 $("author").onchange = e => {
   st.author = e.target.value; store.set("spc_author", st.author);
   // Le planner change les événements personnels appliqués : la commande est relue.
-  st.overrides = {}; st.seen = new Set(); st.confirmed = new Set(); st.includeOk = false; st.savedId = null; st.f.ev = null; st.evPlanner = null;
+  st.overrides = {}; st.pending = {}; st.seen = new Set(); st.confirmed = new Set(); st.includeOk = false; st.savedId = null; st.f.ev = null; st.evPlanner = null;
   if (st.order && st.order.live) { st.order = null; st.err = "Planner changé : recalcule la commande pour appliquer ses événements personnels."; }
   render();
 };
@@ -551,7 +558,7 @@ async function computeLive(f) {
   const out = livePlan(f);
   st.busy = "";
   if (out.error) { st.err = out.error; return render(); }
-  st.order = { ...f, live: out, run_date: RUN() }; st.overrides = {}; st.seen = new Set(); st.savedId = null; st.why = null; st.xmsg = null;
+  st.order = { ...f, live: out, run_date: RUN() }; st.overrides = {}; st.pending = {}; st.seen = new Set(); st.savedId = null; st.why = null; st.xmsg = null;
   render();
 }
 
@@ -648,7 +655,7 @@ function compute() {
   if (f.delivery < RUN()) { st.err = "La date de livraison doit être le " + fdate(RUN()) + " ou après."; return render(); }
   if (DS().live) return computeLive(f);
   if (f.boutique !== M.boutique) { st.err = "Calcul impossible : Aucune ligne de Stock Situation pour la boutique " + f.boutique + ". (Démo : seules les données de B80 sont fournies. Pour tes boutiques, dépose tes exports avec « Mes fichiers ».)"; return render(); }
-  st.order = { ...f, run_date: RUN() }; st.overrides = {}; st.seen = new Set(); st.savedId = null; st.why = null; st.xmsg = null;
+  st.order = { ...f, run_date: RUN() }; st.overrides = {}; st.pending = {}; st.seen = new Set(); st.savedId = null; st.why = null; st.xmsg = null;
   render();
 }
 function paramsRow() {
@@ -680,9 +687,13 @@ function paramsRow() {
   if (st.err) out.push(el("div", "msg err", st.err));
   return out;
 }
-function setExamples(on) { st.examples = on; store.set("spc2_examples", on); st.overrides = {}; st.savedId = null; render(); }
+function setExamples(on) { st.examples = on; store.set("spc2_examples", on); st.overrides = {}; st.pending = {}; st.savedId = null; render(); }
 function categoryOf(m) { return categories()[(m.type || "").trim().toUpperCase()] || "Autres"; }
 function statusKey(x) { return x.ov ? "Modifié" : STATUS[x.s]; }
+// D-036 : quantité saisie sans catégorie → « À catégoriser », pas encore appliquée.
+const pendingQty = sku => (st.pending[sku] && st.pending[sku].qty !== null && st.pending[sku].qty !== undefined) ? st.pending[sku].qty : null;
+const pendingCount = () => Object.keys(st.pending).filter(k => pendingQty(k) !== null).length;
+const ovCat = x => x.ov ? x.ov.cat : (st.pending[x.m.sku] ? st.pending[x.m.sku].cat : "");
 function matches(x) {
   const f = st.f;
   if (f.cat !== "Tous" && categoryOf(x.m) !== f.cat) return false;
@@ -695,7 +706,7 @@ function matches(x) {
 const COLS = [
   ["Statut", 112, 0, x => statusKey(x)], ["SKU", 96, 0, x => x.m.sku], ["Description", 210, 0, x => x.m.desc],
   ["Catégorie", 130, 0, x => categoryOf(x.m)], ["Événement", 170, 0, x => evCell(x)], ["Expected", 86, 1, x => x.m.exp], ["Ventes", 68, 1, x => x.m.sales],
-  ["Couv. act.", 72, 1, x => x.m.cur], ["Proposée", 78, 1, (x, b) => b[x.m.sku]], ["Qty finale", 92, 1, x => x.qty],
+  ["Couv. act.", 72, 1, x => x.m.cur], ["Proposée", 78, 1, (x, b) => b[x.m.sku]], ["Qty finale", 92, 1, x => pendingQty(x.m.sku) ?? x.qty], ["Catégorie modif.", 140, 0, x => CAT[ovCat(x)] || null],
   ["Couv. après", 80, 1, x => postCover(x.m, x.qty)], ["Multiple", 68, 1, x => x.multiple], ["Stock DC", 80, 1, x => x.m.dc],
   ["Source", 92, 0, x => SRC[x.source]], ["Raisons", 300, 0, x => x.reasons.join(" | ")]];
 function defaultCmp(baseQty) { return (a, b) => ((a.s === "O") - (b.s === "O")) || (baseQty[b.m.sku] - baseQty[a.m.sku]) || a.m.sku.localeCompare(b.m.sku); }
@@ -726,16 +737,19 @@ function orderTable(rows, baseQty) {
   for (const x of rows) {
     const m = x.m, sku = m.sku;
     const tr = el("tr", (x.ov ? "mod" : "") + (st.why === sku ? " sel" : ""));
-    tr.onclick = e => { if (e.target.closest("input")) return; openWhy(sku); };
+    tr.onclick = e => { if (e.target.closest("input,select")) return; openWhy(sku); };
     const seen = st.seen.has(sku) ? " ✓" : "";
-    const stCell = x.ov ? el("span", "st M", "Modifié" + seen) : el("span", "st " + x.s, STATUS[x.s] + seen);
-    const qi = el("input", { type: "number", min: 0, step: x.multiple || 1, value: x.qty, "aria-label": "Qty finale " + sku });
-    qi.onchange = () => { const v = Math.round(Number(qi.value)); if (!Number.isFinite(v) || v < 0) { qi.value = x.qty; return; } if (v !== x.qty) { applyOverride(sku, v); render(); } };
+    const waiting = pendingQty(sku), shownQty = waiting ?? x.qty;
+    const stCell = waiting !== null ? el("span", "st R", "À catégoriser") : x.ov ? el("span", "st M", "Modifié" + seen) : el("span", "st " + x.s, STATUS[x.s] + seen);
+    const qi = el("input", { type: "number", min: 0, step: x.multiple || 1, value: shownQty, "aria-label": "Qty finale " + sku });
+    qi.onchange = () => { const v = Math.round(Number(qi.value)); if (!Number.isFinite(v) || v < 0) { qi.value = shownQty; return; } if (v !== shownQty) { editQty(sku, v, ovCat(x)); render(); } };
+    const cs = catSelect(null, ovCat(x)); cs.setAttribute("aria-label", "Catégorie de la modification " + sku); cs.className = "rowcat" + (waiting !== null ? " need" : "");
+    cs.onchange = () => { editCat(sku, cs.value, x); render(); };
     const reasons = x.reasons.join(" | ");
     const evText = evCell(x);
     tr.append(el("td", "", stCell), el("td", "mono", sku), el("td", { title: m.desc }, m.desc || "—"), el("td", "", categoryOf(m)), el("td", { class: "evcell", title: evText }, evText),
       el("td", "n", fmt(m.exp)), el("td", "n", fmt(m.sales)), el("td", "n", fmt1(m.cur)), el("td", "n", fmt(baseQty[sku])),
-      el("td", "n q", qi), el("td", "n", fmt1(postCover(m, x.qty))), el("td", "n", fmt(x.multiple)),
+      el("td", "n q", qi), el("td", "q", cs), el("td", "n", fmt1(postCover(m, x.qty))), el("td", "n", fmt(x.multiple)),
       el("td", "n", m.dc === null ? "—" : fmt(m.dc)), el("td", "", SRC[x.source]), el("td", { title: reasons, class: "small" }, reasons || ""));
     body.append(tr);
   }
@@ -768,6 +782,7 @@ function renderOrder() {
     el("label", "chk", el("input", { type: "checkbox", id: "f_qty", checked: st.f.qty, onchange: e => { st.f.qty = e.target.checked; render(); } }), "Qty > 0 seulement"),
     el("div", "grow", search),
     el("button", { class: "btn", id: "accept_ok", onclick: () => { ls.forEach(x => { if (x.s === "O" && !x.ov) st.seen.add(x.m.sku); }); render(); } }, ic("checks"), "Accepter toutes les lignes OK")));
+  if (pendingCount()) out.push(el("div", "msg warn", pendingCount() + " quantité(s) modifiée(s) sans catégorie : pas encore prises en compte. Choisis la catégorie dans la colonne « Catégorie modif. » de la ligne (un clic)."));
   const shown = sortRows(ls.filter(matches), baseQty);
   out.push(shown.length ? orderTable(shown, baseQty) : el("div", "msg info", "Aucune ligne pour ces filtres."));
   out.push(el("div", "row", { style: "justify-content:space-between;margin-top:8px" },
@@ -782,7 +797,7 @@ function eventBanner(o, ls) {
   const ids = Object.keys(counts).map(Number), evs = ids.map(evById).filter(Boolean), out = [];
   if (evs.length) {
     const team = evs.filter(e => e.scope === "team").length, all = new Set(ls.filter(x => x.ev.length).map(x => x.m.sku));
-    const chip = (key, label) => el("button", { class: "chip" + (st.f.ev === key ? " on" : ""), onclick: () => { st.f.ev = st.f.ev === key ? null : key; render(); } }, label);
+    const chip = (key, label) => el("button", { class: "chip" + (st.f.ev === key ? " on" : ""), onclick: () => { st.f.ev = st.f.ev === key ? null : key; if (st.f.ev !== null) st.evViewed.add(viewKey(o.boutique, o.delivery)); render(); } }, label);
     out.push(el("div", "evbanner", el("span", "lab", el("b", "", "Événements actifs"), " · Équipe : " + team + " · Personnel : " + (evs.length - team)),
       chip("all", "Tous (" + all.size + " SKU)"), ...evs.map(e => chip(e.id, DOT[e.scope] + " " + e.title + " (" + counts[e.id].size + " SKU)"))));
     out.push(el("p", "small muted", { style: "margin:2px 0 0" }, "Clic sur un événement pour filtrer la table." + (o.live ? "" : " Démo : événements évalués pour une livraison le " + fdate(DATA.demo_delivery) + ".")));
@@ -793,9 +808,23 @@ function eventBanner(o, ls) {
 }
 
 // ---------- Modifications ----------
-function catSelect(id, value) { const s = el("select", { id }); s.append(new Option("—", "")); M.categories.forEach(([v, t]) => s.append(new Option(t, v))); s.value = value || ""; return s; }
-// Modification du planner : appliquée tout de suite. Auteur et heure toujours gardés ;
-// catégorie et raison facultatives (D-028). Arrondi au multiple comme le moteur.
+function catSelect(id, value) { const s = el("select", id ? { id } : {}); s.append(new Option("—", "")); M.categories.forEach(([v, t]) => s.append(new Option(t, v))); s.value = value || ""; return s; }
+// Modification du planner (D-036) : catégorie obligatoire, choisie en un clic dans la ligne ;
+// raison facultative ; auteur et heure toujours gardés. Arrondi au multiple comme le moteur.
+// Une quantité sans catégorie attend (« À catégoriser ») et ne compte pas encore.
+function editQty(sku, qty, cat) {
+  const b = baseLine(indexOfSku(sku));
+  if (qty === b.qty) { delete st.overrides[sku]; delete st.pending[sku]; st.savedId = null; return; }
+  if (cat) { applyOverride(sku, qty, cat); delete st.pending[sku]; return; }
+  st.pending[sku] = { qty, cat: "" };
+}
+function editCat(sku, cat, x) {
+  const waiting = pendingQty(sku);
+  if (x.ov && cat) { applyOverride(sku, x.ov.after, cat); return; }
+  if (x.ov) return;  // une modification garde toujours sa catégorie
+  if (waiting !== null && cat) { applyOverride(sku, waiting, cat); delete st.pending[sku]; return; }
+  st.pending[sku] = { qty: waiting, cat };  // catégorie choisie avant la quantité
+}
 function applyOverride(sku, qty, cat, reason) {
   const j = indexOfSku(sku), b = baseLine(j), old = st.overrides[sku];
   st.savedId = null;
@@ -823,7 +852,7 @@ function steps(x) {
   } else out.push(["Pas de calcul : la ligne est bloquée (voir les raisons)"]);
   if (x.fb) out.push([x.fb]);
   if (x.biz) out.push([x.biz]);
-  if (x.ov) out.push(["Modifié par " + x.ov.author + " : " + fmt(x.ov.before) + " → " + fmt(x.ov.final) + " (" + x.ov.reason + ")"]);
+  if (x.ov) out.push(["Modifié par " + x.ov.author + " : " + fmt(x.ov.before) + " → " + fmt(x.ov.final) + " (" + [CAT[x.ov.cat], x.ov.reason].filter(Boolean).join(" : ") + ")"]);
   return out;
 }
 function renderWhy() {
@@ -836,8 +865,8 @@ function renderWhy() {
   const x = finalLine(j), b = baseLine(j), m = x.m;
   const days = Math.round((parseIso(st.order.delivery) - parseIso(st.order.run_date || RUN())) / 86400000);
   const proj = m.sales ? m.exp - m.sales / V().hd * days : m.exp;
-  const qty = el("input", { type: "number", id: "dlg_qty", min: 0, step: x.multiple || 1, value: x.qty });
-  const cat = catSelect("dlg_cat", x.ov ? x.ov.cat : ""), reason = el("input", { type: "text", id: "dlg_reason", placeholder: "Raison", value: x.ov ? x.ov.reason : "" });
+  const qty = el("input", { type: "number", id: "dlg_qty", min: 0, step: x.multiple || 1, value: pendingQty(m.sku) ?? x.qty });
+  const cat = catSelect("dlg_cat", ovCat(x)), reason = el("input", { type: "text", id: "dlg_reason", placeholder: "Raison", value: x.ov ? x.ov.reason : "" });
   const msg = el("div");
   p.hidden = false;
   p.replaceChildren(...[
@@ -856,12 +885,13 @@ function renderWhy() {
       st.confirmed.has(m.sku) ? "Retirer la confirmation du blocage" : "Confirmer le blocage (qty 0)") : null,
     el("button", { class: "btn", style: "width:100%;margin-top:6px", onclick: () => { const on = !st.seen.has(m.sku); on ? st.seen.add(m.sku) : st.seen.delete(m.sku); if (b.ev.length) logValidation("seen", st.order.boutique, [m.sku], on ? "" : "retiré"); render(); } }, st.seen.has(m.sku) ? ic("undo") : ic("check"), st.seen.has(m.sku) ? "Retirer la validation" : "Marquer comme vérifiée"),
     el("h3", "", "Modifier la quantité"),
-    el("div", "form3", el("label", "f", "Qty finale", qty), el("label", "f", "Catégorie (facultatif)", cat), el("label", "f wide", "Raison (facultatif)", reason)),
+    el("div", "form3", el("label", "f", "Qty finale", qty), el("label", "f", "Catégorie (obligatoire)", cat), el("label", "f wide", "Raison (facultatif)", reason)),
     el("div", "row", { style: "margin-top:10px" }, el("button", { class: "btn primary", id: "dlg_save", onclick: () => {
       const q = Math.round(Number(qty.value));
       if (!Number.isFinite(q) || q < 0) return msg.replaceChildren(el("div", "msg err", "Quantité entière ≥ 0 attendue."));
-      applyOverride(m.sku, q, cat.value, reason.value); render();
-    } }, "Enregistrer"), b.qty !== x.qty ? el("button", { class: "btn", onclick: () => { delete st.overrides[m.sku]; render(); } }, "Revenir à " + fmt(b.qty)) : null),
+      if (q !== b.qty && !cat.value) return msg.replaceChildren(el("div", "msg err", "Choisis la catégorie de la modification (obligatoire)."));
+      applyOverride(m.sku, q, cat.value, reason.value); delete st.pending[m.sku]; render();
+    } }, "Enregistrer"), b.qty !== x.qty || pendingQty(m.sku) !== null ? el("button", { class: "btn", onclick: () => { delete st.overrides[m.sku]; delete st.pending[m.sku]; render(); } }, "Revenir à " + fmt(b.qty)) : null),
     msg].filter(Boolean));
 }
 
@@ -920,11 +950,11 @@ function renderDay() {
       const saveOv = st.overrides; st.overrides = {}; const ls0 = lines(), s = summarize(ls0); st.overrides = saveOv;
       const order = st.order, base = ls0.map((_, j) => baseLine(j));
       const ck = d.checks[o.b] = d.checks[o.b] || { seen: new Set(), blocks: new Set(), include: false };
-      checks.push([o.b, evCheck(base, {}, ck.seen, ck.blocks, ck.include), ck]);
+      checks.push([o.b, evCheck(base, {}, ck.seen, ck.blocks, ck.include), ck, o.r.delivery]);
       const teamN = new Set(base.filter(x => x.ev.some(e => e.scope === "t")).map(x => x.m.sku)).size, persN = new Set(base.filter(x => x.ev.some(e => e.scope === "p")).map(x => x.m.sku)).size;
       res.push([btqLabel(o.b), frday(o.r.delivery), fmt(s.ordered), fmt(s.units), fmt1(s.palTotal), el("span", "st R", String(s.by.R)), el("span", "st B", String(s.by.B)),
         teamN || persN ? el("span", { title: "SKU flagués : ● équipe · ○ personnel" }, "● " + teamN + " · ○ " + persN) : "—", V(order).warnings.join(" | ") || "—",
-        el("button", { class: "btn", onclick: () => { st.form = { ...order }; st.order = { ...order }; st.overrides = {}; st.seen = new Set(); st.savedId = null; go(PAGES[1]); } }, "Ouvrir")]);
+        el("button", { class: "btn", onclick: () => { st.form = { ...order }; st.order = { ...order }; st.overrides = {}; st.pending = {}; st.seen = new Set(); st.savedId = null; go(PAGES[1]); } }, "Ouvrir")]);
     }
     st.order = prev;
     out.push(el("h3", "", "Résultats"), tableOf(["Boutique", "Livraison", "Lignes", "Unités", "Palettes", "REVIEW", "BLOCKED", "Événements", "Alertes", ""], res, [2, 3, 4]));
@@ -932,11 +962,12 @@ function renderDay() {
     const pre = (b, list) => checks.length > 1 ? list.map(x => b + " " + x) : list;
     const all = { blocked: checks.flatMap(([b, c]) => pre(b, c.blocked)), unval: checks.flatMap(([b, c]) => pre(b, c.unval)), inc: checks.flatMap(([b, c]) => pre(b, c.inc)) };
     const incOk = checks.every(([, c, k]) => !c.inc.length || k.include);
-    all.ok = !all.blocked.length && !all.unval.length && (!all.inc.length || incOk);
+    all.ok = !all.blocked.length && !all.unval.length && (!all.inc.length || incOk); all.multi = checks.length > 1;
+    const toOpen = checks.filter(([b, c, , dl]) => c.unval.length && !st.evViewed.has(viewKey(b, dl))).map(([b]) => b);
     if (all.blocked.length || all.unval.length || all.inc.length) out.push(gateCard(all, incOk,
       () => { checks.forEach(([b, c, k]) => { if (c.blocked.length) { c.blocked.forEach(x => k.blocks.add(x)); logValidation("confirm_block", b, c.blocked); } }); render(); },
       () => { checks.forEach(([b, c, k]) => { if (c.unval.length) { c.unval.forEach(x => k.seen.add(x)); logValidation("seen", b, c.unval); } }); render(); },
-      on => { checks.forEach(([b, c, k]) => { if (c.inc.length) { k.include = on; logValidation("include", b, c.inc, on ? "coché" : "décoché"); } }); render(); }));
+      on => { checks.forEach(([b, c, k]) => { if (c.inc.length) { k.include = on; logValidation("include", b, c.inc, on ? "coché" : "décoché"); } }); render(); }, toOpen));
     if (okOnes.length) {
       const m2 = el("div");
       out.push(el("div", { style: "margin-top:10px" }, el("button", { class: "btn primary", id: "day_zip", disabled: !st.author || !all.ok, onclick: () => dayZip(okOnes, m2) }, okOnes.length === 1 ? "Télécharger le fichier LT (zip)" : "Télécharger les " + okOnes.length + " fichiers LT (zip)")), m2);
@@ -950,7 +981,7 @@ async function dayZip(okOnes, box) {
   const now = new Date(), files = [];
   const prev = st.order, prevOv = st.overrides;
   for (const o of okOnes) {
-    st.order = { boutique: o.b, delivery: o.r.delivery, cover: o.r.cover, coffee: o.r.coffee, mode: st.day.mode, live: o.live || null, run_date: RUN() }; st.overrides = {};
+    st.order = { boutique: o.b, delivery: o.r.delivery, cover: o.r.cover, coffee: o.r.coffee, mode: st.day.mode, live: o.live || null, run_date: RUN() }; st.overrides = {}; st.pending = {};
     const ls = lines(), text = ltText(ls);
     ls.forEach((_, j) => baseLine(j).ev.forEach(e => { if (e.type === "store_request" && !st.toClose.includes(e.id)) st.toClose.push(e.id); }));
     if (text) { files.push([ltName(o.b, now), text]); saveRun(ls, ltName(o.b, now), true); }
@@ -999,15 +1030,17 @@ function renderExport() {
   const na = needAuthor(); if (na) out.push(na);
   const base = []; for (let j = 0; j < ls.length; j++) base.push(baseLine(j));
   const chk = evCheck(base, st.overrides, st.seen, st.confirmed, st.includeOk), b0 = st.order.boutique;
+  if (pendingCount()) out.push(el("div", "msg err", pendingCount() + " quantité(s) modifiée(s) sans catégorie : choisis la catégorie dans la ligne (Commande boutique) avant d'exporter."));
   if (chk.blocked.length || chk.unval.length || chk.inc.length) out.push(gateCard(chk, st.includeOk,
     () => { chk.blocked.forEach(k => st.confirmed.add(k)); logValidation("confirm_block", b0, chk.blocked); render(); },
     () => { chk.unval.forEach(k => st.seen.add(k)); logValidation("seen", b0, chk.unval); render(); },
-    on => { st.includeOk = on; logValidation("include", b0, chk.inc, on ? "coché" : "décoché"); render(); }));
+    on => { st.includeOk = on; logValidation("include", b0, chk.inc, on ? "coché" : "décoché"); render(); },
+    chk.unval.length && !st.evViewed.has(viewKey(b0, st.order.delivery)) ? [b0] : []));
   const box = el("div");
   if (st.xmsg) box.append(st.xmsg);
   const requests = [...new Set(base.flatMap(x => x.ev.filter(e => e.type === "store_request").map(e => e.id)))];
   out.push(el("div", "row",
-    el("button", { class: "btn primary", id: "dl_lt", disabled: !st.author || !chk.ok, onclick: async () => {
+    el("button", { class: "btn primary", id: "dl_lt", disabled: !st.author || !chk.ok || pendingCount() > 0, onclick: async () => {
       const text = ltText(ls); if (!text) return box.replaceChildren(el("div", "msg info", "Aucune ligne à commander : pas de fichier LT."));
       if (await offer(name, text, box, "Fichier « " + name + " » téléchargé (" + s.ordered + " lignes).")) { saveRun(ls, name); st.toClose = [...new Set([...st.toClose, ...requests])]; st.xmsg = box.firstChild; render(); }
     } }, "Télécharger le fichier LT (SKU;QTY)"),
@@ -1029,7 +1062,7 @@ function closeRequestsPrompt() {
     el("span", "row", el("button", { class: "btn primary", id: "close_req_" + e.id, onclick: () => {
       st.evDone[e.id] = { by: st.author || "Planner non renseigné", at: new Date().toISOString() }; store.set("spc2_ev_done", st.evDone);
       logValidation("close_request", e.boutiques[0] || "", e.skus.map(x => x.sku), "commande exportée");
-      st.toClose = st.toClose.filter(i => i !== e.id); st.overrides = {}; st.seen = new Set(); st.confirmed = new Set(); render(); } }, "Terminer"),
+      st.toClose = st.toClose.filter(i => i !== e.id); st.overrides = {}; st.pending = {}; st.seen = new Set(); st.confirmed = new Set(); render(); } }, "Terminer"),
       el("button", { class: "btn", onclick: () => { st.toClose = st.toClose.filter(i => i !== e.id); render(); } }, "Garder active"))));
 }
 let downloads = null;
@@ -1082,7 +1115,7 @@ function takeOver(e, on) {
   if (!st.author) { st.evMsg = "Choisis ton prénom (Planner, barre de gauche) pour reprendre."; return render(); }
   on ? st.taken.add(e.id) : st.taken.delete(e.id);
   if (on) logValidation("takeover", e.boutiques[0] || "", e.skus.map(x => x.sku), "« " + e.title + " » de " + e.planner);
-  st.overrides = {}; st.seen = new Set(); st.confirmed = new Set(); st.includeOk = false; st.f.ev = null;
+  st.overrides = {}; st.pending = {}; st.seen = new Set(); st.confirmed = new Set(); st.includeOk = false; st.f.ev = null;
   if (st.order && st.order.live) { st.order = null; st.err = "Événement repris : recalcule la commande."; }
   render();
 }
@@ -1105,7 +1138,7 @@ function evPanel(e, day) {
   } else if (e.type === "store_request" && e.status === "active") {
     out.push(el("button", { class: "btn", id: "ev_done", style: "width:100%", onclick: () => {
       st.evDone[e.id] = { by: st.author || "Planner non renseigné", at: new Date().toISOString() }; store.set("spc2_ev_done", st.evDone);
-      logValidation("close_request", e.boutiques[0] || "", e.skus.map(x => x.sku), "terminée depuis Événements SKU"); st.overrides = {}; render(); } }, "Terminer la demande"));
+      logValidation("close_request", e.boutiques[0] || "", e.skus.map(x => x.sku), "terminée depuis Événements SKU"); st.overrides = {}; st.pending = {}; render(); } }, "Terminer la demande"));
   } else out.push(el("p", "small muted", "Démo : modification, duplication et fin d'un événement dans l'outil installé."));
   if (st.evDone[e.id]) out.push(el("p", "small muted", "Terminé par " + st.evDone[e.id].by + " le " + st.evDone[e.id].at.slice(0, 16).replace("T", " ") + ".",
     el("button", { class: "btn link", style: "margin-left:6px", onclick: () => { delete st.evDone[e.id]; store.set("spc2_ev_done", st.evDone); render(); } }, "Réactiver (démo)")));

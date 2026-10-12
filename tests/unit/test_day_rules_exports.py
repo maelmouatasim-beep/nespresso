@@ -167,7 +167,7 @@ def test_order_workbook_and_zip(b80) -> None:
     rows = {r[0]: r for r in wb["Commande"].iter_rows(min_row=2, values_only=True)}
     assert rows["7005.70"][6] == 3600 and rows["7005.70"][5] == 3120
     assert isinstance(next(iter(rows)), str)
-    assert wb["Overrides"]["D2"].value == "Promo / événement"
+    assert wb["Overrides"]["D2"].value == "Promo"
 
     name, payload = lt_zip([res], datetime(2026, 10, 5, 11, 51))
     with zipfile.ZipFile(io.BytesIO(payload)) as z:
@@ -179,9 +179,13 @@ def test_order_workbook_and_zip(b80) -> None:
 # --- Base : catégories et migration -----------------------------------------------------------
 
 
-def test_override_category_is_optional() -> None:
-    o = Override(sku="A", qty_before=1, qty_after=2, author="A", timestamp=datetime(2026, 1, 1))
-    assert o.category is None and o.reason == ""
+def test_override_category_is_required_reason_optional() -> None:
+    """D-036 : la catégorie est obligatoire, la raison libre reste facultative."""
+    with pytest.raises(ValidationError):
+        Override(sku="A", qty_before=1, qty_after=2, author="A", timestamp=datetime(2026, 1, 1))
+    o = Override(sku="A", qty_before=1, qty_after=2, category="store_request", author="A",
+                 timestamp=datetime(2026, 1, 1))  # fmt: skip
+    assert o.category.value == "store_request" and o.reason == ""
 
 
 def test_storage_migrates_old_overrides_table(tmp_path: Path, b80) -> None:
@@ -227,9 +231,9 @@ def test_storage_migrates_reason_constraint_and_keeps_rows(tmp_path: Path, b80) 
     first = db.save_run(conn, res, author="A", sources={}, overrides=[old_ov])
     conn.close()
     conn = db.connect(path)  # migration
-    bare = Override(sku="7005.70", qty_before=3120, qty_after=3840, author="B",
-                    timestamp=datetime(2026, 10, 8))  # fmt: skip
+    bare = Override(sku="7005.70", qty_before=3120, qty_after=3840, category="stockout",
+                    author="B", timestamp=datetime(2026, 10, 8))  # fmt: skip
     second = db.save_run(conn, res, author="B", sources={}, overrides=[bare])
     assert db.run_overrides(conn, first)[0]["reason"] == "Promo AOS"
     got = db.run_overrides(conn, second)[0]
-    assert got["reason"] == "" and got["category"] is None and got["author"] == "B"
+    assert got["reason"] == "" and got["category"] == "stockout" and got["author"] == "B"

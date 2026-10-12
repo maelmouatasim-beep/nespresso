@@ -1,8 +1,8 @@
 """Application des overrides du planner. Fonction pure.
 
-Règle 6 : un override exige une raison, un auteur et un horodatage (validés par le
-modèle `Override`). La quantité d'origine reste visible dans `forecast_qty` et dans
-l'explication.
+Règle 6 : un override exige une catégorie, un auteur et un horodatage (validés par le
+modèle `Override`) ; la raison libre est facultative (D-036). La quantité d'origine reste
+visible dans `forecast_qty` et dans l'explication.
 """
 
 from __future__ import annotations
@@ -52,10 +52,7 @@ def apply_overrides(
         multiple = multiple if multiple > 0 else 1
         final = ceiling_to_multiple(Fraction(ov.qty_after), multiple)
         status = line.status
-        why = " : ".join(
-            x for x in (OVERRIDE_CATEGORY_LABELS.get(ov.category) if ov.category else None,
-                        ov.reason.strip()) if x
-        )  # fmt: skip
+        why = " : ".join(x for x in (OVERRIDE_CATEGORY_LABELS[ov.category], ov.reason.strip()) if x)
         reasons = [
             *line.reasons,
             f"Modifié par {ov.author} : {ov.qty_before} → {final}" + (f" ({why})" if why else ""),

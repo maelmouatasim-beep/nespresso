@@ -1,7 +1,8 @@
 """Garde-fou avant export : trois points à mettre au vert (événements SKU).
 
 1. Lignes BLOCKED par un événement : blocage confirmé ou ligne modifiée avec une raison.
-2. SKU flagués par un événement : marqués « Vu » (ou modifiés).
+2. SKU flagués par un événement : marqués « Vu » (ou modifiés). « Marquer comme vus » en
+   un clic n'est actif qu'une fois le filtre « Événements » de la commande ouvert (Q-030).
 3. Lancements, urgences et demandes boutique à inclure : case cochée.
 Chaque validation est écrite dans la base (qui, quand).
 """
@@ -17,7 +18,7 @@ import streamlit as st
 from app.domain.events import SkuEvent
 from app.engines.events import ExportCheck, store_requests_done
 from app.storage import events as store
-from app.ui.common import author, db_conn, ss
+from app.ui.common import author, db_conn, events_viewed, ss
 
 OK_ICON = ":green[:material/check_circle:]"
 BAD_ICON = ":red[:material/block:]"
@@ -78,7 +79,16 @@ def render_gate(
         c1.markdown(f"{OK_ICON if not unseen else TODO_ICON} **{unseen} SKU flagué(s) par un "
                     "événement non encore validé(s)**"
                     + (f"  \n{_listed(rows, lambda c: c.unvalidated)}" if unseen else ""))  # fmt: skip
-        if unseen and c2.button("Marquer comme vus", key=f"{key}_seen", width="stretch"):
+        to_open = [r.boutique for r in rows
+                   if r.check.unvalidated and not events_viewed(r.boutique, r.delivery)]  # fmt: skip
+        if to_open:
+            where = f" ({', '.join(to_open)})" if len(rows) > 1 else ""
+            c1.caption(f":material/info: Ouvre d'abord le filtre « Événements » de la commande"
+                       f"{where} (Commande boutique) pour activer « Marquer comme vus ».")  # fmt: skip
+        if unseen and c2.button("Marquer comme vus", key=f"{key}_seen", width="stretch",
+                                disabled=bool(to_open),
+                                help="Actif une fois le filtre « Événements » de la commande "
+                                     "ouvert au moins une fois."):  # fmt: skip
             for r in rows:
                 if r.check.unvalidated:
                     mark_seen(r)
