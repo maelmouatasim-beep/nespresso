@@ -34,9 +34,11 @@ from app.ui.common import (
     boutique_label,
     current,
     day_data,
+    dc_short,
     default_order,
     event_context,
     go,
+    is_inactive_line,
     order_frame,
     order_state,
     reset_order,
@@ -46,9 +48,9 @@ from app.ui.common import (
     style_order_frame,
     workspace,
 )
-from app.ui.gate import close_requests_prompt, requests_after_export
+from app.ui.gate import close_requests_prompt, requests_after_export, trace
 from app.ui.screens.export import save_run
-from app.ui.screens.order import FALLBACK_WEEKS_DEFAULT, render_order, set_confirmed
+from app.ui.screens.order import DC_NOTE, FALLBACK_WEEKS_DEFAULT, render_order, set_confirmed
 
 PARAM_FIELDS = ("delivery", "cover", "coffee", "history", "mode", "weeks", "codes")
 TO_COMPUTE, COMPUTED, CONFIRMED = "à calculer", "calculé", "confirmé"
@@ -68,7 +70,8 @@ def pending_lines(base_lines, confirmed: set[str]) -> list:  # noqa: ANN001
     """Lignes qui ne partiront pas sans confirmation : REVIEW, BLOCKED, ou flaguées par un
     événement (lancement, demande boutique, promo…), tant qu'elles ne sont pas confirmées."""
     return [b for b in base_lines
-            if b.sku not in confirmed and (b.status is not Status.OK or event_tags(b))]  # fmt: skip
+            if b.sku not in confirmed and (b.status is not Status.OK or event_tags(b))
+            and not is_inactive_line(b)]  # fmt: skip
 
 
 def add_boutique(boutique: str) -> None:
@@ -131,7 +134,7 @@ def readiness(boutique: str) -> Readiness:
     base, overrides = state["base"], state["overrides"]
     result = with_overrides(base, overrides.values(), data.masters.products)
     confirmed = state["seen"] | state["confirmed_blocks"]
-    open_ = [b for b in base.base_lines if b.sku not in confirmed]
+    open_ = [b for b in base.base_lines if b.sku not in confirmed and not is_inactive_line(b)]
     review = sum(b.status is Status.REVIEW for b in open_)
     blocked = sum(b.status is Status.BLOCKED for b in open_)
     to_treat = sum(b.status is not Status.BLOCKED for b in open_)
@@ -327,12 +330,16 @@ def _pending_list(res, mapping: dict[str, str]) -> None:  # noqa: ANN001
         return
     by_sku = {x.sku: x for x in res.lines}
     shown = default_order([by_sku[b.sku] for b in pending], base)
+    waiting = [x.sku for x in shown if x.sku in ss.dc_warn and dc_short(x)]
+    if waiting:  # D-048 : exclues de « Tout confirmer », à confirmer une par une
+        st.caption(f":orange[:material/warning:] Stock DC à 0 ou insuffisant, à confirmer une par "
+                   f"une (seconde coche) : {', '.join(waiting)}")  # fmt: skip
     c1, c2 = st.columns([4, 1.2], vertical_alignment="center")
     c1.markdown(f"#### {len(pending)} ligne(s) ne partiront pas si tu ne les confirmes pas")
     if c2.button(
         "Tout confirmer", key="confirm_pending", icon=":material/done_all:", width="stretch"
     ):
-        set_confirmed([x.sku for x in shown], True)
+        set_confirmed([x.sku for x in shown], True, bulk=True)
         st.rerun()
     df = order_frame(shown, base, mapping)[PENDING_COLUMNS].reset_index(drop=True)
     df["Raisons"] = [_short_reason(x, base[x.sku]) for x in shown]
@@ -346,8 +353,16 @@ def _pending_list(res, mapping: dict[str, str]) -> None:  # noqa: ANN001
         st.rerun()
 
 
+def _trace_dc0(result, dc_forced: set[str]) -> None:  # noqa: ANN001
+    """D-048 : l'export cite les lignes confirmées malgré un stock DC à 0 ou insuffisant."""
+    skus = [x.sku for x in result.lines if x.sku in dc_forced and dc_short(x)]
+    if skus:
+        trace(result.params.boutique, result.params.delivery_date, "export_dc0", skus, DC_NOTE)
+
+
 def _on_lt(result, filename: str) -> None:  # noqa: ANN001
     requests_after_export(list(result.events))
+    _trace_dc0(result, ss.dc_forced)
     run_id = save_run(result)
     if run_id:
         conn = db.connect(workspace().db_path)
@@ -370,6 +385,7 @@ def _on_zip(boutiques: list[str], when: datetime) -> None:
                 state["base"], state["overrides"].values(), data.masters.products
             )
             requests_after_export(list(result.events))
+            _trace_dc0(result, state["dc_forced"])
             run_id = db.save_run(conn, result, author=author(), sources=data.source_hashes,
                                  overrides=state["overrides"].values())  # fmt: skip
             if any(x.qty > 0 for x in result.lines):

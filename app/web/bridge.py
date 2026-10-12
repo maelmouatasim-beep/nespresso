@@ -31,6 +31,7 @@ from app.domain.models import (
     StockMovement,
     StockSnapshotLine,
 )
+from app.engines.inactive import inactive_candidates
 from app.engines.schedule import boutiques_ordering_on
 from app.ingestion import referential_checks as checks
 from app.ingestion.boutique_table import (
@@ -391,7 +392,9 @@ def status(run_date_iso: str, dataset: str = LIVE) -> str:
         "quality": [row for rep in reports for row in rep.as_rows()],
         "errors": any(rep.has_errors for rep in reports),
         "dq": {"stock_rows": len(stock), "locations": len({x.location for x in stock}),
-               "moves": len(moves), "days": len(dates)},
+               "moves": len(moves), "days": len(dates),
+               "inactive": sum(len(v) for v in inactive_candidates(
+                   stock, moves, masters.dc_mapping).values())},
         "period": [dates[0].isoformat(), dates[-1].isoformat()] if dates else None,
         "boutiques": [[b, names.get(b, "")] for b in all_boutiques(masters, stock)]
         if stock else [],

@@ -34,6 +34,7 @@ from app.domain.models import (
     StockSnapshotLine,
 )
 from app.engines.conversion import ConversionIndex
+from app.engines.inactive import is_inactive
 from app.engines.portfolio import EMPTY_PORTFOLIO, PortfolioIndex, numeric_key
 from app.engines.sales import FallbackHistory, SalesSummary
 
@@ -233,6 +234,17 @@ def compute_line(
     # --- Quantité ---
     dc_line = inputs.dc_stock.get(sku)
     dc_available = dc_line.available if dc_line else None
+    # D-049 : ancien SKU (tout à zéro, sans vente ni stock DC), masqué dans la table ;
+    # calculé quand même. Un nouveau SKU de conversion n'est jamais inactif.
+    fallback_rate = inputs.fallback.rate(sku) if inputs.fallback is not None else None
+    inactive = is_inactive(
+        expected=float(expected_total),
+        available=available_total,
+        incoming=float(snap.incoming) if snap else 0.0,
+        has_sales=sales_total != 0 or fallback_rate is not None,
+        dc_available=dc_available,
+        new_sku=bool(conv.olds_aggregated),
+    )
     in_portfolio = inputs.portfolio.contains(sku)
     exclusion = find_exclusion(sku, params.boutique, inputs.exclusions)
     source = QtySource.FORECAST
@@ -356,6 +368,7 @@ def compute_line(
         "fallback": fallback_info,
         "exclusion": exclusion.model_dump(mode="json") if exclusion else None,
         "cover_applied": cover,
+        "inactive": inactive,
         "cover_source": cover_source,
         "raw_need": None if raw is None else float(raw),
         "multiple": multiple,

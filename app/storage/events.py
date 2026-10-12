@@ -184,7 +184,11 @@ def event_history(conn: sqlite3.Connection, event_id: int) -> list[dict[str, Any
 
 # --- Validations avant export -----------------------------------------------------------
 
-VALIDATION_KINDS = ("seen", "confirm_block", "include", "close_request")
+VALIDATION_KINDS = (
+    "seen", "confirm_block", "include", "close_request",
+    "confirm_dc0",  # D-048 : confirmé malgré un stock DC à 0 ou insuffisant
+    "export_dc0",  # D-048 : export contenant des lignes confirmées malgré DC à 0
+)  # fmt: skip
 
 
 def record_validation(conn: sqlite3.Connection, *, author: str, boutique: str, delivery: date,

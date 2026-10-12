@@ -7,6 +7,7 @@ from datetime import date
 import pandas as pd
 import streamlit as st
 
+from app.engines.inactive import inactive_candidates
 from app.ingestion.depot import detect_kind, freshness
 from app.ui.common import (
     FRESH_ICON,
@@ -110,11 +111,16 @@ def render() -> None:
     dates = sorted({m.movement_date for m in moves})
     locations = {line.location for line in data.stock}
     weeks = (len(dates) and ((dates[-1] - dates[0]).days + 1) // 7) or 0
-    m = st.columns(4)
+    inactive = inactive_candidates(data.stock, moves, data.masters.dc_mapping)
+    m = st.columns(5)
     m[0].metric("Lignes de stock", fmt_int(len(data.stock)))
     m[1].metric("Emplacements", fmt_int(len(locations)))
     m[2].metric("Mouvements", fmt_int(len(moves)))
     m[3].metric("Historique", f"{len(dates)} j" + (f" ({weeks} sem.)" if weeks else ""))
+    m[4].metric("SKU inactifs", fmt_int(sum(len(v) for v in inactive.values())),
+                help="Lignes boutique avec Expected, Available, Incoming, ventes et stock DC à 0 : "
+                "anciens SKU, masqués dans la table de commande (sauf événement actif ou "
+                "conversion), « Afficher les SKU inactifs » pour les voir (D-049).")  # fmt: skip
     if dates:
         st.caption(f"Mouvements du {fmt_date(dates[0])} au {fmt_date(dates[-1])}")
         if weeks < 4:

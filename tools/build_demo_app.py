@@ -39,6 +39,7 @@ from app.domain.models import (  # noqa: E402
     PlanningParameters,
 )
 from app.engines.categories import CATEGORIES, DEFAULT_CATEGORY_MAP  # noqa: E402
+from app.engines.inactive import inactive_candidates  # noqa: E402
 from app.ingestion import referential_checks as checks  # noqa: E402
 from app.ingestion.boutique_table import (  # noqa: E402
     EXTRA_COLUMNS,
@@ -286,6 +287,12 @@ def build() -> Path:  # noqa: PLR0915 - un seul script linéaire, plus simple à
             "locations": len({x.location for x in data.stock}),
             "moves": len(data.movements),
             "days": len(dates),
+            "inactive": sum(
+                len(v)
+                for v in inactive_candidates(
+                    data.stock, data.movements, data.masters.dc_mapping
+                ).values()
+            ),
         },  # fmt: skip
         "quality": quality,
         "refs": refs,

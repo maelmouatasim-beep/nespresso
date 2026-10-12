@@ -49,6 +49,7 @@ CONFIRMED_MD = ":green[● Confirmé]"
 MODIFIED_MD = ":blue[· modifié]"
 MODIFIED_BG = "#E8F0FA"  # fond bleu très léger de la cellule Qty finale modifiée
 STATUS_COLORS = {  # texte, fond
+    "confirmer quand même": ("#94600F", "#FFF4DF"),  # D-048 : double confirmation DC à 0
     "Confirmé": ("#2A7449", "#E6F2EA"),
     "OK": ("#2A7449", "#E6F2EA"),
     "REVIEW": ("#94600F", "#FFF4DF"),
@@ -95,6 +96,9 @@ def init_state() -> None:
         "author": None,
         "taken_over": set(),  # événements personnels d'un collègue repris pour ma session
         "confirmed_blocks": set(),  # SKU bloqués par un événement, blocage confirmé
+        "dc_warn": set(),  # D-048 : premier clic « Confirmé » sur une ligne DC à 0, en attente
+        "dc_forced": set(),  # D-048 : lignes confirmées malgré DC à 0 (tracées à l'export)
+        "show_inactive": False,  # D-049 : « Afficher les SKU inactifs »
         "include_ok": False,  # lancements / demandes à inclure confirmés
         "requests_to_close": [],  # demandes boutique à terminer après l'export
         "ev_edit": None,  # Événements : panneau ouvert (id, "new" ou "request")
@@ -124,6 +128,7 @@ def run_date() -> date:
 def reset_order() -> None:
     ss.base, ss.overrides, ss.seen = None, {}, set()
     ss.confirmed_blocks, ss.include_ok = set(), False
+    ss.dc_warn, ss.dc_forced = set(), set()
     ss.saved_run_id, ss.why_sku = None, None
     ss.nonce += 1
 
@@ -136,6 +141,8 @@ ORDER_KEYS = (
     "overrides",
     "seen",
     "confirmed_blocks",
+    "dc_warn",
+    "dc_forced",
     "include_ok",
     "saved_run_id",
     "why_sku",
@@ -362,8 +369,26 @@ def shown_status(sku: str, base_status: Status) -> str:
 
 def status_cell(line: RecommendationLine, base: RecommendationLine) -> str:
     """Statut de la ligne + marqueur « modifié » ; une modification ne change pas le statut."""
+    if line.sku in ss.get("dc_warn", set()) and dc_short(line):
+        return f"⚠ {dc_short_text(line)} — confirmer quand même ?"  # D-048
     label = CONFIRMED if is_confirmed(line.sku) else STATUS_ICON[base.status.value]
     return label + (MODIFIED_MARK if line.qty != base.qty else "")
+
+
+def dc_short(line: RecommendationLine) -> bool:
+    """Qty finale > 0 et stock DC à 0, absent ou insuffisant pour la couvrir (D-048)."""
+    dc = line.explanation["inputs"]["dc_available"]
+    return line.qty > 0 and (dc is None or dc < line.qty)
+
+
+def dc_short_text(line: RecommendationLine) -> str:
+    dc = line.explanation["inputs"]["dc_available"]
+    return "Stock DC : 0" if not dc else f"Stock DC : {fmt_int(dc)} < {fmt_int(line.qty)}"
+
+
+def is_inactive_line(line: RecommendationLine) -> bool:
+    """Ancien SKU masqué (D-049) : tout à zéro, sauf événement actif ou quantité saisie."""
+    return bool(line.explanation.get("inactive")) and not event_tags(line) and line.qty <= 0
 
 
 def make_override(base_line: RecommendationLine, after: int, reason: str = "") -> Override:

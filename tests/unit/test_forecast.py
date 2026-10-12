@@ -419,3 +419,53 @@ def test_explanation_carries_trace() -> None:
     ):  # fmt: skip
         assert key in exp
     assert exp["parameters"]["movement_codes"] == "ALL"
+
+
+# --- SKU inactifs (D-049) -----------------------------------------------------
+
+
+def test_inactive_sku_flag_everything_at_zero() -> None:
+    # Expected 0, Available 0, Incoming 0, aucune vente, stock DC 0 : ancien SKU, calculé
+    # quand même (qty 0, OK) mais marqué inactif pour être masqué dans la table.
+    line = simple(sales=0, expected=0, dc=0)
+    assert line.qty == 0
+    assert line.explanation["inactive"] is True
+    # DC absent de l'export = pas de stock non plus.
+    assert simple(sales=0, expected=0, dc=None).explanation["inactive"] is True
+
+
+@pytest.mark.parametrize(
+    "kw",
+    [
+        {"sales": 70, "expected": 0, "dc": 0},  # une vente sur la période
+        {"sales": 0, "expected": 240, "dc": 0},  # du stock en boutique
+        {"sales": 0, "expected": 0, "dc": 480},  # du stock au DC (retour DC, règle A6)
+    ],
+)
+def test_sku_with_any_activity_is_not_inactive(kw: dict) -> None:
+    assert simple(**kw).explanation["inactive"] is False
+
+
+def test_new_sku_of_an_active_conversion_is_never_inactive() -> None:
+    old, new = "7039.70", "7040.70"
+    inputs = make_inputs(
+        stock=[snap(old, 0), snap(new, 0)],
+        sales={},
+        products=[
+            Product(sku=s, description="VER-X", product_type="C", order_multiple=240)
+            for s in (old, new)
+        ],  # fmt: skip
+        conversions=[SkuConversion(old_sku=old, new_sku=new, effective_date=RUN)],
+        dc={},
+    )
+    assert compute_line(new, inputs, params(), EXCEL).explanation["inactive"] is False
+
+
+def test_inactive_candidates_from_the_two_exports() -> None:
+    from app.engines.inactive import inactive_candidates
+
+    stock = [snap("A", 0), snap("B", 0), snap("C", 100), snap("A", 0, loc="CY1"),
+             snap("B", 50, loc="CY1")]  # fmt: skip
+    moves = [mv("C", 3, DAYS[0])]
+    out = inactive_candidates(stock, moves, {"B80": "CY1"})
+    assert out == {"B80": ["A"]}  # B : stock au DC ; C : vente et stock boutique

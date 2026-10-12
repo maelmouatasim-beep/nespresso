@@ -115,6 +115,7 @@ def line_meta(
         "exp_own": inp["expected_own"],
         "exp_old": inp["expected_from_old_skus"],
         "avail": inp.get("available_total"),
+        "inactive": bool(e.get("inactive")),
         "dc": inp["dc_available"],
         "cur": r(e["current_cover_days"], 1),
         "pfo": inp.get("in_portfolio"),

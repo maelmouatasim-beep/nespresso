@@ -28,6 +28,7 @@ from app.ui.common import (
     cover_after,
     cover_target,
     day_data,
+    dc_short,
     default_order,
     event_cell,
     explain_steps,
@@ -36,6 +37,7 @@ from app.ui.common import (
     fmt_int,
     incoming_of,
     is_confirmed,
+    is_inactive_line,
     make_override,
     order_frame,
     rounding_note,
@@ -52,8 +54,9 @@ TABLE_HEIGHT = 600
 FALLBACK_WEEKS_DEFAULT = 4
 
 
-def _tiles(res) -> None:  # noqa: ANN001
-    """Unités, palettes, puis OK / REVIEW / BLOCKED non confirmés et Confirmé (D-039)."""
+def _tiles(res, hidden: set[str] = frozenset()) -> None:  # noqa: ANN001
+    """Unités, palettes, puis OK / REVIEW / BLOCKED non confirmés et Confirmé (D-039).
+    Les SKU inactifs masqués (D-049) ne comptent pas."""
     s, p = res.summary, res.pallets
     cols = st.columns(6)
     cols[0].metric("Unités", fmt_int(s.units_total))
@@ -62,7 +65,8 @@ def _tiles(res) -> None:  # noqa: ANN001
                     f"Mach. {fmt_1(p.pallets[MACHINES])} · Autres {fmt_1(p.pallets[OTHERS])}")  # fmt: skip
     counts = {"OK": 0, "REVIEW": 0, "BLOCKED": 0, "Confirmé": 0}
     for b in res.base_lines:
-        counts[shown_status(b.sku, b.status)] += 1
+        if b.sku not in hidden:
+            counts[shown_status(b.sku, b.status)] += 1
     cols[2].metric(STATUS_MD["OK"], fmt_int(counts["OK"]))
     cols[3].metric(STATUS_MD["REVIEW"], fmt_int(counts["REVIEW"]))
     cols[4].metric(STATUS_MD["BLOCKED"], fmt_int(counts["BLOCKED"]))
@@ -164,26 +168,52 @@ def _bulk_buttons(lines: list[RecommendationLine], shown: list[RecommendationLin
     c1, c2, _ = st.columns([1.6, 1.6, 3])
     if c1.button("Accepter toutes les lignes OK", icon=":material/done_all:", key="accept_ok",
                  width="stretch"):  # fmt: skip
-        set_confirmed([x.sku for x in lines if base[x.sku].status is Status.OK], True)
+        set_confirmed([x.sku for x in lines if base[x.sku].status is Status.OK], True, bulk=True)
         st.rerun()
     todo = [x.sku for x in shown if not is_confirmed(x.sku)]
     if c2.button(f"Confirmer les lignes affichées ({len(todo)})", icon=":material/checklist:",
                  key="confirm_shown", disabled=not todo, width="stretch"):  # fmt: skip
-        set_confirmed(todo, True)
+        set_confirmed(todo, True, bulk=True)
         st.rerun()
 
 
-def set_confirmed(skus: list[str], on: bool) -> None:
+DC_NOTE = "Confirmé malgré DC à 0"
+
+
+def _final_qty(sku: str, base_qty: int) -> int:
+    ov = ss.overrides.get(sku)
+    return int(ov.qty_after) if ov else base_qty
+
+
+def set_confirmed(skus: list[str], on: bool, *, bulk: bool = False) -> list[str]:
     """Confirme (ou remet à traiter) des lignes. Une ligne bloquée par un événement voit aussi
-    son blocage confirmé ; tout ce qui touche un événement est tracé (D-031)."""
+    son blocage confirmé ; tout ce qui touche un événement est tracé (D-031).
+
+    D-048 : une ligne dont la Qty finale > 0 et le stock DC est à 0 (ou insuffisant) n'est pas
+    confirmée au premier clic : elle passe en attente (orange, « confirmer quand même ? ») et
+    un second clic la confirme, tracé « Confirmé malgré DC à 0 ». Un lot (`bulk` : « Accepter
+    toutes les lignes OK », « Confirmer les lignes affichées », « Tout confirmer ») les exclut
+    toujours : elles se confirment une par une. Renvoie les SKU mis en attente.
+    """
     base = {x.sku: x for x in ss.base.base_lines} if ss.base else {}
-    traced, blocks = [], []
+    traced, blocks, forced, held = [], [], [], []
     for sku in skus:
         b = base.get(sku)
+        short = b is not None and dc_short(b.model_copy(update={"qty": _final_qty(sku, b.qty)}))
+        if on and short and (bulk or sku not in ss.dc_warn):
+            ss.dc_warn.add(sku)
+            held.append(sku)
+            continue
         if on:
             ss.seen.add(sku)
+            ss.dc_warn.discard(sku)
+            if short:
+                ss.dc_forced.add(sku)
+                forced.append(sku)
         else:
             ss.seen.discard(sku)
+            ss.dc_warn.discard(sku)
+            ss.dc_forced.discard(sku)
         if b is not None and blocked_by_event(b):
             changed = (sku in ss.confirmed_blocks) != on
             ss.confirmed_blocks = (
@@ -197,7 +227,19 @@ def set_confirmed(skus: list[str], on: bool) -> None:
         _trace("seen", traced, "" if on else "retiré")
     if blocks:
         _trace("confirm_block", blocks, "" if on else "retiré")
+    if forced:
+        _trace("confirm_dc0", forced, DC_NOTE)
+    if held:
+        ss.round_notes = [*(ss.get("round_notes") or []), dc_hold_note(held)]
     ss.nonce += 1
+    return held
+
+
+def dc_hold_note(held: list[str]) -> str:
+    """Message après un lot : les lignes DC à 0 sont exclues, à confirmer une par une."""
+    return (f"{len(held)} ligne(s) avec stock DC à 0 ou insuffisant, exclue(s) du lot : "
+            f"{', '.join(held)}. Coche « Confirmé » une seconde fois sur chacune pour confirmer "
+            f"quand même.")  # fmt: skip
 
 
 def _process_edits(
@@ -211,7 +253,7 @@ def _process_edits(
     - Détail : ouvre le panneau « Pourquoi ».
     """
     rows = edited.to_dict("records")
-    checked = [r["SKU"] for r in rows if r["Détail"]]
+    checked = [r["SKU"] for r in rows if r.get("Détail")]
     new_why = next((s for s in checked if s != ss.why_sku), None)
     rerun = False
     if new_why:
@@ -355,19 +397,23 @@ def render_order(res, data) -> None:  # noqa: ANN001 - PlanningResult (avec modi
     if not author():
         st.caption(":material/info: Choisis ton prénom (Planner) pour appliquer aussi tes "
                    "événements personnels.")  # fmt: skip
-    _tiles(res)
+    # D-049 : les anciens SKU (tout à zéro, sans vente ni stock DC) sont masqués et ne comptent
+    # pas dans les tuiles ; « Afficher les SKU inactifs (N) » sous la table les montre.
+    inactive = {x.sku for x in res.lines if is_inactive_line(x)}
+    pool = res.lines if ss.show_inactive else [x for x in res.lines if x.sku not in inactive]
+    _tiles(res, inactive)
     for w in res.rule_warnings:
         st.warning(w)
 
     event = _event_banner(res)
     base = {x.sku: x for x in res.base_lines}
-    cat, status, qty_only, search = _filters(res.lines, base, mapping)
+    cat, status, qty_only, search = _filters(pool, base, mapping)
     shown = default_order(
-        [x for x in res.lines
+        [x for x in pool
          if _matches(x, base[x.sku], cat, status, qty_only, search, mapping, event)],
         base,
     )  # fmt: skip
-    _bulk_buttons(res.lines, shown, base)
+    _bulk_buttons(pool, shown, base)
     for note in ss.pop("round_notes", None) or []:
         st.caption(f":orange[:material/warning:] {note}")
     side = bool(ss.why_sku)
@@ -382,9 +428,12 @@ def render_order(res, data) -> None:  # noqa: ANN001 - PlanningResult (avec modi
         edited = st.data_editor(style_order_frame(df, targets), key=key, hide_index=True, width="stretch", height=TABLE_HEIGHT, placeholder="—",
                                 column_config=ORDER_COLUMN_CONFIG,
                                 disabled=[c for c in df.columns if c not in EDITABLE_COLUMNS])  # fmt: skip
-        done = sum(is_confirmed(x.sku) for x in res.lines)
-        st.caption(f"{len(shown)} ligne(s) affichée(s) sur {len(res.lines)} · lignes confirmées : "
-                   f"{done} / {len(res.lines)} · clic sur un en-tête pour trier · case Détail pour le « Pourquoi »")  # fmt: skip
+        done = sum(is_confirmed(x.sku) for x in pool)
+        st.caption(f"{len(shown)} ligne(s) affichée(s) sur {len(pool)} · lignes confirmées : "
+                   f"{done} / {len(pool)} · clic sur un en-tête pour trier · case Détail pour le « Pourquoi »")  # fmt: skip
+        st.checkbox(f"Afficher les SKU inactifs ({len(inactive)})", key="show_inactive",
+                    help="Anciens SKU : Expected, Available, Incoming, ventes et stock DC à 0. "
+                    "Calculés quand même, masqués de la table et des tuiles (D-049).")  # fmt: skip
     if _process_edits(edited, {x.sku: x for x in shown}, base):
         ss.nonce += 1
         st.rerun()

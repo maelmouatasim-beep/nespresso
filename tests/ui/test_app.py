@@ -135,8 +135,18 @@ def grid(at: AppTest):
 
 def test_single_grid_default_order_and_filters(app: AppTest) -> None:
     compute_b80(app)
+    from app.ui.common import is_inactive_line
+
     df = grid(app)
-    assert len(df) == len(app.session_state["base"].lines)  # une seule grille, toutes les lignes
+    all_lines = app.session_state["base"].lines
+    inactive = [x for x in all_lines if is_inactive_line(x)]
+    # D-049 : une seule grille, toutes les lignes sauf les anciens SKU (tout à zéro), masqués.
+    assert len(df) == len(all_lines) - len(inactive)
+    assert inactive and not {x.sku for x in inactive} & set(df["SKU"])
+    app.checkbox(key="show_inactive").check().run()
+    assert len(grid(app)) == len(all_lines)
+    app.checkbox(key="show_inactive").uncheck().run()
+    df = grid(app)
     flagged = ~df["Statut"].str.contains("OK")
     first_ok = int(flagged.values.argmin())
     assert flagged[:first_ok].all() and not flagged[first_ok:].any()  # REVIEW/BLOCKED en haut
@@ -295,15 +305,35 @@ def test_export_waits_for_the_pending_list_to_be_empty(app: AppTest) -> None:
     assert len(pending(app)) == n - 1 and sku not in set(pending(app)["SKU"])
     assert grid(app).set_index("SKU").loc[sku, "Statut"] == "● Confirmé"
     app.button(key="confirm_pending").click().run()  # « Tout confirmer »
+    # D-048 : les lignes Qty finale > 0 avec stock DC à 0 ou insuffisant sont exclues du lot
+    # et restent dans la liste, en attente d'une seconde confirmation.
+    from app.ui.common import dc_short
+
+    held = pending(app)
+    by_sku = {x.sku: x for x in app.session_state["base"].lines}
+    assert held is not None and set(held["SKU"]) == app.session_state["dc_warn"]
+    assert all(dc_short(by_sku[s]) for s in held["SKU"]) and len(held) < n
+    assert held["Statut"].str.contains("confirmer quand même").all()
+    assert download(app, "Télécharger le LT").disabled
+    app.button(key="confirm_pending").click().run()  # second « Tout confirmer » : toujours exclues
+    assert len(pending(app)) == len(held)
+    for sku in held["SKU"]:  # seconde confirmation, une par une (« Confirmer la ligne »)
+        app.session_state["why_sku"] = sku
+        app.run()
+        app.button(key="why_seen").click().run()
     assert pending(app) is None
     assert any("Tout est confirmé" in m.value for m in app.markdown)
+    assert app.session_state["dc_forced"] == set(held["SKU"])
     assert not download(app, "Télécharger le LT").disabled
     assert not download(app, "Télécharger tous les LT").disabled  # une boutique prête
     from app.storage import db
     from app.storage import events as store
 
-    kinds = {v["kind"] for v in store.list_validations(db.connect(), "B80")}
-    assert kinds == {"confirm_block", "seen"}
+    validations = store.list_validations(db.connect(), "B80")
+    assert {v["kind"] for v in validations} == {"confirm_block", "seen", "confirm_dc0"}
+    dc0 = [v for v in validations if v["kind"] == "confirm_dc0"]
+    assert {s for v in dc0 for s in v["skus"]} == set(held["SKU"])  # tracé (D-048)
+    assert all(v["note"] == "Confirmé malgré DC à 0" for v in dc0)
 
 
 def test_store_request_ends_after_export_with_confirmation(app: AppTest) -> None:
