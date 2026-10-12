@@ -161,12 +161,15 @@ def compute_line(
         )
     else:
         own_expected = snap.expected
+    # Available (stock disponible du jour) : affiché seulement, n'entre pas dans qty (D-046).
+    available_total = float(snap.available) if snap else 0.0
 
     conv = inputs.conversions.status(sku, params.run_date)
     sales_from_old: dict[str, float] = {}
     expected_from_old: dict[str, float] = {}
     for old in conv.olds_aggregated:
         old_snap = inputs.boutique_stock.get(old.old_sku)
+        available_total += float(old_snap.available) if old_snap else 0.0
         sales_from_old[old.old_sku] = inputs.sales.sales(old.old_sku)
         expected_from_old[old.old_sku] = old_snap.expected if old_snap else 0.0
         flags.rules.append(f"conversion_new_sku: ventes et Expected de {old.old_sku} ajoutés")
@@ -346,6 +349,7 @@ def compute_line(
             "expected_from_old_skus": expected_from_old,
             "sales_total": float(sales_total),
             "expected_total": float(expected_total),
+            "available_total": available_total,
             "dc_available": dc_available,
             "in_portfolio": in_portfolio,
         },

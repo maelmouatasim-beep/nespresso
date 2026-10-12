@@ -25,8 +25,11 @@ from app.ui.common import (
     author,
     boutique_label,
     category_of_line,
+    cover_after,
+    cover_target,
     day_data,
     default_order,
+    event_cell,
     explain_steps,
     fmt_1,
     fmt_date,
@@ -297,10 +300,16 @@ def _why_panel(res, sku: str, mapping: dict[str, str]) -> None:  # noqa: ANN001
     dc = inp["dc_available"]
     st.markdown(f"Expected après commande : **{fmt_int(inp['expected_total'] + line.qty)}** "
                 f"(Expected du jour {fmt_int(inp['expected_total'])} + Qty finale {fmt_int(line.qty)})")  # fmt: skip
+    target = cover_target(line)
+    st.markdown(f"Couverture : actuelle {fmt_1(cover_after(line, 0))} j → après commande "
+                f"**{fmt_1(cover_after(line))} j**"
+                + (f" · cible {fmt_1(target)} j" if target is not None else ""))  # fmt: skip
     st.markdown(f"Stock DC : **{fmt_int(dc) if dc is not None else 'absent'}** · "
                 f"stock projeté à la livraison : **{fmt_int(e['projected_stock_at_delivery'])}**")  # fmt: skip
     if line.reasons:
         st.markdown("\n".join(f"- {r}" for r in line.reasons))
+    if ev := event_cell(base_line):  # D-046 : plus de colonne Événement dans la grille
+        st.markdown(f"Événement(s) : {ev}")
     if blocked_by_event(base_line):
         done = sku in ss.confirmed_blocks
         st.button("Retirer la confirmation du blocage" if done else "Confirmer le blocage (qty 0)",
@@ -363,7 +372,8 @@ def render_order(res, data) -> None:  # noqa: ANN001 - PlanningResult (avec modi
         # pas la table, la ligne reste en place et le tri choisi au clic est gardé (D-039).
         rows_id = hash(tuple(x.sku for x in shown))
         key = f"grid_{p.boutique}_{cat}_{status}_{qty_only}_{search}_{event}_{ss.nonce}_{rows_id}"
-        edited = st.data_editor(style_order_frame(df), key=key, hide_index=True, width="stretch", height=TABLE_HEIGHT, placeholder="—",
+        targets = {x.sku: cover_target(x) for x in shown}
+        edited = st.data_editor(style_order_frame(df, targets), key=key, hide_index=True, width="stretch", height=TABLE_HEIGHT, placeholder="—",
                                 column_config=ORDER_COLUMN_CONFIG,
                                 disabled=[c for c in df.columns if c not in EDITABLE_COLUMNS])  # fmt: skip
         done = sum(is_confirmed(x.sku) for x in res.lines)

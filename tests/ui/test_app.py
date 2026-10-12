@@ -142,11 +142,14 @@ def test_single_grid_default_order_and_filters(app: AppTest) -> None:
     assert flagged[:first_ok].all() and not flagged[first_ok:].any()  # REVIEW/BLOCKED en haut
     ok = df[first_ok:]["Qty proposée"].tolist()
     assert ok == sorted(ok, reverse=True)  # puis Qty proposée décroissante
-    assert list(df.columns[:6]) == ["Confirmé", "Détail", "Statut", "SKU", "Description",
-                                    "Catégorie"]  # fmt: skip
+    assert list(df.columns) == ["Confirmé", "Détail", "Statut", "SKU", "Description", "Expected",
+                                "Available", "Ventes", "Qty proposée", "Qty finale",
+                                "Expected + commande", "Couverture", "Multiple", "Stock DC",
+                                "Raisons"]  # D-046  # fmt: skip
 
     next(b for b in app.button_group if b.key == "f_cat").set_value("Cafés").run()
-    assert set(grid(app)["Catégorie"]) == {"Cafés"}
+    types = {x.sku: x.product_type for x in app.session_state["base"].lines}
+    assert {types[s] for s in grid(app)["SKU"]} == {"C"}
     next(b for b in app.button_group if b.key == "f_status").set_value("REVIEW").run()
     assert grid(app)["Statut"].str.contains("REVIEW").all()
     app.checkbox(key="f_qty").check().run()
@@ -248,7 +251,9 @@ def test_personal_event_applies_only_to_its_planner_until_taken_over(app: AppTes
     compute_b80(app)
     lines = {x.sku: x for x in app.session_state["base"].lines}
     assert lines["7042.70"].qty == 1440  # 1200 + 240 demandés par la boutique
-    assert "○ Demande B80" in grid(app).set_index("SKU").loc["7042.70", "Événement"]
+    app.session_state["why_sku"] = "7042.70"
+    app.run()
+    assert any("○ Demande B80" in m.value for m in app.markdown)  # dans le « Pourquoi » (D-046)
 
 
 def pending(at: AppTest):  # noqa: ANN201
@@ -435,20 +440,29 @@ def test_create_a_target_stock_event(app: AppTest) -> None:
     assert any("Cible vide" in e.value for e in app.error)
 
 
-def test_expected_follows_the_final_quantity(app: AppTest) -> None:
-    """D-044 : la colonne Expected = Expected du jour + Qty finale, et suit chaque saisie."""
+def test_expected_and_cover_follow_the_final_quantity(app: AppTest) -> None:
+    """D-044 / D-046 : « Expected + commande » et « Couverture » suivent chaque saisie."""
     app.selectbox(key="author").set_value("Camille").run()
     compute_b80(app)
     line = next(x for x in app.session_state["base"].lines if x.sku == "7005.70")
-    today = line.explanation["inputs"]["expected_total"]
+    inp = line.explanation["inputs"]
+    today, sales = inp["expected_total"], inp["sales_total"]
+    days = line.explanation["parameters"]["sales_history_days"]
     row = grid(app).set_index("SKU").loc["7005.70"]
-    assert row["Expected"] == today + 3120
+    assert row["Expected"] == today
+    assert row["Available"] == inp["available_total"]
+    assert row["Expected + commande"] == today + 3120
+    assert row["Couverture"] == round((today + 3120) / sales * days, 1)
     app.session_state["why_sku"] = "7005.70"
     app.run()
     app.number_input(key="dlg_qty_7005.70").set_value(3600).run()
     app.button(key="dlg_save").click().run()
-    assert grid(app).set_index("SKU").loc["7005.70", "Expected"] == today + 3600
+    row = grid(app).set_index("SKU").loc["7005.70"]
+    assert row["Expected"] == today  # l'Expected du jour ne bouge pas
+    assert row["Expected + commande"] == today + 3600
+    assert row["Couverture"] == round((today + 3600) / sales * days, 1)
     assert any("Expected après commande" in m.value for m in app.markdown)
+    assert any("Couverture : actuelle" in m.value for m in app.markdown)
 
 
 def test_several_skus_picked_in_one_promotion(app: AppTest) -> None:

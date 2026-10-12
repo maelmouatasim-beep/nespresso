@@ -54,6 +54,7 @@ STATUS_COLORS = {  # texte, fond
     "BLOCKED": ("#B23A3A", "#FBE9E7"),
 }
 ZEBRA = "#FBF8F3"  # lignes alternées très légères
+COVER_LOW, COVER_OK = "#B23A3A", "#2A7449"  # couverture sous / au-dessus de la cible (D-046)
 SOURCE_LABEL = {
     "forecast": "Prévision",
     "allocation": "Allocation",
@@ -358,8 +359,6 @@ def order_frame(
         b = base.get(x.sku, x)
         e, inp = x.explanation, x.explanation["inputs"]
         sales = inp["sales_total"]
-        days = e["parameters"]["sales_history_days"]
-        after = (inp["expected_total"] + x.qty) / sales * days if sales else None
         rows.append(
             {
                 "Confirmé": is_confirmed(x.sku),
@@ -367,29 +366,43 @@ def order_frame(
                 "Statut": status_cell(x, b),
                 "SKU": x.sku,
                 "Description": x.description or "",
-                "Catégorie": category_of_line(x, mapping),
-                "Événement": event_cell(x),
-                # D-044 : Expected affiché = stock attendu une fois la commande livrée
-                # (Expected de la Stock Situation + Qty finale) ; il suit chaque saisie.
-                "Expected": num(inp["expected_total"] + x.qty),
+                "Expected": num(inp["expected_total"]),
+                "Available": num(inp.get("available_total")),
                 "Ventes": num(sales),
-                "Couv. actuelle": num(_round1(e["current_cover_days"])),
                 "Qty proposée": b.qty,
                 "Qty finale": x.qty,
-                "Couv. après": num(_round1(after)),
+                # D-044 / D-046 : stock attendu une fois la commande livrée (Expected du jour
+                # + Qty finale) et couverture calculée dessus ; les deux suivent chaque saisie.
+                "Expected + commande": num(inp["expected_total"] + x.qty),
+                "Couverture": num(_round1(cover_after(x))),
                 "Multiple": num(e["multiple"]),
                 "Stock DC": num(inp["dc_available"]),
-                "Source": SOURCE_LABEL[x.source.value],
                 "Raisons": " | ".join(x.reasons),
             }
         )
     return pd.DataFrame(rows, columns=ORDER_COLUMNS)
 
 
+def cover_after(line: RecommendationLine, qty: int | None = None) -> float | None:
+    """Couverture (jours) sur Expected + Qty finale ; None sans ventes."""
+    e, inp = line.explanation, line.explanation["inputs"]
+    sales = inp["sales_total"]
+    if not sales:
+        return None
+    q = line.qty if qty is None else qty
+    return float((inp["expected_total"] + q) / sales * e["parameters"]["sales_history_days"])
+
+
+def cover_target(line: RecommendationLine) -> float | None:
+    """Cible de couverture de la ligne : cover café si café et cover café saisi, sinon cover."""
+    target = line.explanation.get("cover_applied")
+    return None if target is None else float(target)
+
+
 ORDER_COLUMNS = [
-    "Confirmé", "Détail", "Statut", "SKU", "Description", "Catégorie", "Événement", "Expected", "Ventes",
-    "Couv. actuelle",
-    "Qty proposée", "Qty finale", "Couv. après", "Multiple", "Stock DC", "Source", "Raisons",
+    "Confirmé", "Détail", "Statut", "SKU", "Description", "Expected", "Available", "Ventes",
+    "Qty proposée", "Qty finale", "Expected + commande", "Couverture", "Multiple", "Stock DC",
+    "Raisons",
 ]  # fmt: skip
 
 _INT = {"format": "localized"}
@@ -407,23 +420,30 @@ ORDER_COLUMN_CONFIG = {
     "Statut": st.column_config.TextColumn(width=150, pinned=True),
     "SKU": st.column_config.TextColumn(width=100, pinned=True),
     "Description": st.column_config.TextColumn(width=210),
-    "Catégorie": st.column_config.TextColumn(width=120),
-    "Événement": st.column_config.TextColumn(
-        width=180, help="● événement d'équipe · ○ événement personnel"
-    ),
     "Expected": st.column_config.NumberColumn(
-        width=80, help="Stock attendu après la commande : Expected du jour + Qty finale", **_INT
+        width=80, help="Stock attendu du jour (Stock Situation)", **_INT
+    ),
+    "Available": st.column_config.NumberColumn(
+        width=80, help="Stock disponible du jour (Stock Situation)", **_INT
     ),
     "Ventes": st.column_config.NumberColumn(width=70, **_INT),
-    "Couv. actuelle": st.column_config.NumberColumn("Couv. act.", width=75, format="%.1f"),
     "Qty proposée": st.column_config.NumberColumn("Proposée", width=80, **_INT),
     "Qty finale": st.column_config.NumberColumn(
         "Qty finale", width=90, min_value=0, step=1, help="Modifiable", **_INT
     ),
-    "Couv. après": st.column_config.NumberColumn("Couv. après", width=80, format="%.1f"),
+    "Expected + commande": st.column_config.NumberColumn(
+        "Expected + commande", width=120, help="Expected du jour + Qty finale", **_INT
+    ),
+    "Couverture": st.column_config.NumberColumn(
+        "Couverture",
+        width=90,
+        format="%.1f",
+        help="Jours de couverture sur Expected + Qty finale (Qty finale 0 = couverture actuelle). "
+        "Rouge : sous la cible saisie · vert : au-dessus. Le détail actuelle → après est dans "
+        "le « Pourquoi ».",
+    ),  # fmt: skip
     "Multiple": st.column_config.NumberColumn(width=70, **_INT),
     "Stock DC": st.column_config.NumberColumn(width=85, **_INT),
-    "Source": st.column_config.TextColumn(width=95),
     "Raisons": st.column_config.TextColumn(width=340),
 }
 EDITABLE_COLUMNS = ("Confirmé", "Détail", "Qty finale")
@@ -436,7 +456,14 @@ def _status_style(value: str) -> str:
     return ""
 
 
-def style_order_frame(df: pd.DataFrame):  # noqa: ANN201 - pandas Styler
+def _cover_style(cover: float | None, target: float | None) -> str:
+    """Couleur discrète de la couverture : rouge sous la cible, vert au-dessus (D-046)."""
+    if cover is None or target is None or pd.isna(cover):
+        return ""
+    return f"color: {COVER_LOW}; font-weight: 600" if cover < target else f"color: {COVER_OK}"
+
+
+def style_order_frame(df: pd.DataFrame, targets: dict[str, float | None] | None = None):  # noqa: ANN201 - pandas Styler
     """Lignes alternées très légères + pastilles de statut colorées."""
     zebra = df.style.apply(
         lambda row: [f"background-color: {ZEBRA}" if row.name % 2 else ""] * len(row), axis=1
@@ -444,6 +471,14 @@ def style_order_frame(df: pd.DataFrame):  # noqa: ANN201 - pandas Styler
     zebra = zebra.map(_status_style, subset=["Statut"])
     if "Qty finale" not in df.columns:  # liste des lignes à confirmer : pas de Qty finale
         return zebra
+    if "Couverture" in df.columns and targets is not None:
+        zebra = zebra.apply(
+            lambda col: [
+                _cover_style(cover, targets.get(sku))
+                for cover, sku in zip(col, df["SKU"], strict=True)
+            ],
+            subset=["Couverture"],
+        )
     # Marqueur « modifié » : fond bleu très léger sur la Qty finale qui diffère de la proposée.
     return zebra.apply(
         lambda col: [

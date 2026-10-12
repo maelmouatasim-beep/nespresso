@@ -114,6 +114,8 @@ table.order tbody tr:hover td { background: var(--surface-2); }
 table.order td.q.modq { background: var(--mod-bg); }
 table.order td.q.modq input { color: var(--mod); font-weight: 700; background: var(--mod-bg); }
 table.order td.conf { text-align: center; } table.order td.conf input { width: 16px; height: 16px; cursor: pointer; }
+table.order td.cov-low { color: var(--blocked); font-weight: 600; }
+table.order td.cov-ok { color: var(--ok); }
 .modmark { color: var(--mod); font-size: 11px; font-weight: 700; margin-left: 4px; white-space: nowrap; }
 td.q input { width: 100%; text-align: right; padding: 3px 6px; font-variant-numeric: tabular-nums; }
 td.vu { text-align: center; }
@@ -821,10 +823,17 @@ function matches(x) {
 // Colonnes : [titre, largeur, numérique, valeur de tri]
 const COLS = [
   ["Confirmé", 76, 0, x => isConf(x.m.sku) ? "1" : "0"], ["Statut", 150, 0, x => statusKey(x)], ["SKU", 110, 0, x => x.m.sku], ["Description", 210, 0, x => x.m.desc],
-  ["Catégorie", 130, 0, x => categoryOf(x.m)], ["Événement", 170, 0, x => evCell(x)], ["Expected", 86, 1, x => x.m.exp + x.qty], ["Ventes", 68, 1, x => x.m.sales],
-  ["Couv. act.", 72, 1, x => x.m.cur], ["Proposée", 78, 1, (x, b) => b[x.m.sku]], ["Qty finale", 92, 1, x => x.qty],
-  ["Couv. après", 80, 1, x => postCover(x.m, x.qty)], ["Multiple", 68, 1, x => x.multiple], ["Stock DC", 80, 1, x => x.m.dc],
-  ["Source", 92, 0, x => SRC[x.source]], ["Raisons", 300, 0, x => x.reasons.join(" | ")]];
+  ["Expected", 80, 1, x => x.m.exp], ["Available", 80, 1, x => x.m.avail], ["Ventes", 68, 1, x => x.m.sales],
+  ["Proposée", 78, 1, (x, b) => b[x.m.sku]], ["Qty finale", 92, 1, x => x.qty],
+  // D-044 / D-046 : Expected + commande et Couverture suivent la Qty finale.
+  ["Expected + commande", 110, 1, x => x.m.exp + x.qty], ["Couverture", 86, 1, x => postCover(x.m, x.qty)],
+  ["Multiple", 68, 1, x => x.multiple], ["Stock DC", 80, 1, x => x.m.dc], ["Raisons", 300, 0, x => x.reasons.join(" | ")]];
+// Couleur discrète de la couverture : rouge sous la cible saisie, vert au-dessus (D-046).
+function coverCell(x) {
+  const m = x.m, after = postCover(m, x.qty), cur = postCover(m, 0);
+  const cls = after === null ? "" : after < x.cover ? " cov-low" : " cov-ok";
+  return el("td", { class: "n cov" + cls, title: "actuelle " + fmt1(cur) + " j → après commande " + fmt1(after) + " j (cible " + fmt1(x.cover) + " j)" }, fmt1(after));
+}
 function defaultCmp(baseQty) { return (a, b) => ((a.s === "O") - (b.s === "O")) || (baseQty[b.m.sku] - baseQty[a.m.sku]) || a.m.sku.localeCompare(b.m.sku); }
 // D-039 : l'ordre des lignes est figé ; il ne se refait qu'au clic sur un en-tête ou au
 // changement de filtre, jamais après une saisie (la ligne ne bouge pas pendant que tu tapes).
@@ -877,10 +886,10 @@ function orderTable(rows, baseQty, keep) {
     // Liste à confirmer : raison en quelques mots (sinon le titre de l'événement).
     const reasons = x.reasons.length || !keep ? x.reasons.join(" | ") : [...new Set(x.ev.map(e => e.title))].join(", ");
     const evText = evCell(x);
-    tr.append(...pick([el("td", "conf", cb), el("td", "", stCell), el("td", "mono", sku), el("td", { title: m.desc }, m.desc || "—"), el("td", "", categoryOf(m)), el("td", { class: "evcell", title: evText }, evText),
-      el("td", { class: "n", title: "Stock attendu après la commande : " + fmt(m.exp) + " + " + fmt(x.qty) }, fmt(m.exp + x.qty)), el("td", "n", fmt(m.sales)), el("td", "n", fmt1(m.cur)), el("td", "n", fmt(baseQty[sku])),
-      el("td", "n q" + (mod ? " modq" : ""), qi), el("td", "n", fmt1(postCover(m, x.qty))), el("td", "n", fmt(x.multiple)),
-      el("td", "n", m.dc === null ? "—" : fmt(m.dc)), el("td", "", SRC[x.source]), el("td", { title: reasons, class: "small" }, reasons || "")]));
+    tr.append(...pick([el("td", "conf", cb), el("td", "", stCell), el("td", "mono", sku), el("td", { title: m.desc + (evText ? " · " + evText : "") }, m.desc || "—"),
+      el("td", "n", fmt(m.exp)), el("td", "n", fmt(m.avail)), el("td", "n", fmt(m.sales)), el("td", "n", fmt(baseQty[sku])),
+      el("td", "n q" + (mod ? " modq" : ""), qi), el("td", { class: "n", title: "Expected du jour " + fmt(m.exp) + " + Qty finale " + fmt(x.qty) }, fmt(m.exp + x.qty)), coverCell(x), el("td", "n", fmt(x.multiple)),
+      el("td", "n", m.dc === null ? "—" : fmt(m.dc)), el("td", { title: reasons, class: "small" }, reasons || "")]));
     body.append(tr);
   }
   t.append(body);
@@ -934,7 +943,7 @@ function ltBlock(states) {
     out.push(el("div", "row", { style: "justify-content:space-between;align-items:center" },
       el("h3", { style: "margin:8px 0" }, pending.length + " ligne(s) ne partiront pas si tu ne les confirmes pas"),
       el("button", { class: "btn", id: "confirm_pending", onclick: () => { setConfirmed(pending.map(x => x.m.sku), true); render(); } }, ic("checks"), "Tout confirmer")));
-    out.push(orderTable(sortRows(pending, baseQty), baseQty, [0, 1, 2, 3, 9, 15]));
+    out.push(orderTable(sortRows(pending, baseQty), baseQty, [0, 1, 2, 3, 7, 13]));
   }
   const na = needAuthor(); if (na) out.push(na);
   const mine = states[b0], box = el("div");
@@ -1050,6 +1059,7 @@ function renderWhy() {
     el("h3", "", "Pourquoi cette quantité ?"),
     el("ol", "steps", steps(x).map(([a, v]) => el("li", "", a, v !== undefined ? el("b", "", v) : null)), el("li", "tot", "Quantité finale : " + fmt(x.qty))),
     el("p", "small", "Expected après commande : ", el("b", "", fmt(m.exp + x.qty)), " (Expected du jour " + fmt(m.exp) + " + Qty finale " + fmt(x.qty) + ")"),
+    el("p", "small", "Couverture : actuelle " + fmt1(postCover(m, 0)) + " j → après commande ", el("b", "", fmt1(postCover(m, x.qty)) + " j"), " · cible " + fmt1(x.cover) + " j"),
     el("p", "small", "Stock DC " + V().dc + " : ", el("b", "", m.dc === null ? "absent" : fmt(m.dc)), " · stock projeté le jour de la livraison (" + days + " j) : ", el("b", "", fmt(proj)),
       x.qty > 0 && m.dc !== null && m.dc < x.qty ? el("span", "", " · ", el("span", "st R", "DC insuffisant")) : null),
     b.ev.length ? el("p", "small", el("b", "", "Événement(s) : "), evCell(b)) : null,
