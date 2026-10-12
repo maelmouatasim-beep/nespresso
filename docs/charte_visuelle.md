@@ -25,7 +25,7 @@ dans la page web), même si l'ordinateur est réglé en sombre.
 | OK | `#2E7D4F` | `#2A7449` | `#E6F2EA` | 4,9:1 |
 | REVIEW | `#B7791F` | `#94600F` | `#FFF4DF` | 4,9:1 |
 | BLOCKED | `#B23A3A` | `#B23A3A` | `#FBE9E7` | 5,0:1 |
-| Modifié par le planner | `#2F5F9E` | `#2F5F9E` | `#E8F0FA` | 5,6:1 |
+| Marqueur « modifié » (pas un statut) | `#2F5F9E` | `#2F5F9E` | `#E8F0FA` | 5,6:1 |
 
 ## Contrastes vérifiés (WCAG : 4,5:1 pour le texte normal)
 

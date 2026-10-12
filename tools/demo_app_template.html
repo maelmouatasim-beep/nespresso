@@ -106,8 +106,10 @@ table.order td:nth-child(2), table.order th:nth-child(2) { position: sticky; lef
 table.order th:nth-child(1), table.order th:nth-child(2) { z-index: 3; background: var(--surface-2); }
 table.order tbody tr { cursor: pointer; }
 table.order tbody tr:hover td { background: var(--surface-2); }
-table.order tr.mod td { background: var(--mod-bg); }
-table.order tr.pend td.q input { border-color: var(--mod); box-shadow: 0 0 0 1px var(--mod); }
+table.order td.q.modq { background: var(--mod-bg); }
+table.order td.q.modq input { color: var(--mod); font-weight: 700; background: var(--mod-bg); }
+table.order td.conf { text-align: center; } table.order td.conf input { width: 16px; height: 16px; cursor: pointer; }
+.modmark { color: var(--mod); font-size: 11px; font-weight: 700; margin-left: 4px; white-space: nowrap; }
 td.q input { width: 100%; text-align: right; padding: 3px 6px; font-variant-numeric: tabular-nums; }
 td.vu { text-align: center; }
 .st { display: inline-block; font-size: 12px; font-weight: 700; padding: 1px 8px; border-radius: 999px; letter-spacing: .02em; }
@@ -184,7 +186,6 @@ td { padding-top: 4px; padding-bottom: 4px; }
 tbody tr:nth-child(even) td { background: var(--zebra); }
 table.order tbody tr:nth-child(even) td:nth-child(1), table.order tbody tr:nth-child(even) td:nth-child(2) { background: var(--zebra); }
 table.order tbody tr:hover td, tbody tr:hover td { background: var(--hover); }
-table.order tr.mod td { background: var(--mod-bg); }
 table.order tr.sel td { box-shadow: inset 0 2px 0 var(--gold), inset 0 -2px 0 var(--gold); }
 .st { font-weight: 600; padding: 2px 9px 2px 8px; }
 .st::before { content: ""; display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 5px; vertical-align: 1px; background: currentColor; }
@@ -254,7 +255,9 @@ const EV_FILTERS = ["Actifs", "À venir", "Terminés", "Brouillons", "Tous"];
 const MSRC = { multiple_list: "Multiple list", multiple_list_family: "famille (deux multiples)", inferred_family: "inféré (famille)", excel_default_1: "absent → 1 (Excel)", missing_default_1: "absent" };
 const CAT = Object.fromEntries(M.categories);  // anciennes catégories (D-036), pour l'historique
 const CATEGORY_FILTERS = ["Tous", ...DATA.category_names];
-const STATUS_FILTERS = ["Tous", "OK", "REVIEW", "BLOCKED", "Modifié"];
+// D-039 : « À traiter » = OK + REVIEW non confirmés ; REVIEW / BLOCKED = non confirmés ;
+// « Modifié » = Qty finale différente de la Qty proposée, quel que soit le statut.
+const STATUS_FILTERS = ["Tous", "À traiter", "REVIEW", "BLOCKED", "Confirmé", "Modifié"];
 const MODES = { "Standard": "standard", "Parité Excel": "excel_parity" };
 const MODE_LABEL = { standard: "Standard", excel_parity: "Parité Excel" };
 // Deux sources : la démo (calculée d'avance) et « Mes fichiers » (moteur Python dans le navigateur).
@@ -356,9 +359,9 @@ function finalLine(j) {
   // Le contexte déduit reste hors des raisons (affichées dans la table) : « Pourquoi » et Historique seulement (D-038).
   const reasons = [...b.reasons, "Modifié par " + ov.author + " : " + ov.before + " → " + ov.final + (ov.reason ? " (" + ov.reason + ")" : "")];
   if (ov.final !== ov.after) reasons.push("⚠ Saisie " + ov.after + " arrondie au multiple de " + (b.multiple || 1) + " : " + ov.final);
-  let s = b.s;
-  if (b.s === "B" && ov.after > 0) { s = "R"; reasons.push("Override sur une ligne bloquée : à vérifier"); }
-  return { ...b, qty: ov.final, s, reasons, source: "override", fq: b.fq ?? b.qty, ov };
+  // D-039 : le statut ne change jamais quand la qty est modifiée ; seul « Confirmé » le change.
+  if (b.s === "B" && ov.after > 0) reasons.push("Quantité saisie sur une ligne bloquée : à vérifier");
+  return { ...b, qty: ov.final, bq: b.qty, reasons, source: "override", fq: b.fq ?? b.qty, ov };
 }
 // Même règle que le moteur d'overrides : la saisie est arrondie au multiple supérieur.
 function roundToMultiple(q, multiple) { const m = multiple > 0 ? multiple : 1; return Math.ceil(q / m) * m; }
@@ -741,23 +744,54 @@ function setExamples(on) {
   render();
 }
 function categoryOf(m) { return categories()[(m.type || "").trim().toUpperCase()] || "Autres"; }
-function statusKey(x) { return x.ov ? "Modifié" : STATUS[x.s]; }
+// Confirmé = case cochée par le planner, ou blocage d'événement confirmé.
+const isConf = sku => st.seen.has(sku) || st.confirmed.has(sku);
+const isMod = x => !!x.ov && x.qty !== x.bq;
+function statusKey(x) { return isConf(x.m.sku) ? "Confirmé" : STATUS[x.s]; }
+function statusMatch(x, f) {
+  if (f === "Tous") return true;
+  if (f === "Modifié") return isMod(x);
+  if (f === "À traiter") return !isConf(x.m.sku) && x.s !== "B";
+  return statusKey(x) === f;
+}
+function setConfirmed(skus, on) {
+  const ev = [], blocks = [];
+  for (const sku of skus) {
+    on ? st.seen.add(sku) : st.seen.delete(sku);
+    const b = baseLine(indexOfSku(sku));
+    if (b.s === "B" && b.ev.length) { if (st.confirmed.has(sku) !== on) blocks.push(sku); on ? st.confirmed.add(sku) : st.confirmed.delete(sku); }
+    else if (b.ev.length) ev.push(sku);
+  }
+  if (ev.length) logValidation("seen", st.order.boutique, ev, on ? "" : "retiré");
+  if (blocks.length) logValidation("confirm_block", st.order.boutique, blocks, on ? "" : "retiré");
+}
 function matches(x) {
   const f = st.f;
   if (f.cat !== "Tous" && categoryOf(x.m) !== f.cat) return false;
-  if (f.status !== "Tous" && statusKey(x) !== f.status) return false;
+  if (!statusMatch(x, f.status)) return false;
   if (f.qty && x.qty <= 0) return false;
   if (f.ev !== null && (!x.ev.length || (f.ev !== "all" && !x.ev.some(e => e.id === f.ev)))) return false;
   return !st.q || x.m.sku.toLowerCase().includes(st.q) || x.m.desc.toLowerCase().includes(st.q);
 }
 // Colonnes : [titre, largeur, numérique, valeur de tri]
 const COLS = [
-  ["Statut", 112, 0, x => statusKey(x)], ["SKU", 96, 0, x => x.m.sku], ["Description", 210, 0, x => x.m.desc],
+  ["Confirmé", 76, 0, x => isConf(x.m.sku) ? "1" : "0"], ["Statut", 150, 0, x => statusKey(x)], ["SKU", 96, 0, x => x.m.sku], ["Description", 210, 0, x => x.m.desc],
   ["Catégorie", 130, 0, x => categoryOf(x.m)], ["Événement", 170, 0, x => evCell(x)], ["Expected", 86, 1, x => x.m.exp], ["Ventes", 68, 1, x => x.m.sales],
   ["Couv. act.", 72, 1, x => x.m.cur], ["Proposée", 78, 1, (x, b) => b[x.m.sku]], ["Qty finale", 92, 1, x => x.qty],
   ["Couv. après", 80, 1, x => postCover(x.m, x.qty)], ["Multiple", 68, 1, x => x.multiple], ["Stock DC", 80, 1, x => x.m.dc],
   ["Source", 92, 0, x => SRC[x.source]], ["Raisons", 300, 0, x => x.reasons.join(" | ")]];
 function defaultCmp(baseQty) { return (a, b) => ((a.s === "O") - (b.s === "O")) || (baseQty[b.m.sku] - baseQty[a.m.sku]) || a.m.sku.localeCompare(b.m.sku); }
+// D-039 : l'ordre des lignes est figé ; il ne se refait qu'au clic sur un en-tête ou au
+// changement de filtre, jamais après une saisie (la ligne ne bouge pas pendant que tu tapes).
+function stableRows(rows, baseQty) {
+  const key = JSON.stringify([st.f, st.q, st.sort, st.order && st.order.boutique, st.order && st.order.delivery]);
+  const pos = st.rowOrder && st.rowOrder.key === key ? st.rowOrder.pos : null;
+  if (pos && rows.every(x => x.m.sku in pos)) return rows.sort((a, b) => pos[a.m.sku] - pos[b.m.sku]);
+  const sorted = sortRows(rows, baseQty), p = {};
+  sorted.forEach((x, i) => { p[x.m.sku] = i; });
+  st.rowOrder = { key, pos: p };
+  return sorted;
+}
 function sortRows(rows, baseQty) {
   if (!st.sort) return rows.sort(defaultCmp(baseQty));
   const get = COLS[st.sort.col][3], dir = st.sort.dir;
@@ -784,18 +818,19 @@ function orderTable(rows, baseQty) {
   const body = el("tbody");
   for (const x of rows) {
     const m = x.m, sku = m.sku;
-    const tr = el("tr", (x.ov ? "mod" : "") + (st.why === sku ? " sel" : ""));
+    const tr = el("tr", st.why === sku ? "sel" : "");
     tr.onclick = e => { if (e.target.closest("input,select")) return; openWhy(sku); };
-    const seen = st.seen.has(sku) ? " ✓" : "";
-    const shownQty = x.qty;
-    const stCell = x.ov ? el("span", "st M", "Modifié" + seen) : el("span", "st " + x.s, STATUS[x.s] + seen);
+    const shownQty = x.qty, conf = isConf(sku), mod = isMod(x);
+    const stCell = el("span", "", conf ? el("span", "st O", "Confirmé") : el("span", "st " + x.s, STATUS[x.s]), mod ? el("span", "modmark", "● modifié") : null);
+    const cb = el("input", { type: "checkbox", checked: conf, "aria-label": "Confirmé " + sku, title: "Cocher = ligne vérifiée (Confirmé). Décocher pour la remettre à traiter." });
+    cb.onchange = () => { setConfirmed([sku], cb.checked); render(); };
     const qi = el("input", { type: "number", min: 0, step: x.multiple || 1, value: shownQty, "aria-label": "Qty finale " + sku });
     qi.onchange = () => { const v = Math.round(Number(qi.value)); if (!Number.isFinite(v) || v < 0) { qi.value = shownQty; return; } if (v !== shownQty) { applyOverride(sku, v); render(); } };
     const reasons = x.reasons.join(" | ");
     const evText = evCell(x);
-    tr.append(el("td", "", stCell), el("td", "mono", sku), el("td", { title: m.desc }, m.desc || "—"), el("td", "", categoryOf(m)), el("td", { class: "evcell", title: evText }, evText),
+    tr.append(el("td", "conf", cb), el("td", "", stCell), el("td", "mono", sku), el("td", { title: m.desc }, m.desc || "—"), el("td", "", categoryOf(m)), el("td", { class: "evcell", title: evText }, evText),
       el("td", "n", fmt(m.exp)), el("td", "n", fmt(m.sales)), el("td", "n", fmt1(m.cur)), el("td", "n", fmt(baseQty[sku])),
-      el("td", "n q", qi), el("td", "n", fmt1(postCover(m, x.qty))), el("td", "n", fmt(x.multiple)),
+      el("td", "n q" + (mod ? " modq" : ""), qi), el("td", "n", fmt1(postCover(m, x.qty))), el("td", "n", fmt(x.multiple)),
       el("td", "n", m.dc === null ? "—" : fmt(m.dc)), el("td", "", SRC[x.source]), el("td", { title: reasons, class: "small" }, reasons || ""));
     body.append(tr);
   }
@@ -815,24 +850,29 @@ function renderOrder() {
   out.push(el("div", "tiles",
     tile("Unités", fmt(s.units), fmt(s.ordered) + " lignes commandées"),
     tile("Palettes estimées", fmt1(s.palTotal), "VL " + fmt1(s.pal.VL) + " · OL " + fmt1(s.pal.OL) + " · Mach. " + fmt1(s.pal.MACHINES) + " · Autres " + fmt1(s.pal.OTHERS)),
-    tile("OK", fmt(s.by.O), null, "O"), tile("REVIEW", fmt(s.by.R), null, "R"), tile("BLOCKED", fmt(s.by.B), null, "B")));
+    tile("OK", fmt(ls.filter(x => x.s === "O" && !isConf(x.m.sku)).length), null, "O"),
+    tile("REVIEW", fmt(ls.filter(x => x.s === "R" && !isConf(x.m.sku)).length), null, "R"),
+    tile("BLOCKED", fmt(ls.filter(x => x.s === "B" && !isConf(x.m.sku)).length), null, "B"),
+    tile("Confirmé", fmt(ls.filter(x => isConf(x.m.sku)).length), null, "O")));
   v.warnings.forEach(w => out.push(el("div", "msg warn", w)));
   out.push(...eventBanner(o, ls));
   const byCat = { Tous: ls.length }, bySt = { Tous: ls.length };
-  ls.forEach(x => { const c = categoryOf(x.m), k = statusKey(x); byCat[c] = (byCat[c] || 0) + 1; bySt[k] = (bySt[k] || 0) + 1; });
+  ls.forEach(x => { const c = categoryOf(x.m); byCat[c] = (byCat[c] || 0) + 1; STATUS_FILTERS.slice(1).forEach(f => { if (statusMatch(x, f)) bySt[f] = (bySt[f] || 0) + 1; }); });
   const search = el("input", { type: "search", id: "search", placeholder: "Rechercher un SKU ou une description", value: st.q });
   search.oninput = () => { st.q = search.value.trim().toLowerCase(); clearTimeout(search._t); search._t = setTimeout(() => { render(); const s2 = $("search"); s2.focus(); s2.setSelectionRange(s2.value.length, s2.value.length); }, 200); };
   out.push(el("div", "filters",
     segmented("Catégorie", CATEGORY_FILTERS, st.f.cat, byCat, c => { st.f.cat = c; render(); }),
     segmented("Statut", STATUS_FILTERS, st.f.status, bySt, c => { st.f.status = c; render(); }),
     el("label", "chk", el("input", { type: "checkbox", id: "f_qty", checked: st.f.qty, onchange: e => { st.f.qty = e.target.checked; render(); } }), "Qty > 0 seulement"),
-    el("div", "grow", search),
-    el("button", { class: "btn", id: "accept_ok", onclick: () => { ls.forEach(x => { if (x.s === "O" && !x.ov) st.seen.add(x.m.sku); }); render(); } }, ic("checks"), "Accepter toutes les lignes OK")));
+    el("div", "grow", search)));
   if (st.roundNotes.length) { st.roundNotes.forEach(n => out.push(el("div", "small", { style: "color:#94600F;margin:4px 0" }, "⚠ " + n))); st.roundNotes = []; }
-  const shown = sortRows(ls.filter(matches), baseQty);
+  const shown = stableRows(ls.filter(matches), baseQty), todo = shown.filter(x => !isConf(x.m.sku)).map(x => x.m.sku);
+  out.push(el("div", "row", { style: "margin:6px 0" },
+    el("button", { class: "btn", id: "accept_ok", onclick: () => { setConfirmed(ls.filter(x => x.s === "O").map(x => x.m.sku), true); render(); } }, ic("checks"), "Accepter toutes les lignes OK"),
+    el("button", { class: "btn", id: "confirm_shown", disabled: !todo.length, onclick: () => { setConfirmed(todo, true); render(); } }, ic("check"), "Confirmer les lignes affichées (" + todo.length + ")")));
   out.push(shown.length ? orderTable(shown, baseQty) : el("div", "msg info", "Aucune ligne pour ces filtres."));
   out.push(el("div", "row", { style: "justify-content:space-between;margin-top:8px" },
-    el("span", "small muted", shown.length + " ligne(s) affichée(s) sur " + ls.length + " · lignes validées : " + st.seen.size + " / " + ls.length + " · clic sur un en-tête pour trier, sur une ligne pour le détail"),
+    el("span", "small muted", shown.length + " ligne(s) affichée(s) sur " + ls.length + " · lignes confirmées : " + ls.filter(x => isConf(x.m.sku)).length + " / " + ls.length + " · clic sur un en-tête pour trier, sur une ligne pour le détail"),
     el("span", "row", el("button", { class: "btn", onclick: () => go(PAGES[4]) }, "Événements SKU"), el("button", { class: "btn primary", onclick: () => go(PAGES[3]) }, "Continuer vers l'export"))));
   return out;
 }
@@ -919,7 +959,7 @@ function renderWhy() {
   p.replaceChildren(...[
     el("button", { class: "x", "aria-label": "Fermer", onclick: () => { st.why = null; render(); } }, "×"),
     el("h2", "", el("span", "mono", m.sku), " — " + (m.desc || "sans description")),
-    el("div", "", x.ov ? el("span", "st M", "Modifié") : el("span", "st " + x.s, STATUS[x.s]), " ", el("span", "muted small", categoryOf(m) + " · source : " + SRC[x.source] + " · multiple " + fmt(x.multiple) + " (" + (MSRC[x.msrc] || x.msrc) + ")")),
+    el("div", "", isConf(m.sku) ? el("span", "st O", "Confirmé") : el("span", "st " + x.s, STATUS[x.s]), isMod(x) ? el("span", "modmark", "● modifié") : null, " ", el("span", "muted small", categoryOf(m) + " · source : " + SRC[x.source] + " · multiple " + fmt(x.multiple) + " (" + (MSRC[x.msrc] || x.msrc) + ")")),
     el("h3", "", "Pourquoi cette quantité ?"),
     el("ol", "steps", steps(x).map(([a, v]) => el("li", "", a, v !== undefined ? el("b", "", v) : null)), el("li", "tot", "Quantité finale : " + fmt(x.qty))),
     el("p", "small", "Stock DC " + V().dc + " : ", el("b", "", m.dc === null ? "absent" : fmt(m.dc)), " · stock projeté le jour de la livraison (" + days + " j) : ", el("b", "", fmt(proj)),
@@ -930,7 +970,7 @@ function renderWhy() {
     b.s === "B" && b.ev.length ? el("button", { class: "btn", id: "why_block", style: "width:100%;margin-top:6px", title: "Bloqué par un événement : confirmer (tracé), ou modifier la quantité AVEC une raison pour l'envoyer quand même.",
       onclick: () => { const on = !st.confirmed.has(m.sku); on ? st.confirmed.add(m.sku) : st.confirmed.delete(m.sku); logValidation("confirm_block", st.order.boutique, [m.sku], on ? "" : "retiré"); render(); } },
       st.confirmed.has(m.sku) ? "Retirer la confirmation du blocage" : "Confirmer le blocage (qty 0)") : null,
-    el("button", { class: "btn", style: "width:100%;margin-top:6px", onclick: () => { const on = !st.seen.has(m.sku); on ? st.seen.add(m.sku) : st.seen.delete(m.sku); if (b.ev.length) logValidation("seen", st.order.boutique, [m.sku], on ? "" : "retiré"); render(); } }, st.seen.has(m.sku) ? ic("undo") : ic("check"), st.seen.has(m.sku) ? "Retirer la validation" : "Marquer comme vérifiée"),
+    el("button", { class: "btn", style: "width:100%;margin-top:6px", id: "why_seen", onclick: () => { setConfirmed([m.sku], !isConf(m.sku)); render(); } }, isConf(m.sku) ? ic("undo") : ic("check"), isConf(m.sku) ? "Retirer la confirmation" : "Confirmer la ligne"),
     el("h3", "", "Modifier la quantité"),
     el("div", "form3", el("label", "f", "Qty finale", qty), el("label", "f wide", "Raison (facultatif)", reason)),
     el("div", "row", { style: "margin-top:10px" }, el("button", { class: "btn primary", id: "dlg_save", onclick: () => {
@@ -1075,8 +1115,10 @@ function renderExport() {
   const ls = lines(), s = summarize(ls), now = new Date(), name = ltName(st.order.boutique, now);
   out.push(el("p", "", el("b", "", btqLabel(st.order.boutique)), " · livraison ", el("b", "", fdate(st.order.delivery)), " · " + fmt(s.ordered) + " lignes · " + fmt(s.units) + " unités · " + fmt1(s.palTotal) + " palettes"));
   out.push(el("p", "", "Fichier LT : ", el("span", "mono", name), " · généré le " + pad(now.getDate()) + "/" + pad(now.getMonth() + 1) + "/" + now.getFullYear() + " à " + pad(now.getHours()) + ":" + pad(now.getMinutes())));
-  const unseen = ls.filter(x => x.s !== "O" && !st.seen.has(x.m.sku));
-  if (unseen.length) out.push(el("div", "msg warn", unseen.length + " ligne(s) REVIEW ou BLOCKED pas encore marquée(s) « Vu »."));
+  // D-039 : le fichier LT attend que chaque ligne REVIEW ou BLOCKED soit confirmée.
+  const todo = ls.filter(x => x.s !== "O" && !isConf(x.m.sku)), nRev = todo.filter(x => x.s === "R").length;
+  if (todo.length) out.push(el("div", "msg err", todo.length + " ligne(s) à confirmer avant le fichier LT (" + nRev + " REVIEW, " + (todo.length - nRev) + " BLOCKED). Coche « Confirmé » dans la commande, ligne par ligne ou avec « Confirmer les lignes affichées ». ",
+    el("button", { class: "btn", onclick: () => go(PAGES[1]) }, "Retour à la commande")));
   const na = needAuthor(); if (na) out.push(na);
   const base = []; for (let j = 0; j < ls.length; j++) base.push(baseLine(j));
   const chk = evCheck(base, st.overrides, st.seen, st.confirmed, st.includeOk), b0 = st.order.boutique;
@@ -1089,7 +1131,7 @@ function renderExport() {
   if (st.xmsg) box.append(st.xmsg);
   const requests = [...new Set(base.flatMap(x => x.ev.filter(e => e.type === "store_request").map(e => e.id)))];
   out.push(el("div", "row",
-    el("button", { class: "btn primary", id: "dl_lt", disabled: !st.author || !chk.ok, onclick: async () => {
+    el("button", { class: "btn primary", id: "dl_lt", disabled: !st.author || !chk.ok || todo.length > 0, onclick: async () => {
       const text = ltText(ls); if (!text) return box.replaceChildren(el("div", "msg info", "Aucune ligne à commander : pas de fichier LT."));
       if (await offer(name, text, box, "Fichier « " + name + " » téléchargé (" + s.ordered + " lignes).")) { saveRun(ls, name); st.toClose = [...new Set([...st.toClose, ...requests])]; st.xmsg = box.firstChild; render(); }
     } }, "Télécharger le fichier LT (SKU;QTY)"),

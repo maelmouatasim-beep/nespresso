@@ -18,6 +18,7 @@ from app.engines.schedule import boutiques_ordering_on
 from app.ingestion.masters import all_boutiques, build_inputs_for_boutique
 from app.services.planning import run_planning, with_overrides
 from app.ui.common import (
+    CONFIRMED_MD,
     DEPOT,
     EDITABLE_COLUMNS,
     EVENT_DOT,
@@ -44,18 +45,22 @@ from app.ui.common import (
     fmt_int,
     fr_day,
     go,
+    is_confirmed,
     make_override,
     mark_events_viewed,
     order_frame,
     reset_order,
     rounding_note,
     run_date,
+    shown_status,
     ss,
     style_order_frame,
 )
 
 CATEGORY_FILTERS = ("Tous", *CATEGORIES)
-STATUS_FILTERS = ("Tous", "OK", "REVIEW", "BLOCKED", "Modifié")
+# D-039 : « À traiter » = OK + REVIEW non confirmés ; REVIEW / BLOCKED = non confirmés ;
+# « Modifié » = Qty finale différente de la Qty proposée, quel que soit le statut.
+STATUS_FILTERS = ("Tous", "À traiter", "REVIEW", "BLOCKED", "Confirmé", "Modifié")
 TABLE_HEIGHT = 600
 FALLBACK_WEEKS_DEFAULT = 4
 
@@ -139,29 +144,43 @@ def _params_row(data) -> None:  # noqa: ANN001
 
 
 def _tiles(res) -> None:  # noqa: ANN001
+    """Unités, palettes, puis OK / REVIEW / BLOCKED non confirmés et Confirmé (D-039)."""
     s, p = res.summary, res.pallets
-    cols = st.columns(5)
+    cols = st.columns(6)
     cols[0].metric("Unités", fmt_int(s.units_total))
     cols[1].metric("Palettes estimées", fmt_1(p.total_pallets))
     cols[1].caption(f"VL {fmt_1(p.pallets[VL])} · OL {fmt_1(p.pallets[OL])} · "
                     f"Mach. {fmt_1(p.pallets[MACHINES])} · Autres {fmt_1(p.pallets[OTHERS])}")  # fmt: skip
-    cols[2].metric(STATUS_MD["OK"], fmt_int(s.by_status["OK"]))
-    cols[3].metric(STATUS_MD["REVIEW"], fmt_int(s.by_status["REVIEW"]))
-    cols[4].metric(STATUS_MD["BLOCKED"], fmt_int(s.by_status["BLOCKED"]))
+    counts = {"OK": 0, "REVIEW": 0, "BLOCKED": 0, "Confirmé": 0}
+    for b in res.base_lines:
+        counts[shown_status(b.sku, b.status)] += 1
+    cols[2].metric(STATUS_MD["OK"], fmt_int(counts["OK"]))
+    cols[3].metric(STATUS_MD["REVIEW"], fmt_int(counts["REVIEW"]))
+    cols[4].metric(STATUS_MD["BLOCKED"], fmt_int(counts["BLOCKED"]))
+    cols[5].metric(CONFIRMED_MD, fmt_int(counts["Confirmé"]))
 
 
-def _matches(x: RecommendationLine, cat: str, status: str, qty_only: bool, search: str,
-             mapping: dict[str, str], event: str | int | None = None) -> bool:  # fmt: skip
+def _status_match(x: RecommendationLine, base: RecommendationLine, status: str) -> bool:
+    shown = shown_status(x.sku, base.status)
+    if status == "Tous":
+        return True
+    if status == "Modifié":
+        return x.qty != base.qty
+    if status == "À traiter":
+        return shown in ("OK", "REVIEW")
+    return shown == status
+
+
+def _matches(x: RecommendationLine, base: RecommendationLine, cat: str, status: str,
+             qty_only: bool, search: str, mapping: dict[str, str],
+             event: str | int | None = None) -> bool:  # fmt: skip
     if cat != "Tous" and category_of_line(x, mapping) != cat:
         return False
     if event is not None:
         ids = {t["id"] for t in event_tags(x)}
         if not ids or (event != "all" and event not in ids):
             return False
-    modified = x.sku in ss.overrides
-    if status == "Modifié" and not modified:
-        return False
-    if status in ("OK", "REVIEW", "BLOCKED") and (modified or x.status.value != status):
+    if not _status_match(x, base, status):
         return False
     if qty_only and x.qty <= 0:
         return False
@@ -211,7 +230,7 @@ def _others_personal(res) -> list:  # noqa: ANN001
 
 
 def _filters(
-    lines: list[RecommendationLine], mapping: dict[str, str]
+    lines: list[RecommendationLine], base: dict[str, RecommendationLine], mapping: dict[str, str]
 ) -> tuple[str, str, bool, str]:
     """Barre de filtres : catégorie, statut, Qty > 0, recherche (aucun recalcul)."""
     by_cat = {c: 0 for c in CATEGORY_FILTERS}
@@ -219,47 +238,93 @@ def _filters(
     for x in lines:
         by_cat["Tous"] += 1
         by_cat[category_of_line(x, mapping)] += 1
-        by_status["Tous"] += 1
-        by_status["Modifié" if x.sku in ss.overrides else x.status.value] += 1
+        for s in STATUS_FILTERS:
+            by_status[s] += _status_match(x, base[x.sku], s)
     c1, c2 = st.columns([5.2, 1], vertical_alignment="bottom")
     cat = c1.segmented_control("Catégorie", CATEGORY_FILTERS, default="Tous", key="f_cat",
                                format_func=lambda c: f"{c} ({by_cat[c]})") or "Tous"  # fmt: skip
     qty_only = c2.checkbox("Qty > 0 seulement", key="f_qty")
-    c3, c4, c5 = st.columns([4.4, 1.5, 1.9], vertical_alignment="bottom")
+    c3, c4 = st.columns([4.4, 3.4], vertical_alignment="bottom")
     status = c3.segmented_control("Statut", STATUS_FILTERS, default="Tous", key="f_status",
                                   format_func=lambda c: f"{c} ({by_status[c]})") or "Tous"  # fmt: skip
     search = c4.text_input("Recherche", placeholder="Rechercher un SKU ou une description",
                            key="f_search", label_visibility="collapsed").strip().lower()  # fmt: skip
-    if c5.button("Accepter toutes les lignes OK", icon=":material/done_all:", key="accept_ok",
-                 width="stretch"):  # fmt: skip
-        ss.seen |= {x.sku for x in lines if x.status is Status.OK and x.sku not in ss.overrides}
-        ss.nonce += 1
-        st.rerun()
     return cat, status, qty_only, search
+
+
+def _bulk_buttons(lines: list[RecommendationLine], shown: list[RecommendationLine],
+                  base: dict[str, RecommendationLine]) -> None:  # fmt: skip
+    """« Accepter toutes les lignes OK » et « Confirmer les lignes affichées » (D-039)."""
+    c1, c2, _ = st.columns([1.6, 1.6, 3])
+    if c1.button("Accepter toutes les lignes OK", icon=":material/done_all:", key="accept_ok",
+                 width="stretch"):  # fmt: skip
+        _set_confirmed([x.sku for x in lines if base[x.sku].status is Status.OK], True)
+        st.rerun()
+    todo = [x.sku for x in shown if not is_confirmed(x.sku)]
+    if c2.button(f"Confirmer les lignes affichées ({len(todo)})", icon=":material/checklist:",
+                 key="confirm_shown", disabled=not todo, width="stretch"):  # fmt: skip
+        _set_confirmed(todo, True)
+        st.rerun()
+
+
+def _set_confirmed(skus: list[str], on: bool) -> None:
+    """Confirme (ou remet à traiter) des lignes. Une ligne bloquée par un événement voit aussi
+    son blocage confirmé ; tout ce qui touche un événement est tracé (D-031)."""
+    base = {x.sku: x for x in ss.base.base_lines} if ss.base else {}
+    traced, blocks = [], []
+    for sku in skus:
+        b = base.get(sku)
+        if on:
+            ss.seen.add(sku)
+        else:
+            ss.seen.discard(sku)
+        if b is not None and blocked_by_event(b):
+            changed = (sku in ss.confirmed_blocks) != on
+            ss.confirmed_blocks = (
+                (ss.confirmed_blocks | {sku}) if on else (ss.confirmed_blocks - {sku})
+            )
+            if changed:
+                blocks.append(sku)
+        elif b is not None and event_tags(b):
+            traced.append(sku)
+    if traced:
+        _trace("seen", traced, "" if on else "retiré")
+    if blocks:
+        _trace("confirm_block", blocks, "" if on else "retiré")
+    ss.nonce += 1
 
 
 def _process_edits(
     edited: pd.DataFrame, lines: dict[str, RecommendationLine], base: dict[str, RecommendationLine]
 ) -> bool:
-    """Qty finale saisie → modification appliquée tout de suite ; Détail → panneau. True = rerun.
+    """Grille → actions. True = rerun.
 
-    Rien n'est demandé au planner (D-038) : quantité d'avant, quantité saisie, planner, heure et
-    contexte déduit sont enregistrés automatiquement. Une saisie hors multiple est arrondie au
-    multiple supérieur, avec un petit avertissement.
+    - Qty finale : modification appliquée tout de suite (D-038), le statut ne change pas (D-039).
+      La grille n'est pas recréée : la ligne reste à sa place et le tri choisi est gardé.
+    - Confirmé : action distincte ; la ligne passe en « Confirmé » ou revient « à traiter ».
+    - Détail : ouvre le panneau « Pourquoi ».
     """
-    checked = [r["SKU"] for r in edited.to_dict("records") if r["Détail"]]
+    rows = edited.to_dict("records")
+    checked = [r["SKU"] for r in rows if r["Détail"]]
     new_why = next((s for s in checked if s != ss.why_sku), None)
     rerun = False
     if new_why:
         ss.why_sku, rerun = new_why, True
     elif ss.why_sku in lines and ss.why_sku not in checked:
         ss.why_sku, rerun = None, True
+    confirm = [r["SKU"] for r in rows if bool(r["Confirmé"]) and not is_confirmed(r["SKU"])]
+    unconfirm = [r["SKU"] for r in rows if not bool(r["Confirmé"]) and is_confirmed(r["SKU"])]
+    if confirm or unconfirm:
+        _set_confirmed(confirm, True)
+        _set_confirmed(unconfirm, False)
+        rerun = True
     new, changed, notes = dict(ss.overrides), False, []
-    for row in edited.to_dict("records"):
+    for row in rows:
         sku, qty = row["SKU"], row["Qty finale"]
-        if pd.isna(qty) or int(qty) == lines[sku].qty:
+        old = ss.overrides.get(sku)
+        if pd.isna(qty) or int(qty) == lines[sku].qty or (old and old.qty_after == int(qty)):
             continue
-        changed, qty, old = True, int(qty), ss.overrides.get(sku)
+        changed, qty = True, int(qty)
         if qty == base[sku].qty:
             new.pop(sku, None)
         else:
@@ -267,11 +332,12 @@ def _process_edits(
             notes.append(rounding_note(base[sku], qty))
     if changed:
         ss.round_notes = [n for n in notes if n]
-        _apply_overrides(new)
+        # Saisie arrondie : la cellule doit afficher la qty arrondie, la grille est recréée.
+        _apply_overrides(new, reset_grid=bool(ss.round_notes))
     return rerun
 
 
-def _apply_overrides(new: dict) -> None:
+def _apply_overrides(new: dict, reset_grid: bool = True) -> None:
     data = day_data()
     try:
         with_overrides(ss.base, new.values(), data.masters.products)
@@ -279,7 +345,8 @@ def _apply_overrides(new: dict) -> None:
         st.error(str(exc))
         return
     ss.overrides, ss.saved_run_id = new, None
-    ss.nonce += 1
+    if reset_grid:
+        ss.nonce += 1
     st.rerun()
 
 
@@ -289,11 +356,7 @@ def _close_why() -> None:
 
 
 def _toggle_seen(sku: str) -> None:
-    (ss.seen.discard if sku in ss.seen else ss.seen.add)(sku)
-    ss.nonce += 1
-    line = next((x for x in ss.base.base_lines if x.sku == sku), None) if ss.base else None
-    if line is not None and event_tags(line):
-        _trace("seen", [sku], "" if sku in ss.seen else "retiré")
+    _set_confirmed([sku], not is_confirmed(sku))
 
 
 def _toggle_block(sku: str) -> None:
@@ -321,7 +384,11 @@ def _why_panel(res, sku: str, mapping: dict[str, str]) -> None:  # noqa: ANN001
         f"**Pourquoi cette quantité ?**  \n`{sku}` {line.description or 'sans description'}"
     )
     t2.button("", icon=":material/close:", key="why_close", on_click=_close_why, help="Fermer")
-    status = MODIFIED_MD if sku in ss.overrides else STATUS_MD[line.status.value]
+    base_line = next((x for x in res.base_lines if x.sku == sku), line)
+    shown = shown_status(sku, base_line.status)
+    status = (CONFIRMED_MD if shown == "Confirmé" else STATUS_MD[shown]) + (
+        f" {MODIFIED_MD}" if line.qty != base_line.qty else ""
+    )
     st.caption(f"{status} · {category_of_line(line, mapping)} · source : "
                f"{SOURCE_LABEL[line.source.value]} · multiple {fmt_int(e['multiple'])}")  # fmt: skip
     st.markdown("\n".join(f"{i}. {step}" for i, step in enumerate(explain_steps(line), start=1)))
@@ -330,7 +397,6 @@ def _why_panel(res, sku: str, mapping: dict[str, str]) -> None:  # noqa: ANN001
                 f"stock projeté à la livraison : **{fmt_int(e['projected_stock_at_delivery'])}**")  # fmt: skip
     if line.reasons:
         st.markdown("\n".join(f"- {r}" for r in line.reasons))
-    base_line = next((x for x in res.base_lines if x.sku == sku), line)
     if blocked_by_event(base_line):
         done = sku in ss.confirmed_blocks
         st.button("Retirer la confirmation du blocage" if done else "Confirmer le blocage (qty 0)",
@@ -338,8 +404,8 @@ def _why_panel(res, sku: str, mapping: dict[str, str]) -> None:  # noqa: ANN001
                   on_click=_toggle_block, args=(sku,), width="stretch",
                   help="Bloqué par un événement : confirmer (tracé), ou modifier la quantité "
                        "AVEC une raison pour l'envoyer quand même.")  # fmt: skip
-    st.button("Retirer la validation" if sku in ss.seen else "Marquer comme vérifiée",
-              icon=":material/undo:" if sku in ss.seen else ":material/check:",
+    st.button("Retirer la confirmation" if is_confirmed(sku) else "Confirmer la ligne",
+              icon=":material/undo:" if is_confirmed(sku) else ":material/check:",
               key="why_seen", on_click=_toggle_seen, args=(sku,), width="stretch")  # fmt: skip
     st.markdown("**Modifier la quantité**")
     qty = st.number_input("Qty finale", min_value=0, step=int(e["multiple"] or 1),
@@ -384,26 +450,31 @@ def render() -> None:
         st.warning(w)
 
     event = _event_banner(res)
-    cat, status, qty_only, search = _filters(res.lines, mapping)
-    base_qty = {x.sku: x.qty for x in res.base_lines}
+    base = {x.sku: x for x in res.base_lines}
+    cat, status, qty_only, search = _filters(res.lines, base, mapping)
     shown = default_order(
-        [x for x in res.lines if _matches(x, cat, status, qty_only, search, mapping, event)],
-        base_qty,
-    )
+        [x for x in res.lines
+         if _matches(x, base[x.sku], cat, status, qty_only, search, mapping, event)],
+        base,
+    )  # fmt: skip
+    _bulk_buttons(res.lines, shown, base)
     for note in ss.pop("round_notes", None) or []:
         st.caption(f":orange[:material/warning:] {note}")
     side = bool(ss.why_sku)
     table, panel = st.columns([2.8, 1.2]) if side else (st.container(), None)
     with table:
-        df = order_frame(shown, base_qty, mapping)
-        key = f"grid_{cat}_{status}_{qty_only}_{search}_{event}_{ss.nonce}"
+        df = order_frame(shown, base, mapping)
+        # Même grille tant que les lignes affichées ne changent pas : taper une qty ne recrée
+        # pas la table, la ligne reste en place et le tri choisi au clic est gardé (D-039).
+        rows_id = hash(tuple(x.sku for x in shown))
+        key = f"grid_{cat}_{status}_{qty_only}_{search}_{event}_{ss.nonce}_{rows_id}"
         edited = st.data_editor(style_order_frame(df), key=key, hide_index=True, width="stretch", height=TABLE_HEIGHT, placeholder="—",
                                 column_config=ORDER_COLUMN_CONFIG,
                                 disabled=[c for c in df.columns if c not in EDITABLE_COLUMNS])  # fmt: skip
-        seen = len([x for x in res.lines if x.sku in ss.seen])
-        st.caption(f"{len(shown)} ligne(s) affichée(s) sur {len(res.lines)} · lignes validées : "
-                   f"{seen} / {len(res.lines)} · clic sur un en-tête pour trier · case Détail pour le « Pourquoi »")  # fmt: skip
-    if _process_edits(edited, {x.sku: x for x in shown}, {x.sku: x for x in res.base_lines}):
+        done = sum(is_confirmed(x.sku) for x in res.lines)
+        st.caption(f"{len(shown)} ligne(s) affichée(s) sur {len(res.lines)} · lignes confirmées : "
+                   f"{done} / {len(res.lines)} · clic sur un en-tête pour trier · case Détail pour le « Pourquoi »")  # fmt: skip
+    if _process_edits(edited, {x.sku: x for x in shown}, base):
         ss.nonce += 1
         st.rerun()
     if panel is not None:

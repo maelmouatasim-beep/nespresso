@@ -84,7 +84,7 @@ def apply_overrides(
         multiple = int(line.explanation.get("multiple") or 1)
         multiple = multiple if multiple > 0 else 1
         final = ceiling_to_multiple(Fraction(ov.qty_after), multiple)
-        status = line.status
+        # Le statut ne change jamais (D-039) : modifier et confirmer sont deux actions distinctes.
         # Le contexte déduit n'entre pas dans les raisons (affichées dans la table) : il reste
         # dans l'explication, lue par « Pourquoi » et l'Historique (D-038).
         why = ov.reason.strip()
@@ -95,8 +95,7 @@ def apply_overrides(
         if final != ov.qty_after:
             reasons.append(f"⚠ Saisie {ov.qty_after} arrondie au multiple de {multiple} : {final}")
         if line.status is Status.BLOCKED and ov.qty_after > 0:
-            status = Status.REVIEW
-            reasons.append("Override sur une ligne bloquée : à vérifier")
+            reasons.append("Quantité saisie sur une ligne bloquée : à vérifier")
         explanation = dict(line.explanation)
         explanation["override"] = {**ov.model_dump(mode="json"), "qty_final": final}
         out.append(
@@ -105,7 +104,6 @@ def apply_overrides(
                     "qty": final,
                     "source": QtySource.OVERRIDE,
                     "forecast_qty": line.qty if line.forecast_qty is None else line.forecast_qty,
-                    "status": status,
                     "reasons": reasons,
                     "explanation": explanation,
                 }

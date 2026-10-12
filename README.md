@@ -41,18 +41,25 @@ la première fois, prénom seulement), choisis « Mes données »
    grille, comme dans le calculateur Excel : filtres Catégorie et Statut, « Qty > 0 seulement »,
    recherche, tri au clic sur un en-tête. Coche 🔍 sur une ligne pour voir « Pourquoi cette quantité ? »
    à droite. Tape la « Qty finale » directement dans la cellule : elle compte tout de suite (totaux,
-   palettes, export) et la ligne passe en « Modifié ». Rien n'est demandé : l'outil garde l'ancienne
+   palettes, export). Le statut de la ligne ne change pas : la cellule devient bleue et un marqueur
+   « modifié » s'ajoute à côté du statut. Rien n'est demandé : l'outil garde l'ancienne
    et la nouvelle qty, ton prénom, l'heure et un contexte déduit (événement actif, stock DC
    insuffisant, SKU dormant ou « non précisé »), visible dans « Pourquoi » et l'Historique. Une qty
    qui n'est pas un multiple est arrondie au multiple supérieur, avec un petit avertissement. Les SKU concernés par
    un événement ont une puce dans la colonne « Événement » (● équipe, ○ personnel) ; le bandeau
    « Événements actifs » filtre la table d'un clic.
+   Confirmer est une action à part : coche « Confirmé » en début de ligne (la ligne passe en
+   « Confirmé », décocher la remet à traiter), ou « Accepter toutes les lignes OK », ou
+   « Confirmer les lignes affichées » pour traiter un paquet filtré. Filtres de statut : Tous,
+   À traiter (OK et REVIEW non confirmés), REVIEW, BLOCKED, Confirmé, Modifié. La ligne ne bouge
+   pas pendant la saisie : le tri ne se refait qu'au clic sur un en-tête ou au changement de filtre.
 3. **Journée** : plusieurs boutiques d'un coup (présélection du Schedule, modifiable), un cover par
    boutique, le nombre de SKU flagués par des événements, puis le zip des fichiers LT.
 4. **Export** : fichier LT pour Nessoft, récapitulatif boutique, export Excel détaillé.
    Avant le fichier LT, une vérification en 3 points (lignes bloquées par un événement, SKU flagués
    non vus, lancements et demandes boutique à inclure) doit être verte ; chaque validation est tracée.
    « Marquer comme vus » ne s'active qu'après avoir ouvert une fois le filtre « Événements » de la
+   commande. Le fichier LT attend aussi que toutes les lignes REVIEW et BLOCKED soient confirmées.
    L'outil n'écrit jamais dans Nessoft : tu importes le fichier toi-même.
 5. **Événements SKU** : promotions, lancements, arrêts, interdictions, conversions, urgences,
    demandes boutique et SKU à surveiller. Onglets « Équipe » et « Mes événements », table triable,

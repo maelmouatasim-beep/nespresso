@@ -39,15 +39,20 @@ DEPOT, ORDER, DAY, EXPORT, EVENTS, REFS, HISTORY = PAGES
 MODES = {"Standard": ForecastMode.STANDARD, "Parité Excel": ForecastMode.EXCEL_PARITY}
 MODE_LABEL = {v.value: k for k, v in MODES.items()} | {"safe": "Standard"}
 # Statuts : pastille + texte. Couleurs de la charte (docs/charte_visuelle.md), contraste ≥ 4,5:1.
+# D-039 : le statut vient du calcul et ne change jamais quand la qty est modifiée ; seul un clic
+# « Confirmé » le fait passer à « Confirmé ». « modifié » est un marqueur, pas un statut.
 STATUS_ICON = {"OK": "● OK", "REVIEW": "● REVIEW", "BLOCKED": "● BLOCKED"}  # grille
-MODIFIED = "● Modifié"
+CONFIRMED = "● Confirmé"
+MODIFIED_MARK = " · modifié"
 STATUS_MD = {"OK": ":green[● OK]", "REVIEW": ":orange[● REVIEW]", "BLOCKED": ":red[● BLOCKED]"}
-MODIFIED_MD = ":blue[● Modifié]"
+CONFIRMED_MD = ":green[● Confirmé]"
+MODIFIED_MD = ":blue[· modifié]"
+MODIFIED_BG = "#E8F0FA"  # fond bleu très léger de la cellule Qty finale modifiée
 STATUS_COLORS = {  # texte, fond
+    "Confirmé": ("#2A7449", "#E6F2EA"),
     "OK": ("#2A7449", "#E6F2EA"),
     "REVIEW": ("#94600F", "#FFF4DF"),
     "BLOCKED": ("#B23A3A", "#FBE9E7"),
-    "Modifié": ("#2F5F9E", "#E8F0FA"),
 }
 ZEBRA = "#FBF8F3"  # lignes alternées très légères
 SOURCE_LABEL = {
@@ -256,10 +261,20 @@ def num(x: float | None) -> float:
     return float("nan") if x is None else float(x)
 
 
-def status_cell(line: RecommendationLine) -> str:
-    """Statut affiché : « Modifié » prime ; « ✓ » quand le planner a validé la ligne."""
-    label = MODIFIED if line.sku in ss.overrides else STATUS_ICON[line.status.value]
-    return f"{label} ✓" if line.sku in ss.seen else label
+def is_confirmed(sku: str) -> bool:
+    """Ligne confirmée par le planner (case « Confirmé », ou blocage d'événement confirmé)."""
+    return sku in ss.seen or sku in ss.get("confirmed_blocks", set())
+
+
+def shown_status(sku: str, base_status: Status) -> str:
+    """« Confirmé » si le planner l'a coché, sinon le statut du calcul (D-039)."""
+    return "Confirmé" if is_confirmed(sku) else base_status.value
+
+
+def status_cell(line: RecommendationLine, base: RecommendationLine) -> str:
+    """Statut de la ligne + marqueur « modifié » ; une modification ne change pas le statut."""
+    label = CONFIRMED if is_confirmed(line.sku) else STATUS_ICON[base.status.value]
+    return label + (MODIFIED_MARK if line.qty != base.qty else "")
 
 
 def make_override(base_line: RecommendationLine, after: int, reason: str = "") -> Override:
@@ -300,19 +315,23 @@ def _round1(x: float | None) -> float | None:
 
 
 def order_frame(
-    lines: list[RecommendationLine], base_qty: dict[str, int], mapping: dict[str, str]
+    lines: list[RecommendationLine],
+    base: dict[str, RecommendationLine],
+    mapping: dict[str, str],
 ) -> pd.DataFrame:
     """Une seule grille, colonnes dans l'ordre du planner ; nombres en vrais nombres (tri)."""
     rows = []
     for x in lines:
+        b = base.get(x.sku, x)
         e, inp = x.explanation, x.explanation["inputs"]
         sales = inp["sales_total"]
         days = e["parameters"]["sales_history_days"]
         after = (inp["expected_total"] + x.qty) / sales * days if sales else None
         rows.append(
             {
+                "Confirmé": is_confirmed(x.sku),
                 "Détail": x.sku == ss.get("why_sku"),
-                "Statut": status_cell(x),
+                "Statut": status_cell(x, b),
                 "SKU": x.sku,
                 "Description": x.description or "",
                 "Catégorie": category_of_line(x, mapping),
@@ -320,7 +339,7 @@ def order_frame(
                 "Expected": num(inp["expected_total"]),
                 "Ventes": num(sales),
                 "Couv. actuelle": num(_round1(e["current_cover_days"])),
-                "Qty proposée": base_qty.get(x.sku, x.qty),
+                "Qty proposée": b.qty,
                 "Qty finale": x.qty,
                 "Couv. après": num(_round1(after)),
                 "Multiple": num(e["multiple"]),
@@ -333,17 +352,23 @@ def order_frame(
 
 
 ORDER_COLUMNS = [
-    "Détail", "Statut", "SKU", "Description", "Catégorie", "Événement", "Expected", "Ventes",
+    "Confirmé", "Détail", "Statut", "SKU", "Description", "Catégorie", "Événement", "Expected", "Ventes",
     "Couv. actuelle",
     "Qty proposée", "Qty finale", "Couv. après", "Multiple", "Stock DC", "Source", "Raisons",
 ]  # fmt: skip
 
 _INT = {"format": "localized"}
 ORDER_COLUMN_CONFIG = {
+    "Confirmé": st.column_config.CheckboxColumn(
+        "Confirmé",
+        width=80,
+        pinned=True,
+        help="Cocher = ligne vérifiée (statut « Confirmé »). Décocher pour la remettre à traiter.",
+    ),  # fmt: skip
     "Détail": st.column_config.CheckboxColumn(
         "Détail", width=72, help="Pourquoi cette quantité ?", pinned=True
     ),
-    "Statut": st.column_config.TextColumn(width=110),
+    "Statut": st.column_config.TextColumn(width=150),
     "SKU": st.column_config.TextColumn(width=100),
     "Description": st.column_config.TextColumn(width=210),
     "Catégorie": st.column_config.TextColumn(width=120),
@@ -363,7 +388,7 @@ ORDER_COLUMN_CONFIG = {
     "Source": st.column_config.TextColumn(width=95),
     "Raisons": st.column_config.TextColumn(width=340),
 }
-EDITABLE_COLUMNS = ("Détail", "Qty finale")
+EDITABLE_COLUMNS = ("Confirmé", "Détail", "Qty finale")
 
 
 def _status_style(value: str) -> str:
@@ -378,14 +403,33 @@ def style_order_frame(df: pd.DataFrame):  # noqa: ANN201 - pandas Styler
     zebra = df.style.apply(
         lambda row: [f"background-color: {ZEBRA}" if row.name % 2 else ""] * len(row), axis=1
     )
-    return zebra.map(_status_style, subset=["Statut"])
+    zebra = zebra.map(_status_style, subset=["Statut"])
+    # Marqueur « modifié » : fond bleu très léger sur la Qty finale qui diffère de la proposée.
+    return zebra.apply(
+        lambda col: [
+            f"background-color: {MODIFIED_BG}; color: #2F5F9E; font-weight: 600"
+            if final != proposed
+            else ""
+            for final, proposed in zip(col, df["Qty proposée"], strict=True)
+        ],
+        subset=["Qty finale"],
+    )
 
 
 def default_order(
-    lines: list[RecommendationLine], base_qty: dict[str, int]
+    lines: list[RecommendationLine], base: dict[str, RecommendationLine]
 ) -> list[RecommendationLine]:
-    """Tri par défaut : REVIEW et BLOCKED en haut, puis Qty proposée décroissante."""
-    return sorted(lines, key=lambda x: (x.status is Status.OK, -base_qty.get(x.sku, x.qty), x.sku))
+    """Tri par défaut : REVIEW et BLOCKED en haut, puis Qty proposée décroissante.
+
+    Calculé sur le statut et la qty du calcul (jamais sur la qty saisie) : une ligne ne bouge
+    pas pendant que le planner tape (D-039).
+    """
+
+    def key(x: RecommendationLine) -> tuple[bool, int, str]:
+        b = base.get(x.sku, x)
+        return (b.status is Status.OK, -b.qty, x.sku)
+
+    return sorted(lines, key=key)
 
 
 def explain_steps(line: RecommendationLine) -> list[str]:

@@ -20,6 +20,7 @@ from app.ui.common import (
     fmt_date,
     fmt_int,
     go,
+    is_confirmed,
     ss,
     workspace,
 )
@@ -94,16 +95,21 @@ def render() -> None:
                 f"{fmt_int(s.lines_ordered)} lignes · {fmt_int(s.units_total)} unités · "
                 f"{fmt_1(res.pallets.total_pallets)} palettes")  # fmt: skip
     st.markdown(f"Fichier LT : `{name}` · généré le {now:%d/%m/%Y à %H:%M}")
-    unseen = [x for x in res.lines if x.status.value != "OK" and x.sku not in ss.seen]
-    if unseen:
-        st.warning(f"{len(unseen)} ligne(s) REVIEW ou BLOCKED pas encore marquée(s) « Vu ».")
+    # D-039 : le fichier LT attend que chaque ligne REVIEW ou BLOCKED soit confirmée.
+    todo = [b for b in res.base_lines if b.status.value != "OK" and not is_confirmed(b.sku)]
+    if todo:
+        n_rev = sum(b.status.value == "REVIEW" for b in todo)
+        st.error(f"{len(todo)} ligne(s) à confirmer avant le fichier LT ({n_rev} REVIEW, "
+                 f"{len(todo) - n_rev} BLOCKED). Coche « Confirmé » dans la commande, ligne par "
+                 "ligne ou avec « Confirmer les lignes affichées ».")  # fmt: skip
+        st.button("Retour à la commande", on_click=go, args=(ORDER,), key="back_to_order")
     if not author():
         st.error("Choisis ton prénom (Planner, barre de gauche) pour exporter.")
     gate_ok = gate_for_order(res)
     c = st.columns(3)
     c[0].download_button("Télécharger le fichier LT (SKU;QTY)", data=lt_content(res.lines),
                          file_name=name, mime="text/csv", type="primary", key="dl_lt",
-                         disabled=not author() or not gate_ok, on_click=_on_lt, args=(res, name),
+                         disabled=not author() or not gate_ok or bool(todo), on_click=_on_lt, args=(res, name),
                          width="stretch")  # fmt: skip
     c[1].download_button("Récapitulatif boutique",
                          data=recap_csv(p.boutique, p.delivery_date.isoformat(), res.lines, res.pallets),

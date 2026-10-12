@@ -312,3 +312,14 @@ def test_projected_stock_at_delivery_is_display_only() -> None:
     assert res.explanation["days_until_delivery"] == 3
     assert res.explanation["projected_stock_at_delivery"] == 400  # 700 − 100 × 3
     assert res.qty == 200  # 9 × 100 − 700 : la date de livraison ne change pas la qty
+
+
+def test_override_never_changes_the_status() -> None:
+    """D-039 : modifier une quantité ne change jamais le statut (confirmer est à part)."""
+    for status in Status:
+        base = line("7005.70", 0, status=status)
+        moved = Override(sku="7005.70", qty_before=0, qty_after=240, author="A",
+                         timestamp=datetime(2026, 10, 12))  # fmt: skip
+        out = apply_overrides([base], [moved])[0]
+        assert out.status is status and out.qty == 240
+    assert out.reasons[-1] == "Quantité saisie sur une ligne bloquée : à vérifier"

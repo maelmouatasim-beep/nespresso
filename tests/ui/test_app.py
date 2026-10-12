@@ -107,7 +107,8 @@ def test_single_grid_default_order_and_filters(app: AppTest) -> None:
     assert flagged[:first_ok].all() and not flagged[first_ok:].any()  # REVIEW/BLOCKED en haut
     ok = df[first_ok:]["Qty proposée"].tolist()
     assert ok == sorted(ok, reverse=True)  # puis Qty proposée décroissante
-    assert list(df.columns[1:5]) == ["Statut", "SKU", "Description", "Catégorie"]
+    assert list(df.columns[:6]) == ["Confirmé", "Détail", "Statut", "SKU", "Description",
+                                    "Catégorie"]  # fmt: skip
 
     next(b for b in app.button_group if b.key == "f_cat").set_value("Cafés").run()
     assert set(grid(app)["Catégorie"]) == {"Cafés"}
@@ -121,8 +122,11 @@ def test_accept_all_ok_marks_ok_lines(app: AppTest) -> None:
     compute_b80(app)
     app.button(key="accept_ok").click().run()
     df = grid(app)
-    assert df[df["Statut"].str.contains("OK")]["Statut"].str.endswith("✓").all()
-    assert not df[df["Statut"].str.contains("REVIEW")]["Statut"].str.endswith("✓").any()
+    base = {x.sku: x.status.value for x in app.session_state["base"].base_lines}
+    ok = df[df["SKU"].map(base) == "OK"]
+    assert len(ok) and (ok["Statut"] == "● Confirmé").all() and ok["Confirmé"].all()
+    review = df[df["SKU"].map(base) == "REVIEW"]
+    assert (review["Statut"] == "● REVIEW").all() and not review["Confirmé"].any()
 
 
 def test_my_data_depot_offers_referentials_and_uploader(tmp_path, monkeypatch) -> None:
@@ -233,6 +237,12 @@ def test_export_is_refused_until_the_gate_is_green(app: AppTest) -> None:
     app.button(key="order_gate_seen").click().run()
     assert app.get("download_button")[0].proto.disabled  # reste : lancements / demandes
     next(c for c in app.checkbox if c.key.startswith("order_gate_include")).check().run()
+    # D-039 : garde-fou vert, mais des lignes REVIEW / BLOCKED ne sont pas encore confirmées.
+    assert app.get("download_button")[0].proto.disabled
+    assert any("à confirmer avant le fichier LT" in e.value for e in app.error)
+    goto(app, PAGES[1])
+    app.button(key="confirm_shown").click().run()  # filtre « Tous » : toutes les lignes
+    goto(app, PAGES[3])
     assert not app.get("download_button")[0].proto.disabled
     from app.storage import db
     from app.storage import events as store
@@ -312,7 +322,7 @@ def test_quantity_change_counts_immediately_with_deduced_context(app: AppTest) -
     assert ov.context_detail  # déduit, jamais demandé
     assert any("n'est pas un multiple de 240, arrondi à 3360" in c.value for c in app.caption)
     row = grid(app).set_index("SKU").loc["7005.70"]
-    assert (row["Statut"], row["Qty finale"]) == ("● Modifié", 3360)
+    assert (row["Statut"], row["Qty finale"]) == ("● OK · modifié", 3360)  # D-039
     assert ov.context_detail not in row["Raisons"]
     assert any("Contexte déduit" in m.value for m in app.markdown)
     app.run()  # l'avertissement d'arrondi ne s'affiche qu'une fois
@@ -332,3 +342,40 @@ def test_every_referential_is_editable_and_saved(app: AppTest) -> None:
 
     meta = demo_workspace().meta()["dc_mapping"]
     assert meta["updated_by"] == "Sami" and meta["source_file"] == "modifié dans l'outil"
+
+
+def test_changing_a_quantity_never_changes_the_status(app: AppTest) -> None:
+    """D-039 : modifier et confirmer sont deux actions distinctes."""
+    app.selectbox(key="author").set_value("Camille").run()
+    compute_b80(app)
+    next(b for b in app.button_group if b.key == "f_status").set_value("REVIEW").run()
+    df = grid(app)
+    sku, qty, multiple = df.iloc[0][["SKU", "Qty finale", "Multiple"]]
+    n_review = len(df)
+    app.session_state["why_sku"] = sku
+    app.run()
+    app.number_input(key=f"dlg_qty_{sku}").set_value(int(qty + multiple)).run()
+    app.button(key="dlg_save").click().run()
+    assert sku in app.session_state["overrides"]
+    df = grid(app)  # toujours dans le filtre REVIEW, même place, statut REVIEW + marqueur
+    assert len(df) == n_review and df.iloc[0]["SKU"] == sku
+    assert df.iloc[0]["Statut"] == "● REVIEW · modifié"
+    assert df.iloc[0]["Qty finale"] == qty + multiple
+    next(b for b in app.button_group if b.key == "f_status").set_value("Modifié").run()
+    assert list(grid(app)["SKU"]) == [sku]
+    # Confirmer (case « Confirmé » ou bouton du panneau) : la ligne sort du filtre REVIEW.
+    next(b for b in app.button_group if b.key == "f_status").set_value("REVIEW").run()
+    app.button(key="why_seen").click().run()
+    assert sku not in set(grid(app)["SKU"]) and len(grid(app)) == n_review - 1
+    goto(app, PAGES[3])
+    assert app.get("download_button")[0].proto.disabled  # d'autres REVIEW non confirmés
+    goto(app, PAGES[1])
+    next(b for b in app.button_group if b.key == "f_status").set_value("Confirmé").run()
+    row = grid(app).set_index("SKU").loc[sku]
+    assert row["Statut"] == "● Confirmé · modifié" and row["Confirmé"]
+    # Décocher la ramène dans REVIEW.
+    app.session_state["why_sku"] = sku
+    app.run()
+    app.button(key="why_seen").click().run()
+    next(b for b in app.button_group if b.key == "f_status").set_value("REVIEW").run()
+    assert sku in set(grid(app)["SKU"])
