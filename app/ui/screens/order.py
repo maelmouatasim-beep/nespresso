@@ -33,7 +33,6 @@ from app.ui.common import (
     fmt_int,
     is_confirmed,
     make_override,
-    mark_events_viewed,
     order_frame,
     rounding_note,
     shown_status,
@@ -112,9 +111,6 @@ def _event_banner(res) -> str | int | None:  # noqa: ANN001
                     f"{len(res.events) - team} — clic sur un événement pour filtrer la table")  # fmt: skip
         choice = st.pills("Événements", list(labels), key="f_event", format_func=labels.get,
                           label_visibility="collapsed")  # fmt: skip
-        if choice is not None:
-            # Q-030 : « Marquer comme vus » n'est actif qu'après ce premier coup d'œil.
-            mark_events_viewed(res.params.boutique, res.params.delivery_date)
     else:
         choice = None
     if others:
@@ -164,16 +160,16 @@ def _bulk_buttons(lines: list[RecommendationLine], shown: list[RecommendationLin
     c1, c2, _ = st.columns([1.6, 1.6, 3])
     if c1.button("Accepter toutes les lignes OK", icon=":material/done_all:", key="accept_ok",
                  width="stretch"):  # fmt: skip
-        _set_confirmed([x.sku for x in lines if base[x.sku].status is Status.OK], True)
+        set_confirmed([x.sku for x in lines if base[x.sku].status is Status.OK], True)
         st.rerun()
     todo = [x.sku for x in shown if not is_confirmed(x.sku)]
     if c2.button(f"Confirmer les lignes affichées ({len(todo)})", icon=":material/checklist:",
                  key="confirm_shown", disabled=not todo, width="stretch"):  # fmt: skip
-        _set_confirmed(todo, True)
+        set_confirmed(todo, True)
         st.rerun()
 
 
-def _set_confirmed(skus: list[str], on: bool) -> None:
+def set_confirmed(skus: list[str], on: bool) -> None:
     """Confirme (ou remet à traiter) des lignes. Une ligne bloquée par un événement voit aussi
     son blocage confirmé ; tout ce qui touche un événement est tracé (D-031)."""
     base = {x.sku: x for x in ss.base.base_lines} if ss.base else {}
@@ -221,8 +217,8 @@ def _process_edits(
     confirm = [r["SKU"] for r in rows if bool(r["Confirmé"]) and not is_confirmed(r["SKU"])]
     unconfirm = [r["SKU"] for r in rows if not bool(r["Confirmé"]) and is_confirmed(r["SKU"])]
     if confirm or unconfirm:
-        _set_confirmed(confirm, True)
-        _set_confirmed(unconfirm, False)
+        set_confirmed(confirm, True)
+        set_confirmed(unconfirm, False)
         rerun = True
     new, changed, notes = dict(ss.overrides), False, []
     for row in rows:
@@ -262,7 +258,7 @@ def _close_why() -> None:
 
 
 def _toggle_seen(sku: str) -> None:
-    _set_confirmed([sku], not is_confirmed(sku))
+    set_confirmed([sku], not is_confirmed(sku))
 
 
 def _toggle_block(sku: str) -> None:

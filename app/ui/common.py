@@ -95,7 +95,6 @@ def init_state() -> None:
         "confirmed_blocks": set(),  # SKU bloqués par un événement, blocage confirmé
         "include_ok": False,  # lancements / demandes à inclure confirmés
         "requests_to_close": [],  # demandes boutique à terminer après l'export
-        "events_viewed": set(),  # (boutique, livraison) dont le filtre « Événements » a été ouvert
         "ev_edit": None,  # Événements : panneau ouvert (id, "new" ou "request")
         "ev_nonce": 0,
     }
@@ -118,15 +117,6 @@ def is_demo() -> bool:
 def run_date() -> date:
     """Jour du calcul : aujourd'hui (démo : jour des données de démonstration)."""
     return DEMO_EXTRACTION if is_demo() else date.today()
-
-
-def mark_events_viewed(boutique: str, delivery: date) -> None:
-    """Le planner a ouvert le filtre « Événements » de cette commande (Q-030)."""
-    ss.events_viewed = ss.events_viewed | {(boutique, delivery.isoformat())}
-
-
-def events_viewed(boutique: str, delivery: date) -> bool:
-    return (boutique, delivery.isoformat()) in ss.events_viewed
 
 
 def reset_order() -> None:
@@ -411,8 +401,9 @@ ORDER_COLUMN_CONFIG = {
     "Détail": st.column_config.CheckboxColumn(
         "Détail", width=72, help="Pourquoi cette quantité ?", pinned=True
     ),
-    "Statut": st.column_config.TextColumn(width=150),
-    "SKU": st.column_config.TextColumn(width=100),
+    # Bloc figé à gauche (Confirmé, Détail, Statut, SKU) : le reste défile.
+    "Statut": st.column_config.TextColumn(width=150, pinned=True),
+    "SKU": st.column_config.TextColumn(width=100, pinned=True),
     "Description": st.column_config.TextColumn(width=210),
     "Catégorie": st.column_config.TextColumn(width=120),
     "Événement": st.column_config.TextColumn(
@@ -447,6 +438,8 @@ def style_order_frame(df: pd.DataFrame):  # noqa: ANN201 - pandas Styler
         lambda row: [f"background-color: {ZEBRA}" if row.name % 2 else ""] * len(row), axis=1
     )
     zebra = zebra.map(_status_style, subset=["Statut"])
+    if "Qty finale" not in df.columns:  # liste des lignes à confirmer : pas de Qty finale
+        return zebra
     # Marqueur « modifié » : fond bleu très léger sur la Qty finale qui diffère de la proposée.
     return zebra.apply(
         lambda col: [

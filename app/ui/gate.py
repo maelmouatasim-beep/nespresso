@@ -1,114 +1,25 @@
-"""Garde-fou avant export : trois points à mettre au vert (événements SKU).
+"""Traces des validations (qui, quand) et demandes boutique à terminer après l'export.
 
-1. Lignes BLOCKED par un événement : blocage confirmé ou ligne modifiée avec une raison.
-2. SKU flagués par un événement : marqués « Vu » (ou modifiés). « Marquer comme vus » en
-   un clic n'est actif qu'une fois le filtre « Événements » de la commande ouvert (Q-030).
-3. Lancements, urgences et demandes boutique à inclure : case cochée.
-Chaque validation est écrite dans la base (qui, quand).
+Les lignes à confirmer avant le fichier LT (REVIEW, BLOCKED, flaguées par un événement) sont
+listées dans la page Commandes (D-043) ; chaque confirmation est écrite dans la base.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from dataclasses import dataclass
 from datetime import date
 
 import streamlit as st
 
 from app.domain.events import SkuEvent
-from app.engines.events import ExportCheck, store_requests_done
+from app.engines.events import store_requests_done
 from app.storage import events as store
-from app.ui.common import author, db_conn, events_viewed, ss
-
-OK_ICON = ":green[:material/check_circle:]"
-BAD_ICON = ":red[:material/block:]"
-TODO_ICON = ":orange[:material/pending:]"
-MAX_LISTED = 12
-
-
-@dataclass(frozen=True)
-class GateRow:
-    boutique: str
-    delivery: date
-    check: ExportCheck
+from app.ui.common import author, db_conn, ss
 
 
 def trace(boutique: str, delivery: date, kind: str, skus: list[str], note: str = "") -> None:
     with db_conn() as conn:
         store.record_validation(conn, author=author() or "Planner non renseigné", boutique=boutique,
                                 delivery=delivery, kind=kind, skus=skus, note=note)  # fmt: skip
-
-
-def _listed(rows: list[GateRow], get: Callable[[ExportCheck], tuple]) -> str:
-    parts = []
-    for r in rows:
-        items = [x if isinstance(x, str) else f"{x[0]} ({x[1]})" for x in get(r.check)]
-        if items:
-            more = f" … (+{len(items) - MAX_LISTED})" if len(items) > MAX_LISTED else ""
-            prefix = f"{r.boutique} : " if len(rows) > 1 else ""
-            parts.append(prefix + ", ".join(items[:MAX_LISTED]) + more)
-    return " · ".join(parts)
-
-
-def render_gate(
-    rows: list[GateRow],
-    *,
-    key: str,
-    confirm_blocks: Callable[[GateRow], None],
-    mark_seen: Callable[[GateRow], None],
-    set_include: Callable[[GateRow, bool], None],
-) -> bool:
-    """Affiche les 3 points. Retourne True quand tout est vert (export permis)."""
-    blocked = sum(len(r.check.blocked) for r in rows)
-    unseen = sum(len(r.check.unvalidated) for r in rows)
-    include = sum(len(r.check.to_include) for r in rows)
-    include_ok = all(r.check.include_ok for r in rows)
-    with st.container(border=True, key=f"gate_{key}"):
-        st.markdown("**Vérification avant export (événements SKU)**")
-        c1, c2 = st.columns([4, 1.4], vertical_alignment="center")
-        c1.markdown(f"{OK_ICON if not blocked else BAD_ICON} **{blocked} ligne(s) BLOCKED par un "
-                    "événement**" + (f"  \n{_listed(rows, lambda c: c.blocked)}" if blocked else ""))  # fmt: skip
-        if blocked and c2.button("Confirmer les blocages", key=f"{key}_blocks", width="stretch",
-                                 help="La quantité reste 0 (tracé). Pour envoyer quand même : "
-                                      "modifier la ligne avec une raison."):  # fmt: skip
-            for r in rows:
-                if r.check.blocked:
-                    confirm_blocks(r)
-            st.rerun()
-        c1, c2 = st.columns([4, 1.4], vertical_alignment="center")
-        c1.markdown(f"{OK_ICON if not unseen else TODO_ICON} **{unseen} SKU flagué(s) par un "
-                    "événement non encore validé(s)**"
-                    + (f"  \n{_listed(rows, lambda c: c.unvalidated)}" if unseen else ""))  # fmt: skip
-        to_open = [r.boutique for r in rows
-                   if r.check.unvalidated and not events_viewed(r.boutique, r.delivery)]  # fmt: skip
-        if to_open:
-            where = f" ({', '.join(to_open)})" if len(rows) > 1 else ""
-            c1.caption(f":material/info: Ouvre d'abord le filtre « Événements » de la commande"
-                       f"{where} (Commande boutique) pour activer « Marquer comme vus ».")  # fmt: skip
-        if unseen and c2.button("Marquer comme vus", key=f"{key}_seen", width="stretch",
-                                disabled=bool(to_open),
-                                help="Actif une fois le filtre « Événements » de la commande "
-                                     "ouvert au moins une fois."):  # fmt: skip
-            for r in rows:
-                if r.check.unvalidated:
-                    mark_seen(r)
-            st.rerun()
-        if not include:
-            st.markdown(f"{OK_ICON} **Aucun lancement ni demande boutique à inclure**")
-        else:
-            st.markdown(f"{OK_ICON if include_ok else TODO_ICON} **Lancements et demandes boutique "
-                        f"à inclure** : {_listed(rows, lambda c: c.to_include)}")  # fmt: skip
-            value = st.checkbox("J'ai vérifié : ces lancements et demandes sont inclus",
-                                value=include_ok, key=f"{key}_include_{include}")  # fmt: skip
-            if value != include_ok:
-                for r in rows:
-                    if r.check.to_include:
-                        set_include(r, value)
-                st.rerun()
-        ok = not blocked and not unseen and include_ok
-        if not ok:
-            st.caption("Le téléchargement est désactivé tant que ces points ne sont pas verts.")
-    return ok
 
 
 def requests_after_export(events: list[SkuEvent]) -> None:

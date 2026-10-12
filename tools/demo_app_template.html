@@ -87,6 +87,8 @@ button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-v
 .seg button b { font-weight: 600; margin-left: 5px; opacity: .65; font-variant-numeric: tabular-nums; }
 .chk { display: inline-flex; gap: 6px; align-items: center; font-size: 14px; padding-bottom: 6px; }
 .tablewrap.grid { max-height: calc(100vh - 120px); min-height: 420px; }
+.tablewrap.pending { max-height: 400px; margin: 6px 0 12px; }
+.tablewrap.pending table.order td:nth-child(-n+3), .tablewrap.pending table.order th:nth-child(-n+3) { position: static; box-shadow: none; }
 th.sortable { cursor: pointer; user-select: none; }
 th.sortable:hover { color: var(--text); }
 th.sortable.on { color: var(--accent); }
@@ -101,9 +103,12 @@ table.order { table-layout: fixed; width: 1410px; }
 th, td { padding: 5px 8px; border-bottom: 1px solid var(--border); text-align: left; white-space: nowrap; vertical-align: middle; overflow: hidden; text-overflow: ellipsis; font-size: 14px; }
 th { position: sticky; top: 0; background: var(--surface-2); font-size: 12.5px; color: var(--muted); z-index: 2; font-weight: 600; white-space: normal; line-height: 1.2; vertical-align: bottom; }
 td.n, th.n { text-align: right; font-variant-numeric: tabular-nums; }
-table.order td:nth-child(1), table.order th:nth-child(1) { position: sticky; left: 0; z-index: 1; background: var(--surface); }
-table.order td:nth-child(2), table.order th:nth-child(2) { position: sticky; left: 104px; z-index: 1; background: var(--surface); box-shadow: inset -1px 0 0 var(--border); }
-table.order th:nth-child(1), table.order th:nth-child(2) { z-index: 3; background: var(--surface-2); }
+/* Bloc figé à gauche : Confirmé (76) + Statut (150) + SKU (110), collés ; le reste défile. */
+table.order td:nth-child(-n+3), table.order th:nth-child(-n+3) { position: sticky; z-index: 1; background: var(--surface); }
+table.order td:nth-child(1), table.order th:nth-child(1) { left: 0; }
+table.order td:nth-child(2), table.order th:nth-child(2) { left: 76px; }
+table.order td:nth-child(3), table.order th:nth-child(3) { left: 226px; box-shadow: inset -1px 0 0 var(--border); }
+table.order th:nth-child(-n+3) { z-index: 3; background: var(--surface-2); }
 table.order tbody tr { cursor: pointer; }
 table.order tbody tr:hover td { background: var(--surface-2); }
 table.order td.q.modq { background: var(--mod-bg); }
@@ -184,11 +189,11 @@ h2.fam, h3 { color: var(--gold-ink); font-weight: 600; }
 .btn svg, .ic { width: 16px; height: 16px; vertical-align: -3px; margin-right: 6px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .gear .btn svg { margin-right: 0; }
 th { background: var(--espresso); color: #FAF7F2; }
-table.order th:nth-child(1), table.order th:nth-child(2) { background: var(--espresso); }
+table.order th:nth-child(-n+3) { background: var(--espresso); }
 th.sortable:hover { color: #FFFFFF; } th.sortable.on { color: #E2C99F; }
 td { padding-top: 4px; padding-bottom: 4px; }
 tbody tr:nth-child(even) td { background: var(--zebra); }
-table.order tbody tr:nth-child(even) td:nth-child(1), table.order tbody tr:nth-child(even) td:nth-child(2) { background: var(--zebra); }
+table.order tbody tr:nth-child(even) td:nth-child(-n+3) { background: var(--zebra); }
 table.order tbody tr:hover td, tbody tr:hover td { background: var(--hover); }
 table.order tr.sel td { box-shadow: inset 0 2px 0 var(--gold), inset 0 -2px 0 var(--gold); }
 .st { font-weight: 600; padding: 2px 9px 2px 8px; }
@@ -220,13 +225,6 @@ dl.kv dt { color: var(--muted); font-weight: 600; font-size: 12.5px; padding-top
 dl.kv dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
 table.ev tbody tr { cursor: pointer; }
 table.ev tr.sel td { box-shadow: inset 0 2px 0 var(--gold), inset 0 -2px 0 var(--gold); }
-.gate { border: 1px solid var(--border); border-radius: 10px; background: var(--surface); padding: 12px 14px; margin: 12px 0; box-shadow: var(--shadow); }
-.gate .g { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--border); }
-.gate .g:last-of-type { border-bottom: 0; }
-.gate .g .t { flex: 1 1 320px; min-width: 0; }
-.gate .g .t small { display: block; color: var(--muted); overflow-wrap: anywhere; }
-.gate .ico { font-weight: 700; margin-right: 6px; }
-.gate .ico.ok { color: var(--ok); } .gate .ico.ko { color: var(--blocked); } .gate .ico.todo { color: var(--review); }
 @media (max-width: 1100px) { .evlayout.open { grid-template-columns: minmax(0, 1fr); } .evpanel { position: static; max-height: none; } }
 </style>
 
@@ -266,7 +264,6 @@ const QTY_HELP = {
   initial_qty: "Jusqu'au début (date de lancement) : quantité initiale − Expected, arrondie au multiple",
   target: "Sous le min après commande : quantité = cible − Expected, arrondie au multiple ; au-dessus du max : plafonnée",
 };
-const INCLUDE_TYPES = new Set(["launch", "urgent", "store_request"]);
 const DOT = { t: "●", p: "○", team: "●", personal: "○" };
 const EV_CLS = { "Actif": "G", "À venir": "Y", "Bloqué": "X", "Terminé": "U", "Annulé": "U", "Brouillon": "M" };
 const EV_FILTERS = ["Actifs", "À venir", "Terminés", "Brouillons", "Tous"];
@@ -329,7 +326,7 @@ const st = {
   overrides: {}, roundNotes: [], seen: new Set(), f: { cat: "Tous", status: "Tous", qty: false, ev: null }, sort: null, q: "", why: null, rowOrder: null, savedId: null, xmsg: null,
   refTab: 0, source: "demo", busy: "", depotErr: [],
   // Événements : reprises (session seulement), demandes terminées, validations avant export.
-  taken: new Set(), evDone: store.get("spc2_ev_done", {}), confirmed: new Set(), includeOk: false, evViewed: new Set(),
+  taken: new Set(), evDone: store.get("spc2_ev_done", {}), confirmed: new Set(),
   validations: store.get("spc2_validations", []), toClose: [], evTab: "team", evStatus: "Actifs", evQ: "", evTypes: new Set(), evPlanner: null, evSel: null, evEdit: null, tbl: null,
 };
 
@@ -422,37 +419,9 @@ function logValidation(kind, boutique, skus, note) {
   st.validations.unshift({ at: new Date().toISOString(), who: st.author || "Planner non renseigné", kind, boutique, skus, note: note || "" });
   store.set("spc2_validations", st.validations.slice(0, 500));
 }
-// Garde-fou avant export : mêmes règles que app/engines/events.py (export_check).
-function evCheck(baseRows, ovs, seen, confirmed, includeOk) {
-  const blocked = [], unval = [], inc = [];
-  for (const b of baseRows) {
-    if (!b.ev.length) continue;
-    const sku = b.m.sku, ov = ovs[sku];
-    if (b.s === "B") { if (!confirmed.has(sku) && !(ov && ov.reason)) blocked.push(sku); continue; }
-    if (!seen.has(sku) && !ov) unval.push(sku);
-    const titles = [...new Set(b.ev.filter(e => INCLUDE_TYPES.has(e.type)).map(e => e.title))];
-    if (titles.length) inc.push(sku + " (" + titles.join(" / ") + ")");
-  }
-  return { blocked, unval, inc, ok: !blocked.length && !unval.length && (!inc.length || includeOk) };
-}
-// Q-030 : « Marquer comme vus » n'est actif qu'après un premier clic sur le filtre
-// « Événements » de la commande (boutique + livraison).
-const viewKey = (b, d) => b + "|" + d;
-function gateCard(c, includeOk, onBlocks, onSeen, onInclude, toOpen) {
-  toOpen = toOpen || [];
-  const line = (ok, cls, title, detail, btn) => el("div", "g", el("div", "t", el("span", "ico " + (ok ? "ok" : cls), ok ? "✓" : (cls === "ko" ? "⦸" : "…")), el("b", "", title), detail ? el("small", "", detail) : null), btn);
-  const incBox = el("input", { type: "checkbox", id: "gate_include", checked: includeOk, onchange: e => onInclude(e.target.checked) });
-  return el("div", "gate",
-    el("div", "", el("b", "", "Vérification avant export (événements SKU)")),
-    line(!c.blocked.length, "ko", c.blocked.length + " ligne(s) BLOCKED par un événement", c.blocked.join(", "),
-      c.blocked.length ? el("button", { class: "btn", id: "gate_blocks", title: "La quantité reste 0 (tracé). Pour envoyer quand même : modifier la ligne avec une raison.", onclick: onBlocks }, "Confirmer les blocages") : null),
-    line(!c.unval.length, "todo", c.unval.length + " SKU flagué(s) par un événement non encore validé(s)", c.unval.join(", "),
-      c.unval.length ? el("button", { class: "btn", id: "gate_seen", disabled: toOpen.length > 0, title: "Actif une fois le filtre « Événements » de la commande ouvert au moins une fois.", onclick: onSeen }, ic("check"), "Marquer comme vus") : null),
-    c.unval.length && toOpen.length ? el("p", "small muted", "Ouvre d'abord le filtre « Événements » de la commande" + (toOpen.length > 1 || c.multi ? " (" + toOpen.join(", ") + ")" : "") + " (page Commandes) pour activer « Marquer comme vus ».") : null,
-    c.inc.length ? line(includeOk, "todo", "Lancements et demandes boutique à inclure", c.inc.join(", "), el("label", "chk", incBox, "J'ai vérifié : inclus"))
-      : line(true, "", "Aucun lancement ni demande boutique à inclure", "", null),
-    c.ok ? null : el("p", "small muted", "Le téléchargement est désactivé tant que ces points ne sont pas verts."));
-}
+// Lignes qui ne partiront pas sans confirmation : REVIEW, BLOCKED ou flaguées par un événement
+// (lancement, demande boutique, promo…), tant qu'elles ne sont pas confirmées (D-043).
+function pendingLines(ls) { return ls.filter(x => !isConf(x.m.sku) && (x.s !== "O" || x.ev.length)); }
 
 // ---------- Navigation ----------
 function go(p) { st.page = p; store.set("spc2_page", p); st.why = null; render(); window.scrollTo(0, 0); }
@@ -697,8 +666,8 @@ function tableOf(head, rows, numCols = []) {
 // ---------- 2. Commandes ----------
 // Une boutique = une commande simple, plusieurs = une journée. Rien n'est présélectionné (plus de
 // Schedule). La boutique affichée garde son état dans st.* ; les autres onglets dans st.tabs.states.
-const ORDER_KEYS = ["order", "overrides", "seen", "confirmed", "includeOk", "savedId", "why", "f", "sort", "q", "rowOrder", "roundNotes", "xmsg"];
-function emptyState() { return { order: null, overrides: {}, seen: new Set(), confirmed: new Set(), includeOk: false, savedId: null, why: null, f: { cat: "Tous", status: "Tous", qty: false, ev: null }, sort: null, q: "", rowOrder: null, roundNotes: [], xmsg: null }; }
+const ORDER_KEYS = ["order", "overrides", "seen", "confirmed", "savedId", "why", "f", "sort", "q", "rowOrder", "roundNotes", "xmsg"];
+function emptyState() { return { order: null, overrides: {}, seen: new Set(), confirmed: new Set(), savedId: null, why: null, f: { cat: "Tous", status: "Tous", qty: false, ev: null }, sort: null, q: "", rowOrder: null, roundNotes: [], xmsg: null }; }
 function tabs() { if (!st.tabs || st.tabs.source !== st.source) { st.tabs = { source: st.source, list: [], params: {}, states: {}, computed: {}, errors: {} }; st.active = null; Object.assign(st, emptyState()); } return st.tabs; }
 function parkActive() { const t = tabs(); if (st.active && t.list.includes(st.active)) t.states[st.active] = Object.fromEntries(ORDER_KEYS.map(k => [k, st[k]])); }
 function activate(b) { if (b === st.active) return; parkActive(); Object.assign(st, tabs().states[b] || emptyState()); st.active = b; render(); }
@@ -752,10 +721,8 @@ function readiness(b) {
   return withState(b, () => {
     const ls = lines(), sum = summarize(ls), base = ls.map((_, j) => baseLine(j)), open = ls.filter(x => !isConf(x.m.sku));
     const review = open.filter(x => x.s === "R").length, blocked = open.filter(x => x.s === "B").length, toTreat = open.filter(x => x.s !== "B").length;
-    const chk = evCheck(base, st.overrides, st.seen, st.confirmed, st.includeOk), reasons = [];
-    if (review || blocked) reasons.push(review + " REVIEW et " + blocked + " BLOCKED à confirmer");
-    if (!chk.ok) reasons.push("vérification des événements à terminer");
-    return { b, status: review || blocked ? "calculé" : "confirmé", ls, sum, base, chk, review, blocked, toTreat, delivery: st.order.delivery, reason: reasons.join(" · "), ready: !reasons.length };
+    const pending = pendingLines(ls).length;
+    return { b, status: review || blocked ? "calculé" : "confirmé", ls, sum, base, review, blocked, toTreat, pending, delivery: st.order.delivery, reason: pending ? pending + " ligne(s) à confirmer" : "", ready: !pending };
   });
 }
 function coverSelect(id, value, optional) {
@@ -853,7 +820,7 @@ function matches(x) {
 }
 // Colonnes : [titre, largeur, numérique, valeur de tri]
 const COLS = [
-  ["Confirmé", 76, 0, x => isConf(x.m.sku) ? "1" : "0"], ["Statut", 150, 0, x => statusKey(x)], ["SKU", 96, 0, x => x.m.sku], ["Description", 210, 0, x => x.m.desc],
+  ["Confirmé", 76, 0, x => isConf(x.m.sku) ? "1" : "0"], ["Statut", 150, 0, x => statusKey(x)], ["SKU", 110, 0, x => x.m.sku], ["Description", 210, 0, x => x.m.desc],
   ["Catégorie", 130, 0, x => categoryOf(x.m)], ["Événement", 170, 0, x => evCell(x)], ["Expected", 86, 1, x => x.m.exp], ["Ventes", 68, 1, x => x.m.sales],
   ["Couv. act.", 72, 1, x => x.m.cur], ["Proposée", 78, 1, (x, b) => b[x.m.sku]], ["Qty finale", 92, 1, x => x.qty],
   ["Couv. après", 80, 1, x => postCover(x.m, x.qty)], ["Multiple", 68, 1, x => x.multiple], ["Stock DC", 80, 1, x => x.m.dc],
@@ -887,12 +854,15 @@ function clickSort(i) {
   else st.sort = null;  // troisième clic : retour au tri par défaut
   render();
 }
-function orderTable(rows, baseQty) {
-  const head = el("tr", "", COLS.map((c, i) => {
+// keep : indices des colonnes à garder (liste des lignes à confirmer) ; sans tri ni clic.
+function orderTable(rows, baseQty, keep) {
+  const cols = keep ? COLS.filter((_, i) => keep.includes(i)) : COLS, pick = cells => keep ? cells.filter((_, i) => keep.includes(i)) : cells;
+  const head = el("tr", "", cols.map((c, i) => {
+    if (keep) return el("th", { class: c[2] ? "n" : "" }, c[0]);
     const on = st.sort && st.sort.col === i, arrow = on ? (st.sort.dir > 0 ? " ▲" : " ▼") : "";
     return el("th", { class: (c[2] ? "n " : "") + "sortable" + (on ? " on" : ""), title: "Trier", onclick: () => clickSort(i) }, c[0] + arrow);
   }));
-  const t = el("table", "order", el("colgroup", "", COLS.map(c => el("col", { style: "width:" + c[1] + "px" }))), el("thead", "", head));
+  const t = el("table", { class: "order", style: keep ? "width:100%;min-width:" + cols.reduce((a, c) => a + c[1], 0) + "px" : "" }, el("colgroup", "", cols.map(c => el("col", { style: "width:" + c[1] + "px" }))), el("thead", "", head));
   const body = el("tbody");
   for (const x of rows) {
     const m = x.m, sku = m.sku;
@@ -904,16 +874,17 @@ function orderTable(rows, baseQty) {
     cb.onchange = () => { setConfirmed([sku], cb.checked); render(); };
     const qi = el("input", { type: "number", min: 0, step: x.multiple || 1, value: shownQty, "aria-label": "Qty finale " + sku });
     qi.onchange = () => { const v = Math.round(Number(qi.value)); if (!Number.isFinite(v) || v < 0) { qi.value = shownQty; return; } if (v !== shownQty) { applyOverride(sku, v); render(); } };
-    const reasons = x.reasons.join(" | ");
+    // Liste à confirmer : raison en quelques mots (sinon le titre de l'événement).
+    const reasons = x.reasons.length || !keep ? x.reasons.join(" | ") : [...new Set(x.ev.map(e => e.title))].join(", ");
     const evText = evCell(x);
-    tr.append(el("td", "conf", cb), el("td", "", stCell), el("td", "mono", sku), el("td", { title: m.desc }, m.desc || "—"), el("td", "", categoryOf(m)), el("td", { class: "evcell", title: evText }, evText),
+    tr.append(...pick([el("td", "conf", cb), el("td", "", stCell), el("td", "mono", sku), el("td", { title: m.desc }, m.desc || "—"), el("td", "", categoryOf(m)), el("td", { class: "evcell", title: evText }, evText),
       el("td", "n", fmt(m.exp)), el("td", "n", fmt(m.sales)), el("td", "n", fmt1(m.cur)), el("td", "n", fmt(baseQty[sku])),
       el("td", "n q" + (mod ? " modq" : ""), qi), el("td", "n", fmt1(postCover(m, x.qty))), el("td", "n", fmt(x.multiple)),
-      el("td", "n", m.dc === null ? "—" : fmt(m.dc)), el("td", "", SRC[x.source]), el("td", { title: reasons, class: "small" }, reasons || ""));
+      el("td", "n", m.dc === null ? "—" : fmt(m.dc)), el("td", "", SRC[x.source]), el("td", { title: reasons, class: "small" }, reasons || "")]));
     body.append(tr);
   }
   t.append(body);
-  return el("div", { class: "tablewrap grid", id: "grid" }, t);
+  return el("div", { class: "tablewrap" + (keep ? " pending" : " grid"), id: keep ? "pending" : "grid" }, t);
 }
 function segmented(label, options, value, counts, onpick) {
   return el("div", "f", label, el("div", "seg", options.map(o => el("button", { class: value === o ? "on" : "", onclick: () => onpick(o) }, o, el("b", "", String(counts[o] || 0))))));
@@ -955,22 +926,23 @@ function orderBody() {
 // Fichiers LT : la boutique affichée, ou toutes (zip). Chaque téléchargement passe par le garde-fou :
 // lignes REVIEW et BLOCKED confirmées (D-039) et les 3 points des événements SKU.
 function ltBlock(states) {
-  const out = [el("h3", "", "Fichiers LT")], ls = lines(), s = summarize(ls), now = new Date(), b0 = st.order.boutique, name = ltName(b0, now);
+  const out = [], ls = lines(), s = summarize(ls), now = new Date(), b0 = st.order.boutique, name = ltName(b0, now);
+  // D-043 : une seule liste. Vide → « Tout est confirmé » et les téléchargements sont actifs.
+  const pending = pendingLines(ls), baseQty = {}; ls.forEach((x, j) => { baseQty[x.m.sku] = baseLine(j).qty; });
+  if (!pending.length) out.push(el("h3", "", "✓ Tout est confirmé"));
+  else {
+    out.push(el("div", "row", { style: "justify-content:space-between;align-items:center" },
+      el("h3", { style: "margin:8px 0" }, pending.length + " ligne(s) ne partiront pas si tu ne les confirmes pas"),
+      el("button", { class: "btn", id: "confirm_pending", onclick: () => { setConfirmed(pending.map(x => x.m.sku), true); render(); } }, ic("checks"), "Tout confirmer")));
+    out.push(orderTable(sortRows(pending, baseQty), baseQty, [0, 1, 2, 3, 9, 15]));
+  }
   const na = needAuthor(); if (na) out.push(na);
-  const mine = states[b0], todo = mine.review + mine.blocked;
-  if (todo) out.push(el("div", "msg err", todo + " ligne(s) à confirmer avant le fichier LT de " + b0 + " (" + mine.review + " REVIEW, " + mine.blocked + " BLOCKED). Coche « Confirmé » dans la table, ligne par ligne ou avec « Confirmer les lignes affichées »."));
-  const base = mine.base || [], chk = evCheck(base, st.overrides, st.seen, st.confirmed, st.includeOk);
-  if (chk.blocked.length || chk.unval.length || chk.inc.length) out.push(gateCard(chk, st.includeOk,
-    () => { chk.blocked.forEach(k => st.confirmed.add(k)); logValidation("confirm_block", b0, chk.blocked); render(); },
-    () => { chk.unval.forEach(k => st.seen.add(k)); logValidation("seen", b0, chk.unval); render(); },
-    on => { st.includeOk = on; logValidation("include", b0, chk.inc, on ? "coché" : "décoché"); render(); },
-    chk.unval.length && !st.evViewed.has(viewKey(b0, st.order.delivery)) ? [b0] : []));
-  const box = el("div");
+  const mine = states[b0], box = el("div");
   if (st.xmsg) box.append(st.xmsg);
-  const requests = [...new Set(base.flatMap(x => x.ev.filter(e => e.type === "store_request").map(e => e.id)))];
+  const requests = [...new Set((mine.base || []).flatMap(x => x.ev.filter(e => e.type === "store_request").map(e => e.id)))];
   const list = tabs().list, waiting = list.filter(b => !states[b].ready);
   out.push(el("div", "row",
-    el("button", { class: "btn primary", id: "dl_lt", disabled: !st.author || !chk.ok || todo > 0, onclick: async () => {
+    el("button", { class: "btn primary", id: "dl_lt", disabled: !st.author || pending.length > 0, onclick: async () => {
       const text = ltText(ls); if (!text) return box.replaceChildren(el("div", "msg info", "Aucune ligne à commander : pas de fichier LT."));
       if (await offer(name, text, box, "Fichier « " + name + " » téléchargé (" + s.ordered + " lignes).")) { saveRun(ls, name); st.toClose = [...new Set([...st.toClose, ...requests])]; st.xmsg = box.firstChild; render(); }
     } }, "Télécharger le LT de " + b0),
@@ -998,7 +970,7 @@ function eventBanner(o, ls) {
   const ids = Object.keys(counts).map(Number), evs = ids.map(evById).filter(Boolean), out = [];
   if (evs.length) {
     const team = evs.filter(e => e.scope === "team").length, all = new Set(ls.filter(x => x.ev.length).map(x => x.m.sku));
-    const chip = (key, label) => el("button", { class: "chip" + (st.f.ev === key ? " on" : ""), onclick: () => { st.f.ev = st.f.ev === key ? null : key; if (st.f.ev !== null) st.evViewed.add(viewKey(o.boutique, o.delivery)); render(); } }, label);
+    const chip = (key, label) => el("button", { class: "chip" + (st.f.ev === key ? " on" : ""), onclick: () => { st.f.ev = st.f.ev === key ? null : key; render(); } }, label);
     out.push(el("div", "evbanner", el("span", "lab", el("b", "", "Événements actifs"), " · Équipe : " + team + " · Personnel : " + (evs.length - team)),
       chip("all", "Tous (" + all.size + " SKU)"), ...evs.map(e => chip(e.id, DOT[e.scope] + " " + e.title + " (" + counts[e.id].size + " SKU)"))));
     out.push(el("p", "small muted", { style: "margin:2px 0 0" }, "Clic sur un événement pour filtrer la table." + (o.live ? "" : " Démo : événements évalués pour une livraison le " + fdate(DATA.demo_delivery) + ".")));

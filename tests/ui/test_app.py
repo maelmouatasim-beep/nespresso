@@ -251,38 +251,52 @@ def test_personal_event_applies_only_to_its_planner_until_taken_over(app: AppTes
     assert "○ Demande B80" in grid(app).set_index("SKU").loc["7042.70", "Événement"]
 
 
-def open_events_filter(at: AppTest) -> None:
-    """Clic sur « Tous » dans le bandeau Événements actifs de la commande."""
-    goto(at, ORDERS)
-    next(b for b in at.button_group if b.key == "f_event").set_value("all").run()
-    assert not at.exception, at.exception
+def pending(at: AppTest):  # noqa: ANN201
+    return next((d.value for d in at.dataframe if d.key and d.key.startswith("pending_")), None)
 
 
-def test_export_is_refused_until_the_gate_is_green(app: AppTest) -> None:
+def test_export_waits_for_the_pending_list_to_be_empty(app: AppTest) -> None:
+    """D-043 : une seule liste « X lignes ne partiront pas si tu ne les confirmes pas »."""
     app.selectbox(key="author").set_value("Camille").run()
     compute_b80(app)
-    assert download(app, "Télécharger le LT").disabled  # garde-fou rouge
-    assert download(app, "Télécharger tous les LT").disabled
-    app.button(key="order_gate_blocks").click().run()  # confirme le blocage de 7928.70
-    # Q-030 : « Marquer comme vus » inactif tant que le filtre « Événements » n'a pas été ouvert
-    assert app.button(key="order_gate_seen").disabled
-    open_events_filter(app)
-    assert not app.button(key="order_gate_seen").disabled
-    app.button(key="order_gate_seen").click().run()
-    assert download(app, "Télécharger le LT").disabled  # reste : lancements / demandes
-    next(c for c in app.checkbox if c.key.startswith("order_gate_include")).check().run()
-    # D-039 : garde-fou vert, mais des lignes REVIEW / BLOCKED ne sont pas encore confirmées.
     assert download(app, "Télécharger le LT").disabled
-    assert any("à confirmer avant le fichier LT" in e.value for e in app.error)
-    next(b for b in app.button_group if b.key == "f_event").set_value(None).run()
-    app.button(key="confirm_shown").click().run()  # filtre « Tous » : toutes les lignes
+    assert download(app, "Télécharger tous les LT").disabled
+    df = pending(app)
+    base = {x.sku: x for x in app.session_state["base"].base_lines}
+    n = len(df)
+    assert any(f"{n} ligne(s) ne partiront pas" in m.value for m in app.markdown)
+    assert list(df.columns) == [
+        "Confirmé",
+        "Statut",
+        "SKU",
+        "Description",
+        "Qty proposée",
+        "Raisons",
+    ]
+    assert not df["Confirmé"].any()
+    # REVIEW et BLOCKED non confirmés, plus les lignes OK flaguées par un événement (lancement,
+    # demande boutique…) avec le titre de l'événement en raison.
+    assert {base[s].status.value for s in df["SKU"]} == {"REVIEW", "BLOCKED"}
+    assert "Advent" in df.set_index("SKU").loc["ADV-2026-CA", "Raisons"]
+    assert not [
+        b for b in app.button if b.key and b.key.startswith("order_gate")
+    ]  # plus de garde-fou
+    # Confirmer une ligne dans la liste : elle en sort et passe « Confirmé » dans la table.
+    sku = df.iloc[0]["SKU"]
+    app.session_state["seen"] = app.session_state["seen"] | {sku}
+    app.run()
+    assert len(pending(app)) == n - 1 and sku not in set(pending(app)["SKU"])
+    assert grid(app).set_index("SKU").loc[sku, "Statut"] == "● Confirmé"
+    app.button(key="confirm_pending").click().run()  # « Tout confirmer »
+    assert pending(app) is None
+    assert any("Tout est confirmé" in m.value for m in app.markdown)
     assert not download(app, "Télécharger le LT").disabled
     assert not download(app, "Télécharger tous les LT").disabled  # une boutique prête
     from app.storage import db
     from app.storage import events as store
 
     kinds = {v["kind"] for v in store.list_validations(db.connect(), "B80")}
-    assert kinds == {"confirm_block", "seen", "include"}
+    assert kinds == {"confirm_block", "seen"}
 
 
 def test_store_request_ends_after_export_with_confirmation(app: AppTest) -> None:

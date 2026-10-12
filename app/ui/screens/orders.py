@@ -17,7 +17,7 @@ import streamlit as st
 from pydantic import ValidationError
 
 from app.domain.models import PlanningParameters, Status
-from app.engines.events import export_check
+from app.engines.events import event_tags
 from app.engines.export import lt_content, lt_filename
 from app.exports.files import lt_zip
 from app.ingestion.masters import all_boutiques, build_inputs_for_boutique
@@ -28,22 +28,26 @@ from app.ui.common import (
     EVENTS,
     EXPORT,
     MODES,
+    ORDER_COLUMN_CONFIG,
     activate,
     author,
     boutique_label,
     current,
     day_data,
+    default_order,
     event_context,
     go,
+    order_frame,
     order_state,
     reset_order,
     run_date,
     ss,
+    style_order_frame,
     workspace,
 )
-from app.ui.gate import GateRow, close_requests_prompt, render_gate, requests_after_export, trace
+from app.ui.gate import close_requests_prompt, requests_after_export
 from app.ui.screens.export import save_run
-from app.ui.screens.order import FALLBACK_WEEKS_DEFAULT, render_order
+from app.ui.screens.order import FALLBACK_WEEKS_DEFAULT, render_order, set_confirmed
 
 PARAM_FIELDS = ("delivery", "cover", "coffee", "history", "mode", "weeks", "codes")
 TO_COMPUTE, COMPUTED, CONFIRMED = "à calculer", "calculé", "confirmé"
@@ -57,6 +61,13 @@ PARAM_WIDTHS = [2.1, 1.25, 1, 1, 0.85, 1.05, 0.45, 0.9]
 def _empty_params() -> dict:
     return {"delivery": None, "cover": None, "coffee": None, "history": 7, "mode": "Standard",
             "weeks": FALLBACK_WEEKS_DEFAULT, "codes": None}  # fmt: skip
+
+
+def pending_lines(base_lines, confirmed: set[str]) -> list:  # noqa: ANN001
+    """Lignes qui ne partiront pas sans confirmation : REVIEW, BLOCKED, ou flaguées par un
+    événement (lancement, demande boutique, promo…), tant qu'elles ne sont pas confirmées."""
+    return [b for b in base_lines
+            if b.sku not in confirmed and (b.status is not Status.OK or event_tags(b))]  # fmt: skip
 
 
 def add_boutique(boutique: str) -> None:
@@ -100,7 +111,7 @@ class Readiness:
     review: int = 0  # lignes REVIEW non confirmées
     blocked: int = 0  # lignes BLOCKED non confirmées
     to_treat: int = 0  # OK + REVIEW non confirmés (filtre « À traiter »)
-    events_ok: bool = True
+    pending: int = 0  # lignes qui ne partiront pas sans confirmation
     reason: str = ""
 
     @property
@@ -123,19 +134,10 @@ def readiness(boutique: str) -> Readiness:
     review = sum(b.status is Status.REVIEW for b in open_)
     blocked = sum(b.status is Status.BLOCKED for b in open_)
     to_treat = sum(b.status is not Status.BLOCKED for b in open_)
-    check = export_check(base.base_lines, overrides=overrides, seen=state["seen"],
-                         confirmed_blocks=state["confirmed_blocks"],
-                         include_confirmed=state["include_ok"])  # fmt: skip
-    events_ok = not check.blocked and not check.unvalidated and check.include_ok
-    reasons = []
-    if review or blocked:
-        reasons.append(f"{review} REVIEW et {blocked} BLOCKED à confirmer")
-    if not events_ok:
-        reasons.append("vérification des événements à terminer")
+    pending = len(pending_lines(base.base_lines, confirmed))
+    reason = f"{pending} ligne(s) à confirmer" if pending else ""
     status = COMPUTED if review or blocked else CONFIRMED
-    return Readiness(
-        boutique, status, result, review, blocked, to_treat, events_ok, " · ".join(reasons)
-    )
+    return Readiness(boutique, status, result, review, blocked, to_treat, pending, reason)
 
 
 # --- Calcul -----------------------------------------------------------------------------
@@ -304,32 +306,43 @@ def _recap(states: dict[str, Readiness]) -> None:
 # --- Export -----------------------------------------------------------------------------
 
 
-def _confirm_blocks(row: GateRow) -> None:
-    trace(row.boutique, row.delivery, "confirm_block", list(row.check.blocked))
-    ss.confirmed_blocks = ss.confirmed_blocks | set(row.check.blocked)
+PENDING_COLUMNS = ["Confirmé", "Statut", "SKU", "Description", "Qty proposée", "Raisons"]
 
 
-def _mark_seen(row: GateRow) -> None:
-    trace(row.boutique, row.delivery, "seen", list(row.check.unvalidated))
-    ss.seen = ss.seen | set(row.check.unvalidated)
-    ss.nonce += 1
+def _short_reason(line, base) -> str:  # noqa: ANN001
+    """Raison en quelques mots : les raisons du calcul, sinon le titre de l'événement."""
+    if line.reasons:
+        return " | ".join(line.reasons)
+    return ", ".join(dict.fromkeys(t["title"] for t in event_tags(base)))
 
 
-def _set_include(row: GateRow, value: bool) -> None:
-    trace(row.boutique, row.delivery, "include", [s for s, _ in row.check.to_include],
-          "coché" if value else "décoché")  # fmt: skip
-    ss.include_ok = value
-
-
-def gate_for_order(result) -> bool:  # noqa: ANN001
-    """Les 3 points du garde-fou pour la commande affichée. True = export permis."""
-    check = export_check(result.base_lines, overrides=ss.overrides, seen=ss.seen,
-                         confirmed_blocks=ss.confirmed_blocks, include_confirmed=ss.include_ok)  # fmt: skip
-    if not check.blocked and not check.unvalidated and not check.to_include:
-        return True
-    row = GateRow(result.params.boutique, result.params.delivery_date, check)
-    return render_gate([row], key="order_gate", confirm_blocks=_confirm_blocks,
-                       mark_seen=_mark_seen, set_include=_set_include)  # fmt: skip
+def _pending_list(res, mapping: dict[str, str]) -> None:  # noqa: ANN001
+    """« X lignes ne partiront pas si tu ne les confirmes pas » : même présentation que la table,
+    filtrée, une case Confirmé par ligne et « Tout confirmer ». Vide → « Tout est confirmé »."""
+    base = {x.sku: x for x in res.base_lines}
+    pending = pending_lines(res.base_lines, ss.seen | ss.confirmed_blocks)
+    if not pending:
+        st.markdown("#### :green[:material/check_circle:] Tout est confirmé")
+        return
+    by_sku = {x.sku: x for x in res.lines}
+    shown = default_order([by_sku[b.sku] for b in pending], base)
+    c1, c2 = st.columns([4, 1.2], vertical_alignment="center")
+    c1.markdown(f"#### {len(pending)} ligne(s) ne partiront pas si tu ne les confirmes pas")
+    if c2.button(
+        "Tout confirmer", key="confirm_pending", icon=":material/done_all:", width="stretch"
+    ):
+        set_confirmed([x.sku for x in shown], True)
+        st.rerun()
+    df = order_frame(shown, base, mapping)[PENDING_COLUMNS].reset_index(drop=True)
+    df["Raisons"] = [_short_reason(x, base[x.sku]) for x in shown]
+    edited = st.data_editor(style_order_frame(df), key=f"pending_{res.params.boutique}_{ss.nonce}",
+                            hide_index=True, width="stretch", height=min(400, 40 + 35 * len(df)),
+                            column_config={k: ORDER_COLUMN_CONFIG[k] for k in PENDING_COLUMNS},
+                            disabled=[c for c in PENDING_COLUMNS if c != "Confirmé"])  # fmt: skip
+    confirm = [r["SKU"] for r in edited.to_dict("records") if bool(r["Confirmé"])]
+    if confirm:
+        set_confirmed(confirm, True)
+        st.rerun()
 
 
 def _on_lt(result, filename: str) -> None:  # noqa: ANN001
@@ -364,25 +377,19 @@ def _on_zip(boutiques: list[str], when: datetime) -> None:
         conn.close()
 
 
-def _export(res, states: dict[str, Readiness]) -> None:  # noqa: ANN001
-    st.markdown("#### Fichiers LT")
+def _export(res, states: dict[str, Readiness], mapping: dict[str, str]) -> None:  # noqa: ANN001
+    _pending_list(res, mapping)
     if not author():
         st.error("Choisis ton prénom (Planner, barre de gauche) pour télécharger.")
     now = datetime.now()
     mine = states[res.params.boutique]
-    if mine.review or mine.blocked:
-        st.error(f"{mine.review + mine.blocked} ligne(s) à confirmer avant le fichier LT de "
-                 f"{res.params.boutique} ({mine.review} REVIEW, {mine.blocked} BLOCKED). Coche "
-                 "« Confirmé » dans la table, ligne par ligne ou avec « Confirmer les lignes "
-                 "affichées ».")  # fmt: skip
-    gate_ok = gate_for_order(res)
     name = lt_filename(res.params.boutique, now)
     ready = [b for b, r in states.items() if r.ready]
     waiting = {b: r.reason for b, r in states.items() if not r.ready}
     c1, c2, c3 = st.columns([1.6, 1.8, 1.3])
     c1.download_button(f"Télécharger le LT de {res.params.boutique}", data=lt_content(res.lines),
                        file_name=name, mime="text/csv", type="primary", key="dl_lt",
-                       disabled=not author() or not gate_ok or bool(mine.review or mine.blocked),
+                       disabled=not author() or mine.pending > 0,
                        on_click=_on_lt, args=(res, name), width="stretch")  # fmt: skip
     zip_name, payload = lt_zip([r.result for r in states.values() if r.ready and r.result], now)
     c2.download_button(f"Télécharger tous les LT (zip, {len(states)} boutique(s))", data=payload,
@@ -433,7 +440,7 @@ def render() -> None:
         return
     st.divider()
     render_order(res, data)
-    _export(res, states)
+    _export(res, states, data.categories)
     st.button(
         "Événements SKU", on_click=go, args=(EVENTS,), key="to_events", icon=":material/event:"
     )
