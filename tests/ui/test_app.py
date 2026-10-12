@@ -433,3 +433,19 @@ def test_create_a_target_stock_event(app: AppTest) -> None:
     # Sans cible ni min / max : la raison est affichée et l'enregistrement reste fermé.
     assert by_suffix(app.button, "_save").disabled
     assert any("Cible vide" in e.value for e in app.error)
+
+
+def test_expected_follows_the_final_quantity(app: AppTest) -> None:
+    """D-044 : la colonne Expected = Expected du jour + Qty finale, et suit chaque saisie."""
+    app.selectbox(key="author").set_value("Camille").run()
+    compute_b80(app)
+    line = next(x for x in app.session_state["base"].lines if x.sku == "7005.70")
+    today = line.explanation["inputs"]["expected_total"]
+    row = grid(app).set_index("SKU").loc["7005.70"]
+    assert row["Expected"] == today + 3120
+    app.session_state["why_sku"] = "7005.70"
+    app.run()
+    app.number_input(key="dlg_qty_7005.70").set_value(3600).run()
+    app.button(key="dlg_save").click().run()
+    assert grid(app).set_index("SKU").loc["7005.70", "Expected"] == today + 3600
+    assert any("Expected après commande" in m.value for m in app.markdown)

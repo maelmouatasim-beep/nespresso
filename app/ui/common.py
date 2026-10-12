@@ -369,7 +369,9 @@ def order_frame(
                 "Description": x.description or "",
                 "Catégorie": category_of_line(x, mapping),
                 "Événement": event_cell(x),
-                "Expected": num(inp["expected_total"]),
+                # D-044 : Expected affiché = stock attendu une fois la commande livrée
+                # (Expected de la Stock Situation + Qty finale) ; il suit chaque saisie.
+                "Expected": num(inp["expected_total"] + x.qty),
                 "Ventes": num(sales),
                 "Couv. actuelle": num(_round1(e["current_cover_days"])),
                 "Qty proposée": b.qty,
@@ -409,7 +411,9 @@ ORDER_COLUMN_CONFIG = {
     "Événement": st.column_config.TextColumn(
         width=180, help="● événement d'équipe · ○ événement personnel"
     ),
-    "Expected": st.column_config.NumberColumn(width=80, **_INT),
+    "Expected": st.column_config.NumberColumn(
+        width=80, help="Stock attendu après la commande : Expected du jour + Qty finale", **_INT
+    ),
     "Ventes": st.column_config.NumberColumn(width=70, **_INT),
     "Couv. actuelle": st.column_config.NumberColumn("Couv. act.", width=75, format="%.1f"),
     "Qty proposée": st.column_config.NumberColumn("Proposée", width=80, **_INT),

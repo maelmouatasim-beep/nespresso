@@ -295,6 +295,8 @@ def _why_panel(res, sku: str, mapping: dict[str, str]) -> None:  # noqa: ANN001
                f"{SOURCE_LABEL[line.source.value]} · multiple {fmt_int(e['multiple'])}")  # fmt: skip
     st.markdown("\n".join(f"{i}. {step}" for i, step in enumerate(explain_steps(line), start=1)))
     dc = inp["dc_available"]
+    st.markdown(f"Expected après commande : **{fmt_int(inp['expected_total'] + line.qty)}** "
+                f"(Expected du jour {fmt_int(inp['expected_total'])} + Qty finale {fmt_int(line.qty)})")  # fmt: skip
     st.markdown(f"Stock DC : **{fmt_int(dc) if dc is not None else 'absent'}** · "
                 f"stock projeté à la livraison : **{fmt_int(e['projected_stock_at_delivery'])}**")  # fmt: skip
     if line.reasons:

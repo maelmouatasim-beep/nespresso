@@ -821,7 +821,7 @@ function matches(x) {
 // Colonnes : [titre, largeur, numérique, valeur de tri]
 const COLS = [
   ["Confirmé", 76, 0, x => isConf(x.m.sku) ? "1" : "0"], ["Statut", 150, 0, x => statusKey(x)], ["SKU", 110, 0, x => x.m.sku], ["Description", 210, 0, x => x.m.desc],
-  ["Catégorie", 130, 0, x => categoryOf(x.m)], ["Événement", 170, 0, x => evCell(x)], ["Expected", 86, 1, x => x.m.exp], ["Ventes", 68, 1, x => x.m.sales],
+  ["Catégorie", 130, 0, x => categoryOf(x.m)], ["Événement", 170, 0, x => evCell(x)], ["Expected", 86, 1, x => x.m.exp + x.qty], ["Ventes", 68, 1, x => x.m.sales],
   ["Couv. act.", 72, 1, x => x.m.cur], ["Proposée", 78, 1, (x, b) => b[x.m.sku]], ["Qty finale", 92, 1, x => x.qty],
   ["Couv. après", 80, 1, x => postCover(x.m, x.qty)], ["Multiple", 68, 1, x => x.multiple], ["Stock DC", 80, 1, x => x.m.dc],
   ["Source", 92, 0, x => SRC[x.source]], ["Raisons", 300, 0, x => x.reasons.join(" | ")]];
@@ -878,7 +878,7 @@ function orderTable(rows, baseQty, keep) {
     const reasons = x.reasons.length || !keep ? x.reasons.join(" | ") : [...new Set(x.ev.map(e => e.title))].join(", ");
     const evText = evCell(x);
     tr.append(...pick([el("td", "conf", cb), el("td", "", stCell), el("td", "mono", sku), el("td", { title: m.desc }, m.desc || "—"), el("td", "", categoryOf(m)), el("td", { class: "evcell", title: evText }, evText),
-      el("td", "n", fmt(m.exp)), el("td", "n", fmt(m.sales)), el("td", "n", fmt1(m.cur)), el("td", "n", fmt(baseQty[sku])),
+      el("td", { class: "n", title: "Stock attendu après la commande : " + fmt(m.exp) + " + " + fmt(x.qty) }, fmt(m.exp + x.qty)), el("td", "n", fmt(m.sales)), el("td", "n", fmt1(m.cur)), el("td", "n", fmt(baseQty[sku])),
       el("td", "n q" + (mod ? " modq" : ""), qi), el("td", "n", fmt1(postCover(m, x.qty))), el("td", "n", fmt(x.multiple)),
       el("td", "n", m.dc === null ? "—" : fmt(m.dc)), el("td", "", SRC[x.source]), el("td", { title: reasons, class: "small" }, reasons || "")]));
     body.append(tr);
@@ -1049,6 +1049,7 @@ function renderWhy() {
     el("div", "", isConf(m.sku) ? el("span", "st O", "Confirmé") : el("span", "st " + x.s, STATUS[x.s]), isMod(x) ? el("span", "modmark", "● modifié") : null, " ", el("span", "muted small", categoryOf(m) + " · source : " + SRC[x.source] + " · multiple " + fmt(x.multiple) + " (" + (MSRC[x.msrc] || x.msrc) + ")")),
     el("h3", "", "Pourquoi cette quantité ?"),
     el("ol", "steps", steps(x).map(([a, v]) => el("li", "", a, v !== undefined ? el("b", "", v) : null)), el("li", "tot", "Quantité finale : " + fmt(x.qty))),
+    el("p", "small", "Expected après commande : ", el("b", "", fmt(m.exp + x.qty)), " (Expected du jour " + fmt(m.exp) + " + Qty finale " + fmt(x.qty) + ")"),
     el("p", "small", "Stock DC " + V().dc + " : ", el("b", "", m.dc === null ? "absent" : fmt(m.dc)), " · stock projeté le jour de la livraison (" + days + " j) : ", el("b", "", fmt(proj)),
       x.qty > 0 && m.dc !== null && m.dc < x.qty ? el("span", "", " · ", el("span", "st R", "DC insuffisant")) : null),
     b.ev.length ? el("p", "small", el("b", "", "Événement(s) : "), evCell(b)) : null,
