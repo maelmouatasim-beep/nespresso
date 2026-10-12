@@ -1167,8 +1167,8 @@ const STATUS_TXT = { draft: "Brouillon", active: "Actif", done: "Terminé", canc
 function canEdit(e) { return e.scope === "team" || DATA.others_editable || (!!st.author && e.planner.toLowerCase() === st.author.toLowerCase()); }
 function newEvent(request) {
   const day = RUN();
-  return request ? { scope: "personal", type: "store_request", title: "Demande B80", description: "", skus: [{ sku: "" }], boutiques: ["B80"], dcs: [], start: day, end: null, lead_days: 0, effect: "add_qty", quantities: [{ boutique: "*", sku: "*", qty: 0 }], planner: st.author, status: "active", requested_by: "", requested_on: day, until_next_order: true }
-    : { scope: st.evTab === "mine" ? "personal" : "team", type: "promotion", title: "", description: "", skus: [{ sku: "" }], boutiques: [], dcs: [], start: day, end: addDays(day, 7), lead_days: 0, effect: "flag", quantities: [], planner: st.author, status: "active", requested_by: "", requested_on: null, until_next_order: false };
+  return request ? { scope: "personal", type: "store_request", title: "Demande B80", description: "", skus: [], boutiques: ["B80"], dcs: [], start: day, end: null, lead_days: 0, effect: "add_qty", quantities: [{ boutique: "*", sku: "*", qty: 0 }], planner: st.author, status: "active", requested_by: "", requested_on: day, until_next_order: true }
+    : { scope: st.evTab === "mine" ? "personal" : "team", type: "promotion", title: "", description: "", skus: [], boutiques: [], dcs: [], start: day, end: addDays(day, 7), lead_days: 0, effect: "flag", quantities: [], planner: st.author, status: "active", requested_by: "", requested_on: null, until_next_order: false };
 }
 function saveEvents(list, why) {
   EDIT.events = list;
@@ -1200,6 +1200,47 @@ function setEventStatus(e, status) {
   saveEvents(all, "Événement " + STATUS_TXT[status].toLowerCase()); render();
 }
 const splitList = v => v.split(/[;,\s]+/).map(x => x.trim()).filter(Boolean);
+// SKU d'un événement : recherche (SKU ou description), collage d'une liste, une puce par SKU.
+// La liste se met à jour à chaque ajout ; doublons retirés (comparaison comme Excel).
+function skuCatalog() {
+  if (!skuCatalog.c) skuCatalog.c = new Map(DATA.lines.map(m => [m.sku, m.desc]));
+  return skuCatalog.c;
+}
+const skuKey = s => { const t = String(s).trim(), n = Number(t); return t !== "" && /^[0-9.]+$/.test(t) && isFinite(n) ? "n:" + n : "t:" + t; };
+function skuPicker(d) {
+  const cat = skuCatalog();
+  d.skus = d.skus.filter(x => x.sku);
+  const focusAdd = () => setTimeout(() => { const i = document.getElementById("ev_f_sku_add"); if (i) i.focus(); }, 0);
+  const add = text => {
+    const have = new Set(d.skus.map(x => skuKey(x.sku)));
+    let added = 0, dup = 0;
+    for (const part of String(text).split(/\n|[;,]|\t/).flatMap(x => x.includes(" · ") ? [x.split(" · ")[0]] : splitList(x))) {
+      const sku = part.trim(), k = skuKey(sku);
+      if (!sku) continue;
+      if (have.has(k)) { dup++; continue; }
+      have.add(k); d.skus.push({ sku }); added++;
+    }
+    st.skuNote = (added ? added + " SKU ajouté(s)" : "Aucun nouveau SKU") + (dup ? " · " + dup + " doublon(s) retiré(s)" : "");
+    render(); focusAdd();
+  };
+  const input = el("input", { type: "text", id: "ev_f_sku_add", list: "ev_sku_list", class: "mono", style: "flex:1;min-width:220px", placeholder: "Rechercher un SKU ou une description, ou coller une liste" });
+  input.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); add(input.value); } });
+  input.addEventListener("input", e => { if (e.inputType === "insertReplacementText" || input.value.includes(" · ")) add(input.value); });
+  input.addEventListener("paste", e => { const t = (e.clipboardData || window.clipboardData).getData("text"); if (/[\n,;\t]/.test(t.trim())) { e.preventDefault(); add(t); } });
+  const known = d.skus.filter(x => cat.has(x.sku)).length, unknown = d.skus.length - known;
+  const note = st.skuNote; st.skuNote = "";
+  return el("div", "f",
+    el("span", "", "SKU concernés (" + d.skus.length + ")"),
+    el("div", { id: "ev_f_sku_chips", style: "display:flex;flex-wrap:wrap;gap:6px;margin:4px 0" },
+      d.skus.length ? d.skus.map((x, i) => el("span", { class: "chip", title: cat.get(x.sku) || "SKU inconnu dans la commande B80 de la démo", style: "cursor:default" + (cat.has(x.sku) ? "" : ";border-color:#94600F;color:#94600F") },
+        el("span", "mono", x.sku), cat.get(x.sku) ? el("span", "small muted", " " + cat.get(x.sku).slice(0, 26)) : el("span", "small", " ⚠ inconnu"),
+        el("button", { class: "btn link", "aria-label": "Retirer " + x.sku, style: "padding:0 0 0 6px", onclick: () => { d.skus.splice(i, 1); render(); focusAdd(); } }, "×")))
+        : el("span", "small muted", "Aucun SKU : ajoutes-en un ou plusieurs.")),
+    el("div", "row", { style: "gap:6px" }, input, el("button", { class: "btn", id: "ev_f_sku_btn", onclick: () => add(input.value) }, "Ajouter")),
+    el("datalist", { id: "ev_sku_list" }, [...cat].filter(([k]) => !d.skus.some(x => x.sku === k)).map(([k, v]) => el("option", { value: k + " · " + v }))),
+    el("span", { class: "small muted", style: "font-weight:400" },
+      (d.skus.length ? "✓ " + known + " reconnu(s)" + (unknown ? " · ⚠ " + unknown + " inconnu(s)" : "") + " · " : "") + (note ? note + " · " : "") + "un événement peut porter plusieurs SKU, il s'applique à chacun"));
+}
 function eventForm(d) {
   const box = el("div");
   const f = (label, input, help) => el("label", "f", label, input, help ? el("span", { class: "small muted", style: "font-weight:400" }, help) : null);
@@ -1232,8 +1273,8 @@ function eventForm(d) {
     el("div", "two", f("Portée", select(d.scope, [["team", "Équipe"], ["personal", "Personnel"]], v => { d.scope = v; if (v === "personal" && !d.planner) d.planner = st.author; render(); })),
       f("Type", select(d.type, types.map(t => [t, TYPE_LABELS[t]]), v => { d.type = v; d.until_next_order = v === "store_request" && d.until_next_order; render(); }))),
     d.scope === "personal" ? f("Planner responsable", select(d.planner || "", [["", "Choisir"], ...[...new Set([...planners(), st.author].filter(Boolean))].map(n => [n, n])], v => { d.planner = v; })) : null,
-    f("SKU", text(skuText, v => { d.skus = splitList(v).map(x => { const [a, b] = x.split(">"); return b ? { sku: a, new_sku: b } : { sku: a }; }); }, { id: "ev_f_skus", class: "mono" }),
-      conv ? "Ancien>nouveau, séparés par des virgules (ex. 7882.70>7965.70)" : "Séparés par des virgules"),
+    conv ? f("SKU", text(skuText, v => { d.skus = splitList(v).map(x => { const [a, b] = x.split(">"); return b ? { sku: a, new_sku: b } : { sku: a }; }); }, { id: "ev_f_skus", class: "mono" }),
+      "Ancien>nouveau, séparés par des virgules (ex. 7882.70>7965.70)") : skuPicker(d),
     el("div", "two", f("Boutiques", text(d.boutiques.join(", "), v => { d.boutiques = splitList(v).map(x => x.toUpperCase()); }), "Vide = toutes"),
       f("DC", text(d.dcs.join(", "), v => { d.dcs = splitList(v).map(x => x.toUpperCase()); }), "MT1, TO1, CY1, VA1")),
     el("div", "two", f("Début", date(d.start, v => { d.start = v; })), f("Fin", date(d.end, v => { d.end = v; }), "Vide : arrêt, interdiction, allocation ou stock cible jusqu'à nouvel ordre")),
@@ -1315,8 +1356,8 @@ function renderEvents() {
     el("span", "", el("b", "", String(active)), " actif(s), ", el("b", "", String(soon)), " à venir cette semaine · au " + fdate(day)))];
   out.push(el("p", "small muted", "Promotions et allocations, lancements, stocks cibles, arrêts, interdictions, conversions, urgences et demandes boutique : saisis une fois, ils s'appliquent à toutes les commandes tant qu'ils sont actifs. Le planner valide."));
   out.push(el("div", "msg info", EDIT.events ? el("span", "", "Tes événements sont gardés dans ce navigateur ; la commande B80 est recalculée avec eux. ",
-    el("button", { class: "btn link", id: "ev_reset", onclick: () => { if (!confirm("Revenir aux 4 événements fictifs de la démo ? Tes événements seront effacés de ce navigateur.")) return; EDIT.events = null; try { localStorage.removeItem("spc2_events"); } catch (e) { /* stockage bloqué */ } invalidateOrder("Événements de démo rétablis"); st.evSel = null; st.evEdit = null; render(); } }, "Revenir aux événements de démo"))
-    : "Démo : 4 événements fictifs sur B80 pour commencer. Crée, modifie, duplique, termine ou annule : chaque événement est vérifié par le moteur et la commande B80 est recalculée avec lui."));
+    el("button", { class: "btn link", id: "ev_reset", onclick: () => { if (!confirm("Revenir aux événements fictifs de la démo ? Tes événements seront effacés de ce navigateur.")) return; EDIT.events = null; try { localStorage.removeItem("spc2_events"); } catch (e) { /* stockage bloqué */ } invalidateOrder("Événements de démo rétablis"); st.evSel = null; st.evEdit = null; render(); } }, "Revenir aux événements de démo"))
+    : "Démo : 7 événements fictifs sur B80 pour commencer. Crée, modifie, duplique, termine ou annule : chaque événement est vérifié par le moteur et la commande B80 est recalculée avec lui."));
   out.push(el("div", "row", { style: "margin:10px 0" },
     el("div", "seg", [["team", "Équipe", team.filter(live).length], ["mine", "Mes événements", mineN]].map(([k, t, n]) =>
       el("button", { class: st.evTab === k ? "on" : "", onclick: () => { st.evTab = k; st.evSel = null; st.evPlanner = null; render(); } }, t, el("b", "", String(n))))),

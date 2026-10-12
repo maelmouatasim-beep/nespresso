@@ -327,3 +327,10 @@ Format : contexte → décision → conséquence.
 - Demande du planner : quand il change une quantité, la colonne Expected doit monter ou baisser avec ce qui partira vraiment. Pas de colonne en plus : la colonne « Expected » de la table affiche désormais Expected du jour (Stock Situation) + Qty finale, et se recalcule à chaque saisie (modification immédiate, D-038).
 - Le calcul ne change pas : la formule utilise toujours l'Expected du jour, cité tel quel dans le panneau « Pourquoi » (« Stock attendu en boutique (Expected) »), qui affiche aussi « Expected après commande : X (Expected du jour + Qty finale) ». « Couv. après » reste cohérente avec la même somme. Parité 416/416 inchangée.
 - Même règle dans la démo web (le survol de la cellule montre la somme).
+
+## D-045 — SKU d'un événement : sélection multiple avec recherche (2026-10-12)
+
+- Signalé par le planner : en ajoutant un SKU à un événement, la liste ne se mettait pas à jour, et le choix de plusieurs SKU pour une même promotion n'était pas visible. Cause : dans l'outil installé, la zone de texte n'était relue qu'en quittant le champ (ou Ctrl+Entrée) ; dans la démo web, aucun aperçu des SKU n'était affiché.
+- Le formulaire montre maintenant une **sélection multiple avec recherche** (SKU ou description) : chaque SKU choisi apparaît tout de suite dans la liste, avec sa description et son état (reconnu / inconnu). On peut aussi **coller une liste** (colonne Excel) : les SKU s'ajoutent à la sélection, doublons retirés (comparaison comme Excel, 7005.7 = 7005.70) et comptés. Un SKU inconnu reste possible, signalé.
+- Un événement porte autant de SKU que nécessaire et s'applique à chacun (déjà vrai dans le moteur et la base : aucun changement de moteur ni de base). Les conversions gardent leur grille Ancien / Nouveau SKU.
+- Même fonctionnement dans la démo web (puces avec ×, recherche dans les SKU de la commande B80, collage). Parité 416/416 inchangée.

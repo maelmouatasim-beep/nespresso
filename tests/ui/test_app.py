@@ -449,3 +449,24 @@ def test_expected_follows_the_final_quantity(app: AppTest) -> None:
     app.button(key="dlg_save").click().run()
     assert grid(app).set_index("SKU").loc["7005.70", "Expected"] == today + 3600
     assert any("Expected après commande" in m.value for m in app.markdown)
+
+
+def test_several_skus_picked_in_one_promotion(app: AppTest) -> None:
+    """Sélection multiple avec recherche : la liste se met à jour tout de suite."""
+    app.selectbox(key="author").set_value("Léa").run()
+    goto(app, EVENTS)
+    app.button(key="ev_new").click().run()
+    by_suffix(app.text_input, "_title").input("Promo plusieurs SKU").run()
+    by_suffix(app.multiselect, "_skus_pick").set_value(["7005.70", "7072.70"]).run()
+    table = next(d for d in app.dataframe if d.key and "_skutab_" in d.key).value
+    assert list(table["SKU"]) == ["7005.70", "7072.70"]
+    by_suffix(app.text_area, "_skus").input("7087.70\n7005.70").run()  # collage : doublon retiré
+    assert by_suffix(app.multiselect, "_skus_pick").value == ["7005.70", "7072.70", "7087.70"]
+    by_suffix(app.date_input, "_end_promotion").set_value(date(2026, 10, 20)).run()
+    by_suffix(app.button, "_save").click().run()
+    assert not app.exception, app.exception
+    from app.storage import db
+    from app.storage import events as store
+
+    saved = {e.title: e for e in store.list_events(db.connect())}["Promo plusieurs SKU"]
+    assert saved.sku_codes() == ["7005.70", "7072.70", "7087.70"]

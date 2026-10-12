@@ -288,8 +288,24 @@ def _catalog() -> dict[str, str]:
     return build_catalog(products, stock)
 
 
+def _paste_skus(pick_key: str, paste_key: str, catalog: dict[str, str]) -> None:
+    """Ajoute les SKU collés à la sélection (texte gardé tel quel, doublons retirés)."""
+    pasted = split_skus(ss.get(paste_key, ""))
+    if not pasted:
+        return
+    current = list(ss.get(pick_key, []))
+    checks = check_skus([*current, *pasted], catalog)
+    kept = [c.sku for c in checks if not c.duplicate]
+    dups = sum(c.duplicate for c in checks[len(current) :])
+    ss[pick_key] = kept
+    ss[paste_key] = ""
+    added = len(kept) - len(current)
+    ss[_k("skus_note")] = f"{added} SKU ajouté(s)" + (f" · :red[{dups} doublon(s) retiré(s)]"
+                                                       if dups else "")  # fmt: skip
+
+
 def _sku_block(proto: SkuEvent | None, etype: EventType, catalog: dict[str, str]) -> list[EventSku]:
-    """Zone de collage + validation immédiate (reconnus / inconnus / doublons)."""
+    """Sélection multiple avec recherche (+ collage d'une liste) et validation immédiate."""
     if etype is EventType.CONVERSION:
         rows = [{"Ancien SKU": s.sku, "Nouveau SKU": s.new_sku or ""}
                 for s in (proto.skus if proto else ())] or [{"Ancien SKU": "", "Nouveau SKU": ""}]  # fmt: skip
@@ -305,22 +321,34 @@ def _sku_block(proto: SkuEvent | None, etype: EventType, catalog: dict[str, str]
             if old or new:
                 out.append(EventSku(sku=old or "?", new_sku=new or None))
         return out
-    text = st.text_area("SKU concernés *", value=", ".join(proto.sku_codes()) if proto else "",
-                        key=_k("skus"), height=78,
-                        placeholder="Colle une colonne Excel : virgule, point-virgule, espace ou "
-                                    "retour à la ligne")  # fmt: skip
-    skus = split_skus(text)
+    pick_key, paste_key = _k("skus_pick"), _k("skus")
+    if pick_key not in ss:
+        ss[pick_key] = proto.sku_codes() if proto else []
+    chosen: list[str] = list(ss[pick_key])
+    options = list(dict.fromkeys([*chosen, *sorted(catalog)]))
+    skus = st.multiselect(
+        "SKU concernés *", options, key=pick_key, accept_new_options=True,
+        placeholder="Rechercher un SKU ou une description (plusieurs possibles)",
+        format_func=lambda x: f"{x} · {catalog[x]}" if catalog.get(x) else x,
+        help="Un événement peut porter autant de SKU que nécessaire : il s'applique à chacun.",
+    )  # fmt: skip
+    st.text_area("Ou colle une liste (colonne Excel)", key=paste_key, height=68,
+                 on_change=_paste_skus, args=(pick_key, paste_key, catalog),
+                 placeholder="Virgule, point-virgule, espace ou retour à la ligne : les SKU "
+                             "s'ajoutent à la liste au-dessus")  # fmt: skip
+    note = ss.pop(_k("skus_note"), "")
     if not skus:
+        if note:
+            st.caption(note)
         return []
     checks = check_skus(skus, catalog)
-    known = sum(c.known and not c.duplicate for c in checks)
+    known = sum(c.known for c in checks)
     unknown = [c.sku for c in checks if not c.known]
-    dups = [c.sku for c in checks if c.duplicate]
     parts = [f":green[✓ {known} reconnu(s)]"]
     if unknown:
         parts.append(f":orange[⚠ {len(unknown)} inconnu(s)]")
-    if dups:
-        parts.append(f":red[{len(dups)} doublon(s) retiré(s)]")
+    if note:
+        parts.append(note)
     st.markdown(" · ".join(parts))
     if not catalog:
         st.caption("Dépose les exports du jour pour vérifier les SKU.")
@@ -329,7 +357,7 @@ def _sku_block(proto: SkuEvent | None, etype: EventType, catalog: dict[str, str]
              else ("reconnu" if c.known else "inconnu"), "Multiple": multiples.get(c.sku)}
             for c in checks]  # fmt: skip
     table = st.data_editor(
-        pd.DataFrame(rows).astype({"Multiple": "Float64"}), key=_k(f"skutab_{hash(text)}"),
+        pd.DataFrame(rows).astype({"Multiple": "Float64"}), key=_k(f"skutab_{hash(tuple(skus))}"),
         hide_index=True, width="stretch", disabled=["SKU", "Description", "État"],
         height=min(36 * (len(rows) + 1) + 3, 220),
         column_config={
