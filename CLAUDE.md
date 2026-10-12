@@ -125,6 +125,14 @@ Décisions du planner (étape 2, 07-oct-2026) :
 
 ## Façon de travailler
 
+Règles de travail (décision du propriétaire, 12-oct-2026) :
+
+- Le propriétaire est seul sur ce dépôt : **travailler directement sur `main`**. Pas de branche ni de PR, sauf demande explicite.
+- **Avant chaque push** : `ruff check .`, `ruff format --check .`, `mypy` et `pytest` doivent être verts, avec la parité Excel à 416/416. Si un test casse, corriger avant de pousser.
+- **Après chaque changement** : republier la démo web au même lien (`python tools/build_demo_app.py`, puis publication de `preview/outil_B80.html`), et résumer en 5 points maximum ce qui a changé et ce qu'il faut tester.
+- Pas de surveillance des PR ni de vérification programmée, sauf le contrôle hebdomadaire de parité du lundi.
+- **Changement risqué** (réécriture du moteur, migration de la base) : prévenir le propriétaire avant, et proposer une branche pour cette fois-là.
+
 - Avant un changement important, résumer en 3 à 5 puces ce qui a été compris et ce qui va être fait.
 - Petits commits, chacun avec ses tests. Toujours lancer `pytest` avant de dire « terminé ».
 - Toute hypothèse métier non confirmée va dans `docs/open_questions.md`. Ne pas la coder en dur sans drapeau.
