@@ -28,6 +28,11 @@ sys.path.insert(0, str(ROOT))
 # L'espace de démo est recréé dans un dossier temporaire (rien n'est écrit dans data/).
 os.environ.setdefault("COPILOT_DATA_DIR", tempfile.mkdtemp(prefix="copilot_demo_"))
 
+from app.domain.events import (  # noqa: E402
+    ALLOWED_EFFECTS,
+    PERSONAL_EDITABLE_BY_OTHERS,
+    PERSONAL_ONLY,
+)
 from app.domain.models import (  # noqa: E402
     OVERRIDE_CATEGORY_LABELS,
     Allocation,
@@ -41,7 +46,9 @@ from app.engines.schedule import boutiques_ordering_on  # noqa: E402
 from app.ingestion import referential_checks as checks  # noqa: E402
 from app.ingestion.depot import freshness  # noqa: E402
 from app.ingestion.events import DEMO_PLANNERS, example_events  # noqa: E402
+from app.ingestion.fixtures_loader import read_csv_records  # noqa: E402
 from app.ingestion.masters import all_boutiques, build_inputs_for_boutique  # noqa: E402
+from app.ingestion.referential_edit import DEFAULT_COLUMNS  # noqa: E402
 from app.services.planning import (  # noqa: E402
     RULE_VERSIONS,
     BusinessInputs,
@@ -129,6 +136,43 @@ def _preview_rows(key: str) -> tuple[int, list[dict]]:
     return len(df), df.head(PREVIEW_ROWS).to_dict("records")
 
 
+# Lignes des exemples métier dans les colonnes des modèles (lues par les mêmes lecteurs).
+EXAMPLE_TABLE_ROWS = {
+    "allocations": [["B80", "7005.70", "4800", "0", "75/25", "1", "Exemple : promo AOS 14-21 oct"]],
+    "launches": [["B80", "7200.70", "2026-10-14", "3600", "Exemple : lancement Festive"]],
+    "targets": [["B80", "142172", "20", "30", "60"]],
+    "rules": [],
+}
+
+
+def write_tables(exclusions) -> None:  # noqa: ANN001
+    """Tables complètes des référentiels (modifiables dans la page) et exports de test.
+
+    Chargées seulement quand le planner ouvre une table ou modifie quelque chose.
+    """
+    tables: dict[str, dict] = {}
+    for key, name in FIXTURE_FILES.items():
+        columns, records = read_csv_records(FIXTURES / name)
+        tables[key] = {"columns": columns, "rows": [[r[c] for c in columns] for r in records]}
+    for key, rows in EXAMPLE_TABLE_ROWS.items():
+        tables[key] = {"columns": DEFAULT_COLUMNS[key], "rows": rows}
+    tables["exclusions"] = {
+        "columns": ["sku", "boutiques", "reason", "author", "updated_on"],
+        "rows": [[e.sku, ";".join(e.boutiques) or "ALL", e.reason, e.author,
+                  e.updated_on.isoformat()] for e in exclusions],
+    }  # fmt: skip
+    (ENGINE_DIR / "tables.json").write_text(
+        json.dumps(tables, ensure_ascii=False, separators=(",", ":")), encoding="utf-8"
+    )
+    exports = {
+        name: (FIXTURES / name).read_text(encoding="utf-8")
+        for name in ("stock_situation_B80_CY1.csv", "stock_movements_B80.csv")
+    }
+    (ENGINE_DIR / "demo_exports.json").write_text(
+        json.dumps(exports, ensure_ascii=False), encoding="utf-8"
+    )
+
+
 def write_engine(masters, exclusions) -> None:  # noqa: ANN001
     """Code Python du moteur + référentiels de test, pour le calcul dans le navigateur."""
     ENGINE_DIR.mkdir(parents=True, exist_ok=True)
@@ -166,6 +210,7 @@ def build() -> Path:  # noqa: PLR0915 - un seul script linéaire, plus simple à
         portfolio=masters.portfolio.get(BOUTIQUE, {}), exclusions=data.exclusions,
     )  # fmt: skip
     write_engine(masters, data.exclusions)
+    write_tables(data.exclusions)
     golden = pd.read_csv(FIXTURES / "golden_stock_cover_final_B80.csv", dtype=str)
     excel_qty = dict(zip(golden["sku"], golden["excel_suggested_qty"].astype(int), strict=True))
     excel_formula = dict(zip(golden["sku"], golden["excel_cell_is_formula"] == "True", strict=True))
@@ -274,6 +319,9 @@ def build() -> Path:  # noqa: PLR0915 - un seul script linéaire, plus simple à
         "category_names": list(CATEGORIES),
         "events": [e.model_dump(mode="json") for e in DEMO_EVENTS],
         "planners": list(DEMO_PLANNERS),
+        "allowed_effects": {t.value: [e.value for e in es] for t, es in ALLOWED_EFFECTS.items()},
+        "personal_only": sorted(t.value for t in PERSONAL_ONLY),
+        "others_editable": PERSONAL_EDITABLE_BY_OTHERS,
         "demo_delivery": DEMO_DELIVERY.isoformat(),
         "text": text.items,
         "lines": meta,

@@ -87,6 +87,9 @@ ALLOWED_EFFECTS: dict[EventType, tuple[EventEffect, ...]] = {
     EventType.WATCH: (EventEffect.FLAG,),
 }
 PERSONAL_ONLY = frozenset({EventType.STORE_REQUEST, EventType.WATCH})
+# Un planner peut-il modifier l'événement Personnel d'un collègue ? (D-029 : non, seulement
+# « Reprendre ».) Voir docs/decision_log.md.
+PERSONAL_EDITABLE_BY_OTHERS = False
 OPEN_END_TYPES = frozenset({EventType.STOP, EventType.BAN})  # fin vide = jusqu'à nouvel ordre
 # Types à confirmer explicitement avant l'export (« à inclure »).
 INCLUDE_TYPES = frozenset({EventType.LAUNCH, EventType.URGENT, EventType.STORE_REQUEST})

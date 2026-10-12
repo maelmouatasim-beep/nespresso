@@ -19,6 +19,7 @@ from app.domain.events import (
     ALLOWED_EFFECTS,
     EFFECT_LABELS,
     OPEN_END_TYPES,
+    PERSONAL_EDITABLE_BY_OTHERS,
     PERSONAL_ONLY,
     SCOPE_LABELS,
     STATUS_LABELS,
@@ -688,8 +689,10 @@ def _panel(events: dict[int, SkuEvent], tab: str, me: str) -> None:
 
 
 def _editable(event: SkuEvent, me: str) -> bool:
-    """Équipe : tout le monde. Personnel : seulement son planner."""
-    return event.scope is EventScope.TEAM or (bool(me) and event.planner.lower() == me.lower())
+    """Équipe : tout le monde. Personnel : son planner (et les autres si le réglage le permet)."""
+    if event.scope is EventScope.TEAM or PERSONAL_EDITABLE_BY_OTHERS:
+        return True
+    return bool(me) and event.planner.lower() == me.lower()
 
 
 # --- Import / export Excel --------------------------------------------------------------------

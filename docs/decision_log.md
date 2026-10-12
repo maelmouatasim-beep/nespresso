@@ -248,3 +248,12 @@ Format : contexte → décision → conséquence.
 - Base locale : la colonne `category` reste nullable pour garder les modifications passées enregistrées sans catégorie ; l'Historique les classe sous « Sans catégorie ». Pas de migration.
 - Libellés courts pour tenir dans la cellule (« Promo » au lieu de « Promo / événement », etc.) ; les valeurs stockées ne changent pas.
 - Même règle dans la démo web.
+
+## D-037 — Rien en lecture seule : référentiels et événements modifiables partout (révise D-033) (2026-10-12)
+
+- Décision du planner : « je ne veux rien en lecture seule, je veux avoir la main sur tout l'outil ».
+- Outil installé : Multiples, Conversions, Portfolio, Boutiques et DC, Schedule, Allocations, Lancements, Stocks cibles et Règles boutique deviennent des grilles modifiables (cellules, lignes ajoutées ou retirées, bouton « Enregistrer »). Exclusions et Catégories l'étaient déjà. Avant d'écrire, la table est relue par le **même lecteur qu'à l'import** (`app/ingestion/referential_edit.py`) : une erreur bloque l'enregistrement avec sa raison, le fichier n'est pas touché. Les avertissements (SKU en double, jour illisible au Schedule) sont affichés sans bloquer. La mise à jour est tracée (auteur, heure, « modifié dans l'outil »). Une table métier enregistrée depuis la grille est écrite en `.csv` (elle remplace l'ancien `.xlsx`).
+- Démo web : mêmes grilles (recherche, pages de 50 lignes) et événements SKU créables, modifiables, duplicables, terminables et annulables. Chaque table et chaque événement est vérifié par le moteur Python de la page (mêmes règles), puis gardé dans ce navigateur. Dès qu'une modification existe, la commande B80 est **recalculée en direct** à partir des exports de test, au lieu du résultat calculé d'avance. « Revenir aux données de test » / « Revenir aux événements de démo » efface les modifications.
+- Lecteurs CSV des tables maîtres réécrits sans pandas (module `csv`) pour tourner aussi dans la page ; parité 416/416 inchangée.
+- Exemple : dans la démo, mettre le multiple de `7005.70` à 1000 sur la première ligne laisse 240 : le SKU a alors deux multiples (240 et 1000) et la règle A9 garde le multiple de la famille, ligne en REVIEW « Deux multiples ». Pour changer vraiment un multiple en double, il faut modifier toutes ses lignes.
+- Événements Personnels d'un collègue : réglage `PERSONAL_EDITABLE_BY_OTHERS` (`app/domain/events.py`), en attente de la réponse du planner.

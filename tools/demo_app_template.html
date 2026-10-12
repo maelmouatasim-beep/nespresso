@@ -311,12 +311,28 @@ const st = {
   day: null, refTab: 0, source: "demo", busy: "", depotErr: [],
   // Événements : reprises (session seulement), demandes terminées, validations avant export.
   taken: new Set(), evDone: store.get("spc2_ev_done", {}), confirmed: new Set(), includeOk: false, evViewed: new Set(),
-  validations: store.get("spc2_validations", []), toClose: [], evTab: "team", evStatus: "Actifs", evQ: "", evTypes: new Set(), evPlanner: null, evSel: null,
+  validations: store.get("spc2_validations", []), toClose: [], evTab: "team", evStatus: "Actifs", evQ: "", evTypes: new Set(), evPlanner: null, evSel: null, evEdit: null, tbl: null,
 };
 st.f.ev = null;
 
 // Catégories : table du référentiel (modifiable dans Référentiels, gardée dans ce navigateur).
 function categories() { return store.get("spc2_categories", null) || DATA.category_map; }
+
+// ---------- Modifications du planner : référentiels et événements ----------
+// Tout est modifiable (décision du planner, 12-oct-2026). Les tables modifiées et les
+// événements sont gardés dans ce navigateur ; dès qu'il y en a, la commande B80 est
+// recalculée par le moteur Python dans la page (plus de résultat calculé d'avance).
+const EDIT = { tables: store.get("spc2_tables", {}), events: store.get("spc2_events", null), meta: store.get("spc2_refmeta", {}), base: null, anomalies: null };
+const customized = () => Object.keys(EDIT.tables).length > 0 || EDIT.events !== null;
+async function baseTables() { if (!EDIT.base) EDIT.base = JSON.parse(await fetchText("engine/tables.json")); return EDIT.base; }
+const csvCell = c => { const v = c === null || c === undefined ? "" : String(c); return /[",\r\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
+const csvOf = t => [t.columns, ...t.rows].map(r => r.map(csvCell).join(",")).join("\n") + "\n";
+const tablesCsv = keys => Object.fromEntries(keys.map(k => [k, csvOf(EDIT.tables[k])]));
+// Une modification change le résultat : la commande affichée doit être recalculée.
+function invalidateOrder(why) {
+  st.overrides = {}; st.pending = {}; st.seen = new Set(); st.confirmed = new Set(); st.includeOk = false; st.savedId = null; st.day = null;
+  if (st.order) { st.order = null; st.err = why + " : recalcule la commande."; }
+}
 
 // ---------- Résultat pré-calculé ----------
 function variantKey(mode) { return mode + "|" + (st.examples ? "examples" : "none") + "|" + (personalApplied() ? "all" : "team"); }
@@ -366,7 +382,7 @@ function palKey(f) { const u = (f || "").toUpperCase(); if (u.includes("VERTUO")
 // ---------- Événements SKU ----------
 function addDays(isoStr, n) { const d = parseIso(isoStr); d.setDate(d.getDate() + n); return iso(d); }
 // Une demande terminée dans ce navigateur garde son statut (comme dans la base de l'outil installé).
-function evAll() { return DATA.events.map(e => st.evDone[e.id] ? { ...e, status: "done", updated_at: st.evDone[e.id].at } : e); }
+function evAll() { return (EDIT.events || DATA.events).map(e => st.evDone[e.id] ? { ...e, status: "done", updated_at: st.evDone[e.id].at } : e); }
 const evById = id => evAll().find(e => e.id === id);
 const activeFrom = e => addDays(e.start, -e.lead_days);
 const inWindow = (e, day) => activeFrom(e) <= day && (!e.end || day <= e.end);
@@ -496,7 +512,10 @@ async function engine(step) {
     py.runPython("import sys; sys.path.insert(0, '/home/pyodide/eng')");
     step("Chargement des référentiels…");
     const bridge = py.pyimport("app.web.bridge");
-    bridge.init(await (await fetch("engine/masters.json")).text());
+    ENGINE.masters = JSON.parse(await fetchText("engine/masters.json"));
+    bridge.init(JSON.stringify(ENGINE.masters));
+    const keys = Object.keys(EDIT.tables);
+    if (keys.length) { step("Application de tes référentiels modifiés…"); EDIT.anomalies = JSON.parse(bridge.set_tables(JSON.stringify(tablesCsv(keys)))).anomalies; }
     ENGINE.bridge = bridge;
     return bridge;
   })();
@@ -504,6 +523,24 @@ async function engine(step) {
   catch (e) { ENGINE.loading = null; ENGINE.error = String((e && e.message) || e); throw e; }
 }
 const pause = () => new Promise(r => setTimeout(r, 30));
+// Démo modifiée : les exports de test B80 sont lus par le moteur (jeu « demo », séparé de « Mes fichiers »).
+async function demoEngine(step) {
+  const bridge = await engine(step);
+  if (!ENGINE.demoLoaded) {
+    step("Lecture des exports de test B80…");
+    const ex = JSON.parse(await fetchText("engine/demo_exports.json"));
+    for (const [name, text] of Object.entries(ex)) bridge.ingest_csv(text, name, "demo");
+    ENGINE.demoLoaded = true;
+  }
+  return bridge;
+}
+// Revenir à une table d'origine : le moteur repart des référentiels de test, puis réapplique le reste.
+function reapplyTables() {
+  if (!ENGINE.bridge) return;
+  ENGINE.bridge.init(JSON.stringify(ENGINE.masters));
+  const keys = Object.keys(EDIT.tables);
+  EDIT.anomalies = keys.length ? JSON.parse(ENGINE.bridge.set_tables(JSON.stringify(tablesCsv(keys)))).anomalies : null;
+}
 function cellValue(c) {
   if (!c || c.v === undefined || c.v === null) return null;
   if (c.t === "n" && c.z && XLSX.SSF.is_date(c.z)) {
@@ -549,12 +586,23 @@ function livePlan(p) {
   const out = JSON.parse(ENGINE.bridge.plan(JSON.stringify({
     boutique: p.boutique, run_date: RUN(), delivery: p.delivery, cover: M.covers[+p.cover],
     coffee: p.coffee === "" ? null : M.covers[+p.coffee], mode: p.mode, examples: st.examples,
-    events: evAll(), planner: st.author, taken: [...st.taken] })));
+    events: evAll(), planner: st.author, taken: [...st.taken], dataset: st.source === "live" ? "live" : "demo" })));
   return out;
 }
 async function computeLive(f) {
   if (!ENGINE.bridge || !LIVE.files.stock_situation || !LIVE.files.stock_movements) { st.err = "Dépose d'abord tes deux exports (écran 1. Dépôt du jour)."; return render(); }
   st.busy = "Calcul de la commande " + f.boutique + "…"; render(); await pause();
+  const out = livePlan(f);
+  st.busy = "";
+  if (out.error) { st.err = out.error; return render(); }
+  st.order = { ...f, live: out, run_date: RUN() }; st.overrides = {}; st.pending = {}; st.seen = new Set(); st.savedId = null; st.why = null; st.xmsg = null;
+  render();
+}
+
+async function computeDemoLive(f) {
+  try { await demoEngine(m => { st.busy = m; render(); }); }
+  catch (e) { st.busy = ""; st.err = "Le moteur n'a pas pu démarrer ici (" + String((e && e.message) || e).slice(0, 160) + ")."; return render(); }
+  st.busy = "Calcul de la commande " + f.boutique + " avec tes modifications…"; render(); await pause();
   const out = livePlan(f);
   st.busy = "";
   if (out.error) { st.err = out.error; return render(); }
@@ -621,7 +669,7 @@ function renderDepot() {
         : el("div", "msg info", "Aucun fichier déposé.")));
   }
   out.push(cards);
-  out.push(el("p", "small muted", "Tes fichiers restent dans ce navigateur : ils sont lus et calculés ici, rien n'est envoyé. Ils disparaissent quand tu fermes la page. Référentiels utilisés : ceux des données de test (multiples, conversions, DC, Schedule au 05/10/2026, portfolio de B80)."));
+  out.push(el("p", "small muted", "Tes fichiers restent dans ce navigateur : ils sont lus et calculés ici, rien n'est envoyé. Ils disparaissent quand tu fermes la page. Référentiels utilisés : ceux des données de test (multiples, conversions, DC, Schedule au 05/10/2026, portfolio de B80), avec tes modifications faites dans « 6. Référentiels »."));
   if (LIVE.files.stock_situation && LIVE.files.stock_movements && LIVE.dq) out.push(...qualityBlock(LIVE));
   return out;
 }
@@ -655,6 +703,7 @@ function compute() {
   if (f.delivery < RUN()) { st.err = "La date de livraison doit être le " + fdate(RUN()) + " ou après."; return render(); }
   if (DS().live) return computeLive(f);
   if (f.boutique !== M.boutique) { st.err = "Calcul impossible : Aucune ligne de Stock Situation pour la boutique " + f.boutique + ". (Démo : seules les données de B80 sont fournies. Pour tes boutiques, dépose tes exports avec « Mes fichiers ».)"; return render(); }
+  if (customized()) return computeDemoLive(f);
   st.order = { ...f, run_date: RUN() }; st.overrides = {}; st.pending = {}; st.seen = new Set(); st.savedId = null; st.why = null; st.xmsg = null;
   render();
 }
@@ -684,10 +733,15 @@ function paramsRow() {
     if (slot && slot !== f.delivery) out.push(el("div", { style: "margin-top:8px" }, el("button", { class: "btn", onclick: () => { f.delivery = slot; render(); } }, "Livraison selon le Schedule : " + frday(slot))));
     else if (!slot) out.push(el("p", "small muted", "Pas de commande prévue au Schedule le " + frday(RUN()) + " pour cette boutique."));
   }
+  if (st.busy) out.push(el("div", "msg info busy", st.busy));
   if (st.err) out.push(el("div", "msg err", st.err));
   return out;
 }
-function setExamples(on) { st.examples = on; store.set("spc2_examples", on); st.overrides = {}; st.pending = {}; st.savedId = null; render(); }
+function setExamples(on) {
+  st.examples = on; store.set("spc2_examples", on); st.overrides = {}; st.pending = {}; st.savedId = null;
+  if (st.order && st.order.live) { st.order = null; st.err = "Entrées métier changées : recalcule la commande."; }
+  render();
+}
 function categoryOf(m) { return categories()[(m.type || "").trim().toUpperCase()] || "Autres"; }
 function statusKey(x) { return x.ov ? "Modifié" : STATUS[x.s]; }
 // D-036 : quantité saisie sans catégorie → « À catégoriser », pas encore appliquée.
@@ -765,7 +819,7 @@ function renderOrder() {
   const o = st.order, ls = lines(), s = summarize(ls), v = V(o);
   const baseQty = {}; for (let j = 0; j < ls.length; j++) baseQty[ls[j].m.sku] = baseLine(j).qty;
   out.push(el("div", "ctx", el("b", "", btqLabel(o.boutique)), " · DC " + v.dc + " · livraison ", el("b", "", fdate(o.delivery)),
-    " · cover " + fmt1(M.covers[+o.cover]) + " j" + (o.coffee !== "" ? " (café " + fmt1(M.covers[+o.coffee]) + " j)" : "") + " · historique " + v.hd + " j · " + MODE_LABEL[o.mode] + (st.examples ? " · exemples métier" : "") + (o.live ? " · tes fichiers" : " · démo")));
+    " · cover " + fmt1(M.covers[+o.cover]) + " j" + (o.coffee !== "" ? " (café " + fmt1(M.covers[+o.coffee]) + " j)" : "") + " · historique " + v.hd + " j · " + MODE_LABEL[o.mode] + (st.examples ? " · entrées métier" : "") + (o.live ? (st.source === "live" ? " · tes fichiers" : " · démo recalculée avec tes modifications") : " · démo")));
   out.push(el("div", "tiles",
     tile("Unités", fmt(s.units), fmt(s.ordered) + " lignes commandées"),
     tile("Palettes estimées", fmt1(s.palTotal), "VL " + fmt1(s.pal.VL) + " · OL " + fmt1(s.pal.OL) + " · Mach. " + fmt1(s.pal.MACHINES) + " · Autres " + fmt1(s.pal.OTHERS)),
@@ -928,9 +982,13 @@ function renderDay() {
       for (const b of d.chosen) { const r = d.rows[b]; if (!r.delivery || !r.confirmed) errors.push(b + " : date de livraison à saisir ou confirmer"); else if (r.cover === "") errors.push(b + " : cover manquant"); }
       if (errors.length) d.err = errors.join(" · ");
       if (d.err) { d.outcomes = null; return render(); }
-      if (!DS().live) {
+      if (!DS().live && !customized()) {
         d.outcomes = d.chosen.map(b => b === M.boutique ? { b, r: { ...d.rows[b] } } : { b, error: "Aucune ligne de Stock Situation pour la boutique " + b + " (démo : B80 seulement)" });
         return render();
+      }
+      if (!DS().live) {
+        try { await demoEngine(m => { st.busy = m; render(); }); }
+        catch (e) { st.busy = ""; d.err = "Le moteur n'a pas pu démarrer ici (" + String((e && e.message) || e).slice(0, 160) + ")."; return render(); }
       }
       const outs = [];
       for (const [i, b] of d.chosen.entries()) {
@@ -1099,9 +1157,82 @@ function zipStore(files) {
 }
 
 // ---------- 5. Événements SKU ----------
-// Démo : 4 événements fictifs, en lecture seule (création et modification dans l'outil installé).
-// On peut filtrer, ouvrir le détail, « Reprendre » un événement personnel d'un collègue et
-// terminer une demande boutique : la commande B80 en tient compte tout de suite.
+// Démo : 4 événements fictifs au départ. Créer, modifier, dupliquer, terminer ou annuler :
+// l'événement est vérifié par le moteur Python (mêmes règles que l'outil installé), gardé
+// dans ce navigateur, et la commande B80 est recalculée avec lui.
+const STATUS_TXT = { draft: "Brouillon", active: "Actif", done: "Terminé", cancelled: "Annulé" };
+function canEdit(e) { return e.scope === "team" || DATA.others_editable || (!!st.author && e.planner.toLowerCase() === st.author.toLowerCase()); }
+function newEvent(request) {
+  const day = RUN();
+  return request ? { scope: "personal", type: "store_request", title: "Demande B80", description: "", skus: [{ sku: "" }], boutiques: ["B80"], dcs: [], start: day, end: null, lead_days: 0, effect: "add_qty", quantities: [{ boutique: "*", sku: "*", qty: 0 }], planner: st.author, status: "active", requested_by: "", requested_on: day, until_next_order: true }
+    : { scope: st.evTab === "mine" ? "personal" : "team", type: "promotion", title: "", description: "", skus: [{ sku: "" }], boutiques: [], dcs: [], start: day, end: addDays(day, 7), lead_days: 0, effect: "flag", quantities: [], planner: st.author, status: "active", requested_by: "", requested_on: null, until_next_order: false };
+}
+function saveEvents(list, why) {
+  EDIT.events = list;
+  if (!store.set("spc2_events", list)) st.evMsg = "Ce navigateur n'a pas pu garder les événements : ils seront perdus en fermant la page.";
+  invalidateOrder(why);
+}
+async function submitEvent(draft, box) {
+  if (!st.author) return box.replaceChildren(el("div", "msg err", "Choisis ton prénom (Planner, barre de gauche)."));
+  const now = new Date().toISOString().slice(0, 19), all = evAll().map(e => ({ ...e }));
+  const ev = { ...draft, title: draft.title.trim(), updated_at: now };
+  if (ev.id === undefined || ev.id === null) { ev.id = Math.max(0, ...all.map(e => e.id || 0)) + 1; ev.created_by = st.author; ev.created_at = now; }
+  if (ev.scope === "personal" && !ev.planner) ev.planner = st.author;
+  box.replaceChildren(el("div", "msg info busy", "Vérification par le moteur (la première fois : chargement ≈ 18 Mo)…"));
+  let out;
+  try { out = JSON.parse((await engine(m => box.replaceChildren(el("div", "msg info busy", m)))).check_event(JSON.stringify(ev))); }
+  catch (e) { return box.replaceChildren(el("div", "msg err", "Le moteur n'a pas pu démarrer ici (" + String((e && e.message) || e).slice(0, 160) + ").")); }
+  if (out.errors.length) return box.replaceChildren(el("div", "msg err", "Rien n'est enregistré : " + out.errors.join(" · ")));
+  const i = all.findIndex(e => e.id === ev.id), wasNew = i < 0;
+  if (wasNew) all.push(out.event); else all[i] = out.event;
+  logValidation("event_saved", ev.boutiques[0] || "", ev.skus.map(x => x.sku), (wasNew ? "créé" : "modifié") + " : « " + ev.title + " »");
+  saveEvents(all, "Événement " + (wasNew ? "créé" : "modifié"));
+  st.evEdit = null; st.evSel = ev.id; render();
+}
+function setEventStatus(e, status) {
+  if (!st.author) { st.evMsg = "Choisis ton prénom (Planner, barre de gauche)."; return render(); }
+  const all = evAll().map(x => x.id === e.id ? { ...x, status, updated_at: new Date().toISOString().slice(0, 19) } : x);
+  if (st.evDone[e.id]) { delete st.evDone[e.id]; store.set("spc2_ev_done", st.evDone); }
+  logValidation("event_saved", e.boutiques[0] || "", e.skus.map(x => x.sku), STATUS_TXT[status].toLowerCase() + " : « " + e.title + " »");
+  saveEvents(all, "Événement " + STATUS_TXT[status].toLowerCase()); render();
+}
+const splitList = v => v.split(/[;,\s]+/).map(x => x.trim()).filter(Boolean);
+function eventForm(d) {
+  const box = el("div");
+  const f = (label, input, help) => el("label", "f", label, input, help ? el("span", { class: "small muted", style: "font-weight:400" }, help) : null);
+  const text = (v, on, attrs) => el("input", { type: "text", value: v || "", oninput: e => on(e.target.value), ...(attrs || {}) });
+  const date = (v, on) => el("input", { type: "date", value: v || "", onchange: e => on(e.target.value || null) });
+  const select = (v, opts, on) => { const s = el("select", { onchange: e => on(e.target.value) }, opts.map(([k, t]) => el("option", { value: k }, t))); s.value = v; return s; };
+  const effects = DATA.allowed_effects[d.type] || Object.keys(EFFECT_LABELS);
+  if (!effects.includes(d.effect)) d.effect = effects[0];
+  const conv = d.effect === "replace", withQty = d.effect === "set_qty" || d.effect === "add_qty";
+  const skuText = d.skus.map(x => x.sku + (x.new_sku ? ">" + x.new_sku : "")).filter(x => x !== "").join(", ");
+  const qty = d.quantities.length ? d.quantities[0].qty : "";
+  const types = Object.keys(TYPE_LABELS).filter(t => d.scope === "personal" || !DATA.personal_only.includes(t));
+  const out = [
+    el("h2", "", d.id ? "Modifier l'événement" : (d.type === "store_request" ? "Nouvelle demande boutique" : "Nouvel événement")),
+    f("Titre", text(d.title, v => { d.title = v; }, { id: "ev_f_title" })),
+    el("div", "two", f("Portée", select(d.scope, [["team", "Équipe"], ["personal", "Personnel"]], v => { d.scope = v; if (v === "personal" && !d.planner) d.planner = st.author; render(); })),
+      f("Type", select(d.type, types.map(t => [t, TYPE_LABELS[t]]), v => { d.type = v; d.until_next_order = v === "store_request" && d.until_next_order; render(); }))),
+    d.scope === "personal" ? f("Planner responsable", select(d.planner || "", [["", "Choisir"], ...[...new Set([...DATA.planners, st.author].filter(Boolean))].map(n => [n, n])], v => { d.planner = v; })) : null,
+    f("SKU", text(skuText, v => { d.skus = splitList(v).map(x => { const [a, b] = x.split(">"); return b ? { sku: a, new_sku: b } : { sku: a }; }); }, { id: "ev_f_skus", class: "mono" }),
+      conv ? "Ancien>nouveau, séparés par des virgules (ex. 7882.70>7965.70)" : "Séparés par des virgules"),
+    el("div", "two", f("Boutiques", text(d.boutiques.join(", "), v => { d.boutiques = splitList(v).map(x => x.toUpperCase()); }), "Vide = toutes"),
+      f("DC", text(d.dcs.join(", "), v => { d.dcs = splitList(v).map(x => x.toUpperCase()); }), "MT1, TO1, CY1, VA1")),
+    el("div", "two", f("Début", date(d.start, v => { d.start = v; })), f("Fin", date(d.end, v => { d.end = v; }), "Vide : arrêt ou interdiction jusqu'à nouvel ordre")),
+    d.type === "store_request" ? el("label", "chk", el("input", { type: "checkbox", checked: d.until_next_order, onchange: e => { d.until_next_order = e.target.checked; } }), "Jusqu'à la prochaine commande") : null,
+    el("div", "two", f("Effet", select(d.effect, effects.map(x => [x, EFFECT_LABELS[x]]), v => { d.effect = v; render(); })),
+      f("Anticipation (j)", el("input", { type: "number", min: 0, max: 120, value: d.lead_days, oninput: e => { d.lead_days = +e.target.value || 0; } }))),
+    withQty ? f("Quantité", el("input", { type: "number", min: 0, step: 1, id: "ev_f_qty", value: qty, oninput: e => { d.quantities = e.target.value === "" ? [] : [{ boutique: "*", sku: "*", qty: Math.max(0, Math.round(+e.target.value)) }]; } }), "Pour chaque SKU et chaque boutique visée ; arrondie au multiple par le moteur") : null,
+    d.type === "store_request" ? f("Qui a demandé", text(d.requested_by, v => { d.requested_by = v; }, { placeholder: "Prénom ou rôle, pas d'email" })) : null,
+    f("Description", text(d.description, v => { d.description = v; })),
+    f("Statut", select(d.status, [["active", "Actif"], ["draft", "Brouillon"]], v => { d.status = v; })),
+    el("div", "row", { style: "margin-top:10px" },
+      el("button", { class: "btn primary", id: "ev_f_save", onclick: () => { if (!withQty) d.quantities = []; if (!conv) d.skus = d.skus.map(x => ({ sku: x.sku, multiple: x.multiple ?? null })); submitEvent(d, box); } }, "Enregistrer"),
+      el("button", { class: "btn", onclick: () => { st.evEdit = null; render(); } }, "Fermer")),
+    box];
+  return el("div", "card evpanel", el("button", { class: "x", "aria-label": "Fermer", onclick: () => { st.evEdit = null; render(); } }, "×"), out);
+}
 function evTargets(e) { return !e.boutiques.length && !e.dcs.length ? "Toutes" : [...e.dcs.map(d => "DC " + d), ...e.boutiques].join(", "); }
 function evEffect(e) {
   let t = EFFECT_LABELS[e.effect];
@@ -1120,7 +1251,7 @@ function takeOver(e, on) {
   render();
 }
 function evPanel(e, day) {
-  const mine = e.scope === "team" || (!!st.author && e.planner.toLowerCase() === st.author.toLowerCase());
+  const mine = canEdit(e);
   const label = evStatus(e, day), until = e.end ? "au " + fdate(e.end) : (e.until_next_order ? "jusqu'à la prochaine commande" : "jusqu'à nouvel ordre");
   const kv = [["Statut", el("span", "st " + EV_CLS[label], label)], ["Portée", evScope(e)], ["Type", TYPE_LABELS[e.type]],
     ["SKU", el("span", "mono", e.skus.map(x => x.sku + (x.multiple ? " (multiple " + x.multiple + ")" : "")).join(", "))], ["Boutiques", evTargets(e)],
@@ -1128,7 +1259,7 @@ function evPanel(e, day) {
     ["Effet", evEffect(e)], ["Fichier source", e.source_file || "—"], ["Propriétaire", e.owner || "—"], ["Responsable", e.planner || "—"]];
   if (e.type === "store_request") kv.push(["Demandé par", (e.requested_by || "—") + (e.requested_on ? " le " + fdate(e.requested_on) : "")]);
   kv.push(["Créé", (e.created_by || "—") + (e.created_at ? " le " + fdate(e.created_at.slice(0, 10)) : "")]);
-  const hist = st.validations.filter(v => (v.kind === "takeover" || v.kind === "close_request") && v.skus.join() === e.skus.map(x => x.sku).join());
+  const hist = st.validations.filter(v => ["takeover", "close_request", "event_saved"].includes(v.kind) && v.skus.join() === e.skus.map(x => x.sku).join());
   const out = [el("button", { class: "x", "aria-label": "Fermer", onclick: () => { st.evSel = null; render(); } }, "×"), el("h2", "", e.title),
     e.description ? el("p", "small muted", e.description) : null, el("dl", "kv", kv.flatMap(([k, v]) => [el("dt", "", k), el("dd", "", v)]))];
   if (!mine) {
@@ -1139,10 +1270,15 @@ function evPanel(e, day) {
     out.push(el("button", { class: "btn", id: "ev_done", style: "width:100%", onclick: () => {
       st.evDone[e.id] = { by: st.author || "Planner non renseigné", at: new Date().toISOString() }; store.set("spc2_ev_done", st.evDone);
       logValidation("close_request", e.boutiques[0] || "", e.skus.map(x => x.sku), "terminée depuis Événements SKU"); st.overrides = {}; st.pending = {}; render(); } }, "Terminer la demande"));
-  } else out.push(el("p", "small muted", "Démo : modification, duplication et fin d'un événement dans l'outil installé."));
+  }
+  if (mine) out.push(el("div", "two", { style: "margin-top:8px" },
+    el("button", { class: "btn primary", id: "ev_edit", onclick: () => { st.evEdit = JSON.parse(JSON.stringify(e)); render(); } }, "Modifier"),
+    el("button", { class: "btn", id: "ev_dup", onclick: () => { const c = JSON.parse(JSON.stringify(e)); delete c.id; c.title = e.title + " (copie)"; c.status = "active"; c.planner = c.scope === "personal" ? (st.author || c.planner) : c.planner; st.evEdit = c; render(); } }, "Dupliquer"),
+    el("button", { class: "btn", id: "ev_end", disabled: e.status === "done", onclick: () => setEventStatus(e, "done") }, "Terminer"),
+    el("button", { class: "btn", id: "ev_cancel", disabled: e.status === "cancelled", onclick: () => setEventStatus(e, "cancelled") }, "Annuler l'événement")));
   if (st.evDone[e.id]) out.push(el("p", "small muted", "Terminé par " + st.evDone[e.id].by + " le " + st.evDone[e.id].at.slice(0, 16).replace("T", " ") + ".",
     el("button", { class: "btn link", style: "margin-left:6px", onclick: () => { delete st.evDone[e.id]; store.set("spc2_ev_done", st.evDone); render(); } }, "Réactiver (démo)")));
-  if (hist.length) out.push(el("h3", "", "Historique"), el("ul", "list small", hist.map(v => el("li", "", v.at.slice(0, 16).replace("T", " ") + " · " + v.who + " · " + (v.kind === "takeover" ? "repris" : "terminé")))));
+  if (hist.length) out.push(el("h3", "", "Historique"), el("ul", "list small", hist.map(v => el("li", "", v.at.slice(0, 16).replace("T", " ") + " · " + v.who + " · " + (v.kind === "takeover" ? "repris" : v.kind === "event_saved" ? v.note : "terminé")))));
   if (st.evMsg) { out.push(el("div", "msg err", st.evMsg)); st.evMsg = null; }
   return el("div", "card evpanel", out);
 }
@@ -1157,12 +1293,14 @@ function renderEvents() {
   const out = [el("div", "row", { style: "justify-content:space-between;align-items:baseline" }, el("h1", { style: "margin:0" }, "Événements SKU"),
     el("span", "", el("b", "", String(active)), " actif(s), ", el("b", "", String(soon)), " à venir cette semaine · au " + fdate(day)))];
   out.push(el("p", "small muted", "Promotions, lancements, arrêts, interdictions, conversions, urgences et demandes boutique : saisis une fois, ils flaguent ou bloquent les SKU dans toutes les commandes tant qu'ils sont actifs. Le planner valide."));
-  out.push(el("div", "msg info", "Démo : 4 événements fictifs sur B80, en lecture seule. Tu peux filtrer, ouvrir un événement, « Reprendre » la demande d'un collègue et terminer une demande boutique. Création, modification, duplication et import Excel : dans l'outil installé."));
+  out.push(el("div", "msg info", EDIT.events ? el("span", "", "Tes événements sont gardés dans ce navigateur ; la commande B80 est recalculée avec eux. ",
+    el("button", { class: "btn link", id: "ev_reset", onclick: () => { if (!confirm("Revenir aux 4 événements fictifs de la démo ? Tes événements seront effacés de ce navigateur.")) return; EDIT.events = null; try { localStorage.removeItem("spc2_events"); } catch (e) { /* stockage bloqué */ } invalidateOrder("Événements de démo rétablis"); st.evSel = null; st.evEdit = null; render(); } }, "Revenir aux événements de démo"))
+    : "Démo : 4 événements fictifs sur B80 pour commencer. Crée, modifie, duplique, termine ou annule : chaque événement est vérifié par le moteur et la commande B80 est recalculée avec lui."));
   out.push(el("div", "row", { style: "margin:10px 0" },
     el("div", "seg", [["team", "Équipe", team.filter(live).length], ["mine", "Mes événements", mineN]].map(([k, t, n]) =>
       el("button", { class: st.evTab === k ? "on" : "", onclick: () => { st.evTab = k; st.evSel = null; st.evPlanner = null; render(); } }, t, el("b", "", String(n))))),
-    el("button", { class: "btn primary", disabled: true, title: "Démo : dans l'outil installé" }, "+ Nouvel événement"),
-    st.evTab === "mine" ? el("button", { class: "btn", disabled: true, title: "Démo : dans l'outil installé" }, "+ Demande boutique") : null));
+    el("button", { class: "btn primary", id: "ev_new", onclick: () => { st.evEdit = newEvent(false); st.evSel = null; render(); } }, "+ Nouvel événement"),
+    st.evTab === "mine" ? el("button", { class: "btn", id: "ev_req", onclick: () => { st.evEdit = newEvent(true); st.evSel = null; render(); } }, "+ Demande boutique") : null));
   let list = st.evTab === "team" ? team : personal;
   const plannerSel = el("select", { id: "ev_planner", onchange: e => { st.evPlanner = e.target.value; render(); } }, new Option("Tous les planners", ""), ...[...new Set(personal.map(e => e.planner))].map(n => new Option(n, n)));
   if (st.evTab === "mine") { if (st.evPlanner === null) st.evPlanner = me || ""; plannerSel.value = st.evPlanner; if (st.evPlanner) list = list.filter(e => e.planner === st.evPlanner); }
@@ -1186,40 +1324,101 @@ function renderEvents() {
       el("td", { title: skus.join(", ") }, skus.length + " : " + skus.slice(0, 3).join(", ") + (skus.length > 3 ? " …" : "")), el("td", "", evTargets(e)), el("td", "", fdate(e.start)), el("td", "", e.end ? fdate(e.end) : "—"),
       el("td", "n", left === null ? "—" : String(Math.max(left, 0)), near ? el("span", { class: "st Y", style: "margin-left:6px" }, "Fin proche") : null), el("td", "", evEffect(e)), el("td", "", e.planner || "—"),
       el("td", { title: e.source_file }, e.source_file || "—"), el("td", "", e.updated_at ? fdate(e.updated_at.slice(0, 10)) : "—"));
-    tr.onclick = () => { st.evSel = e.id; render(); };
+    tr.onclick = () => { st.evSel = e.id; st.evEdit = null; render(); };
     body.append(tr);
   }
   t.append(body);
-  const sel = st.evSel !== null ? evById(st.evSel) : null;
-  out.push(el("div", "evlayout" + (sel ? " open" : ""), el("div", "", shown.length ? el("div", "tablewrap", t) : el("div", "msg info", "Aucun événement pour ces filtres."),
-    el("p", "small muted", shown.length + " événement(s) · ● Équipe ○ Personnel · tri par date de fin · clic sur une ligne pour le détail")), sel ? evPanel(sel, day) : null));
+  const sel = st.evSel !== null ? evById(st.evSel) : null, side = st.evEdit ? eventForm(st.evEdit) : sel ? evPanel(sel, day) : null;
+  out.push(el("div", "evlayout" + (side ? " open" : ""), el("div", "", shown.length ? el("div", "tablewrap", t) : el("div", "msg info", "Aucun événement pour ces filtres."),
+    el("p", "small muted", shown.length + " événement(s) · ● Équipe ○ Personnel · tri par date de fin · clic sur une ligne pour le détail")), side));
   return out;
 }
 
 // ---------- 6. Référentiels ----------
+// Chaque table est modifiable : cellules, lignes ajoutées ou retirées, puis « Enregistrer ».
+// La table est relue par le moteur Python avec les mêmes lecteurs qu'à l'import : une
+// erreur bloque l'enregistrement avec sa raison. Gardée dans ce navigateur.
+const PAGE_ROWS = 50;
+function refAnomalies(r) { return EDIT.anomalies && EDIT.anomalies[r.key] ? EDIT.anomalies[r.key] : r.anomalies; }
 function renderRefs() {
   const out = [el("h1", "", "Référentiels")], owners = store.get("spc2_owners", {});
-  out.push(el("div", "tabs", DATA.refs.map((r, i) => el("button", { class: i === st.refTab ? "on" : "", onclick: () => { st.refTab = i; render(); } }, r.label, r.anomalies.length ? el("span", "cnt", String(r.anomalies.length)) : null))));
-  const r = DATA.refs[st.refTab];
+  out.push(el("div", "tabs", DATA.refs.map((r, i) => el("button", { class: i === st.refTab ? "on" : "", onclick: () => { st.refTab = i; st.tbl = null; render(); } }, r.label, refAnomalies(r).length ? el("span", "cnt", String(refAnomalies(r).length)) : null, EDIT.tables[r.key] ? el("span", { class: "cnt", title: "Modifié par toi", style: "background:var(--mod, #3b6ea5)" }, "✎") : null))));
+  const r = DATA.refs[st.refTab], mine = EDIT.meta[r.key];
   const owner = el("input", { type: "text", id: "owner_" + r.key, value: owners[r.key] ?? r.owner, onchange: e => { owners[r.key] = e.target.value; store.set("spc2_owners", owners); } });
-  const when = r.updated ? fdate(r.updated.slice(0, 10)) + (r.updated.length > 11 ? " à " + r.updated.slice(11, 16) : "") : "—";
+  const upd = mine ? mine.at : r.updated, by = mine ? mine.by : r.by, src = mine ? "modifié dans l'outil" : r.src;
+  const when = upd ? fdate(upd.slice(0, 10)) + (upd.length > 11 ? " à " + upd.slice(11, 16) : "") : "—";
   out.push(el("div", "row", { style: "align-items:end" }, el("label", { class: "f", style: "width:260px" }, "Propriétaire", owner),
-    el("p", { style: "margin:0 0 6px" }, "Mis à jour le ", el("b", "", when), r.by ? " par " + r.by : "", r.src ? " · source : " + r.src : "")));
-  out.push(r.anomalies.length ? el("details", { open: true, class: "card", style: "margin:12px 0;border-color:var(--review)" }, el("summary", "", el("b", "", r.anomalies.length + " anomalie(s)")), el("ul", "list", r.anomalies.map(a => el("li", "", a))))
+    el("p", { style: "margin:0 0 6px" }, "Mis à jour le ", el("b", "", when), by ? " par " + by : "", src ? " · source : " + src : "")));
+  const an = refAnomalies(r);
+  out.push(an.length ? el("details", { open: true, class: "card", style: "margin:12px 0;border-color:var(--review)" }, el("summary", "", el("b", "", an.length + " anomalie(s)")), el("ul", "list", an.map(a => el("li", "", a))))
     : el("div", "msg ok", "Aucune anomalie."));
   if (r.key === "categories") { out.push(...categoriesEditor()); return out; }
-  let rows = r.rows;
-  if (r.examples.length && st.examples) rows = r.examples;
-  if (r.examples.length) out.push(el("label", { style: "display:flex;gap:8px;align-items:center;margin:8px 0" }, el("input", { type: "checkbox", checked: st.examples, onchange: e => setExamples(e.target.checked) }), "Démo : utiliser les exemples d'allocation, lancement et stock cible"));
-  if (rows.length) {
-    const head = Object.keys(rows[0]);
-    out.push(el("p", "small muted", (r.count || rows.length) + " lignes" + (r.count > rows.length ? " · aperçu des " + rows.length + " premières" : "") + (r.key === "exclusions" ? " · démo : lecture seule (les calculs sont faits d'avance)" : "")));
-    out.push(tableOf(head, rows.map(x => head.map(h => x[h]))));
-  } else out.push(el("div", "msg info", "Aucun fichier."));
+  if (r.examples.length || ["allocations", "launches", "targets", "rules"].includes(r.key)) out.push(el("label", { style: "display:flex;gap:8px;align-items:center;margin:8px 0" }, el("input", { type: "checkbox", checked: st.examples, onchange: e => setExamples(e.target.checked) }), "Appliquer les allocations, lancements, stocks cibles et règles boutique au calcul"));
+  out.push(...tableEditor(r));
   out.push(el("div", "row", { style: "margin-top:12px" },
-    el("div", { class: "drop", style: "flex:1 1 300px" }, "Importer (remplace le fichier actuel)", el("br"), el("span", "small", "Démo : import désactivé.")),
+    el("div", { class: "drop", style: "flex:1 1 300px" }, "Importer un fichier (remplace la table)", el("br"), el("span", "small", "Démo : modifie la table ci-dessus directement ; l'import de fichier est dans l'outil installé.")),
     r.template ? el("button", { class: "btn", disabled: true, title: "Disponible dans l'outil installé" }, "Modèle vierge") : null));
   return out;
+}
+function tableEditor(r) {
+  if (!st.tbl || st.tbl.key !== r.key) {
+    const saved = EDIT.tables[r.key];
+    if (saved) st.tbl = { key: r.key, draft: JSON.parse(JSON.stringify(saved)), q: "", page: 0, dirty: false };
+    else if (EDIT.base) st.tbl = { key: r.key, draft: JSON.parse(JSON.stringify(EDIT.base[r.key])), q: "", page: 0, dirty: false };
+    else {
+      baseTables().then(render).catch(e => { st.tblErr = String((e && e.message) || e); render(); });
+      return [st.tblErr ? el("div", "msg err", "Table introuvable : " + st.tblErr) : el("div", "msg info busy", "Chargement de la table…")];
+    }
+  }
+  const t = st.tbl, d = t.draft, q = t.q.toLowerCase();
+  const idx = d.rows.map((_, i) => i).filter(i => !q || d.rows[i].some(c => String(c ?? "").toLowerCase().includes(q)));
+  const pages = Math.max(1, Math.ceil(idx.length / PAGE_ROWS)); t.page = Math.min(t.page, pages - 1);
+  const shown = idx.slice(t.page * PAGE_ROWS, (t.page + 1) * PAGE_ROWS);
+  const markDirty = () => { if (!t.dirty) { t.dirty = true; $("tbl_state")?.replaceChildren(el("span", "st Y", "Modifications non enregistrées")); const u = $("tbl_undo"); if (u) u.disabled = false; } };
+  const search = el("input", { type: "search", id: "tbl_q", placeholder: "Rechercher dans la table (SKU, boutique…)", value: t.q });
+  search.oninput = () => { t.q = search.value.trim(); t.page = 0; clearTimeout(search._t); search._t = setTimeout(() => { render(); const s2 = $("tbl_q"); s2.focus(); s2.setSelectionRange(s2.value.length, s2.value.length); }, 250); };
+  const head = el("tr", "", el("th", "n", "Ligne"), d.columns.map(c => el("th", "", c)), el("th", "", ""));
+  const body = el("tbody", "", shown.map(i => el("tr", "", el("td", "n muted", String(i + 2)),
+    d.columns.map((c, ci) => el("td", { style: "padding:2px 4px" }, el("input", { type: "text", class: ci === 0 || /sku/i.test(c) ? "mono" : "", "aria-label": c + " ligne " + (i + 2), value: d.rows[i][ci] ?? "", style: "width:100%;min-width:90px", oninput: e => { d.rows[i][ci] = e.target.value; markDirty(); } }))),
+    el("td", "", el("button", { class: "btn link", title: "Retirer la ligne", onclick: () => { d.rows.splice(i, 1); t.dirty = true; render(); } }, "Retirer")))));
+  const msg = el("div", { id: "tbl_msg" });
+  const pager = pages > 1 ? el("span", "row", { style: "gap:6px;align-items:center" },
+    el("button", { class: "btn", disabled: t.page === 0, onclick: () => { t.page--; render(); } }, "‹"), el("span", "small", "page " + (t.page + 1) + " / " + pages),
+    el("button", { class: "btn", disabled: t.page >= pages - 1, onclick: () => { t.page++; render(); } }, "›")) : null;
+  return [
+    el("div", "row", { style: "align-items:center;margin:8px 0" }, el("div", "grow", search),
+      el("span", "small muted", fmt(d.rows.length) + " lignes" + (q ? " · " + fmt(idx.length) + " trouvée(s)" : "")), pager,
+      el("span", { id: "tbl_state" }, t.dirty ? el("span", "st Y", "Modifications non enregistrées") : EDIT.tables[r.key] ? el("span", "st M", "Modifié par toi") : null)),
+    el("div", { class: "tablewrap", style: "max-height:420px" }, el("table", "", el("thead", "", head), body)),
+    el("div", "row", { style: "margin-top:10px" },
+      el("button", { class: "btn", id: "tbl_add", onclick: () => { d.rows.unshift(d.columns.map(() => "")); t.q = ""; t.page = 0; t.dirty = true; render(); } }, "Ajouter une ligne"),
+      el("button", { class: "btn primary", id: "tbl_save", onclick: () => saveTable(r, msg) }, "Enregistrer " + r.label.toLowerCase()),
+      el("button", { class: "btn", id: "tbl_undo", disabled: !t.dirty, onclick: () => { st.tbl = null; render(); } }, "Annuler mes changements"),
+      EDIT.tables[r.key] ? el("button", { class: "btn", id: "tbl_reset", onclick: () => resetTable(r) }, "Revenir aux données de test") : null),
+    msg];
+}
+async function saveTable(r, box) {
+  if (!st.author) return box.replaceChildren(el("div", "msg err", "Choisis ton prénom (Planner, barre de gauche)."));
+  const t = st.tbl, draft = { columns: t.draft.columns, rows: t.draft.rows.filter(row => row.some(c => String(c ?? "").trim())) };
+  box.replaceChildren(el("div", "msg info busy", "Vérification par le moteur (la première fois : chargement ≈ 18 Mo)…"));
+  let out;
+  try { out = JSON.parse((await engine(m => box.replaceChildren(el("div", "msg info busy", m)))).set_tables(JSON.stringify({ [r.key]: csvOf(draft) }))); }
+  catch (e) { return box.replaceChildren(el("div", "msg err", "Le moteur n'a pas pu démarrer ici (" + String((e && e.message) || e).slice(0, 160) + ").")); }
+  const res = out.tables[r.key];
+  if (res.errors.length) return box.replaceChildren(el("div", "msg err", "Rien n'est enregistré : " + res.errors.join(" · ")));
+  EDIT.tables[r.key] = draft; EDIT.anomalies = out.anomalies;
+  EDIT.meta[r.key] = { by: st.author, at: new Date().toISOString().slice(0, 16) }; store.set("spc2_refmeta", EDIT.meta);
+  const kept = store.set("spc2_tables", EDIT.tables);
+  invalidateOrder(r.label + " modifié");
+  st.tbl = null; render();
+  $("tbl_msg")?.replaceChildren(el("div", "msg ok", r.label + " enregistré (" + fmt(draft.rows.length) + " lignes). La commande B80 sera recalculée avec."),
+    ...res.warnings.map(w => el("div", "msg warn", w)), kept ? "" : el("div", "msg warn", "Ce navigateur n'a pas pu garder la table : elle sera perdue en fermant la page."));
+}
+function resetTable(r) {
+  if (!confirm("Revenir à la table « " + r.label + " » des données de test ? Tes modifications seront effacées.")) return;
+  delete EDIT.tables[r.key]; delete EDIT.meta[r.key];
+  store.set("spc2_tables", EDIT.tables); store.set("spc2_refmeta", EDIT.meta);
+  reapplyTables(); invalidateOrder(r.label + " rétabli"); st.tbl = null; render();
 }
 
 function categoriesEditor() {
