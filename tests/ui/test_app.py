@@ -112,6 +112,12 @@ def test_second_boutique_takes_first_parameters_and_keeps_each_order(app: AppTes
     assert app.session_state["seen"] == confirmed  # la commande de B80 est gardée telle quelle
     recap = next(d.value for d in app.dataframe if "Palettes" in d.value.columns)
     assert list(recap["Boutique"]) == ["B80", other, "Total"]
+    assert list(recap.columns) == ["Boutique", "État", "Livraison", "Unités", "Palettes",
+                                   "À vérifier"]  # fmt: skip
+    assert any("Récapitulatif" in e.label for e in app.expander)  # replié par défaut (D-050)
+    labels = {b.key: b.label for b in app.button if b.key and b.key.startswith("tab_open_")}
+    assert labels[f"tab_open_{other}"] == f"○ {other} · à calculer"
+    assert labels["tab_open_B80"].endswith(" à vérifier") and "REVIEW" not in labels["tab_open_B80"]
     # Le zip attend chaque boutique : celle qui n'est pas calculée est citée.
     app.selectbox(key="author").set_value("Camille").run()
     assert download(app, "Télécharger tous les LT").disabled
@@ -135,11 +141,27 @@ def grid(at: AppTest):
 
 def test_single_grid_default_order_and_filters(app: AppTest) -> None:
     compute_b80(app)
+    from app.engines.events import event_tags
     from app.ui.common import is_inactive_line
+    from app.ui.screens.order import verify_rank
 
-    df = grid(app)
     all_lines = app.session_state["base"].lines
+    base = {x.sku: x for x in app.session_state["base"].base_lines}
     inactive = [x for x in all_lines if is_inactive_line(x)]
+    # D-050 : l'onglet « À vérifier » est ouvert par défaut : BLOCKED, puis REVIEW, puis les
+    # lignes OK flaguées par un événement, chaque groupe par Qty proposée décroissante.
+    df = grid(app)
+    assert app.session_state["f_status"] == "À vérifier"
+    ranks = [verify_rank(base[s]) for s in df["SKU"]]
+    assert ranks == sorted(ranks) and {0, 1} <= set(ranks)
+    assert all(base[s].status.value != "OK" or event_tags(base[s]) for s in df["SKU"])
+    for r in (0, 1, 2):
+        qtys = [base[s].qty for s, k in zip(df["SKU"], ranks, strict=True) if k == r]
+        assert qtys == sorted(qtys, reverse=True)
+    assert any("À vérifier" in m.label for m in app.metric)
+    status_tab = next(b for b in app.button_group if b.key == "f_status")
+    status_tab.set_value("Toutes").run()
+    df = grid(app)
     # D-049 : une seule grille, toutes les lignes sauf les anciens SKU (tout à zéro), masqués.
     assert len(df) == len(all_lines) - len(inactive)
     assert inactive and not {x.sku for x in inactive} & set(df["SKU"])
@@ -160,15 +182,20 @@ def test_single_grid_default_order_and_filters(app: AppTest) -> None:
     next(b for b in app.button_group if b.key == "f_cat").set_value("Cafés").run()
     types = {x.sku: x.product_type for x in app.session_state["base"].lines}
     assert {types[s] for s in grid(app)["SKU"]} == {"C"}
-    next(b for b in app.button_group if b.key == "f_status").set_value("REVIEW").run()
-    assert grid(app)["Statut"].str.contains("REVIEW").all()
+    next(b for b in app.button_group if b.key == "f_status").set_value("OK").run()
+    assert grid(app)["Statut"].str.contains("OK").all()  # OK non confirmées, sans événement
+    assert not any(event_tags(base[s]) for s in grid(app)["SKU"])
     app.checkbox(key="f_qty").check().run()
     assert (grid(app)["Qty finale"] > 0).all()
 
 
 def test_accept_all_ok_marks_ok_lines(app: AppTest) -> None:
     compute_b80(app)
+    assert not [b for b in app.button if b.key == "accept_ok"]  # seulement sur l'onglet OK
+    next(b for b in app.button_group if b.key == "f_status").set_value("OK").run()
     app.button(key="accept_ok").click().run()
+    assert len(grid(app)) == 0  # l'onglet OK se vide
+    next(b for b in app.button_group if b.key == "f_status").set_value("Toutes").run()
     df = grid(app)
     base = {x.sku: x.status.value for x in app.session_state["base"].base_lines}
     ok = df[df["SKU"].map(base) == "OK"]
@@ -268,28 +295,21 @@ def test_personal_event_applies_only_to_its_planner_until_taken_over(app: AppTes
     assert any("en route" in m.value for m in app.markdown)  # Available + écart (D-047)
 
 
-def pending(at: AppTest):  # noqa: ANN201
-    return next((d.value for d in at.dataframe if d.key and d.key.startswith("pending_")), None)
+def status_tab(at: AppTest, value: str) -> None:
+    next(b for b in at.button_group if b.key == "f_status").set_value(value).run()
 
 
-def test_export_waits_for_the_pending_list_to_be_empty(app: AppTest) -> None:
-    """D-043 : une seule liste « X lignes ne partiront pas si tu ne les confirmes pas »."""
+def test_export_waits_for_the_verify_tab_to_be_empty(app: AppTest) -> None:
+    """D-050 : plus de seconde liste ; le LT attend que l'onglet « À vérifier » soit vide."""
     app.selectbox(key="author").set_value("Camille").run()
     compute_b80(app)
     assert download(app, "Télécharger le LT").disabled
     assert download(app, "Télécharger tous les LT").disabled
-    df = pending(app)
+    df = grid(app)  # onglet « À vérifier » ouvert par défaut
     base = {x.sku: x for x in app.session_state["base"].base_lines}
     n = len(df)
-    assert any(f"{n} ligne(s) ne partiront pas" in m.value for m in app.markdown)
-    assert list(df.columns) == [
-        "Confirmé",
-        "Statut",
-        "SKU",
-        "Description",
-        "Qty proposée",
-        "Raisons",
-    ]
+    assert any(f"{n} ligne(s) à vérifier avant l'export" in m.value for m in app.markdown)
+    assert not [d for d in app.dataframe if d.key and d.key.startswith("pending_")]
     assert not df["Confirmé"].any()
     # REVIEW et BLOCKED non confirmés, plus les lignes OK flaguées par un événement (lancement,
     # demande boutique…) avec le titre de l'événement en raison.
@@ -298,31 +318,34 @@ def test_export_waits_for_the_pending_list_to_be_empty(app: AppTest) -> None:
     assert not [
         b for b in app.button if b.key and b.key.startswith("order_gate")
     ]  # plus de garde-fou
-    # Confirmer une ligne dans la liste : elle en sort et passe « Confirmé » dans la table.
+    # Confirmer une ligne : elle quitte « À vérifier » et passe « Confirmé » dans « Toutes ».
     sku = df.iloc[0]["SKU"]
     app.session_state["seen"] = app.session_state["seen"] | {sku}
     app.run()
-    assert len(pending(app)) == n - 1 and sku not in set(pending(app)["SKU"])
+    assert len(grid(app)) == n - 1 and sku not in set(grid(app)["SKU"])
+    status_tab(app, "Toutes")
     assert grid(app).set_index("SKU").loc[sku, "Statut"] == "● Confirmé"
-    app.button(key="confirm_pending").click().run()  # « Tout confirmer »
+    status_tab(app, "À vérifier")
+    app.button(key="confirm_shown").click().run()  # « Confirmer les lignes affichées »
     # D-048 : les lignes Qty finale > 0 avec stock DC à 0 ou insuffisant sont exclues du lot
-    # et restent dans la liste, en attente d'une seconde confirmation.
+    # et restent dans l'onglet, en attente d'une seconde confirmation.
     from app.ui.common import dc_short
 
-    held = pending(app)
+    held = grid(app)
     by_sku = {x.sku: x for x in app.session_state["base"].lines}
-    assert held is not None and set(held["SKU"]) == app.session_state["dc_warn"]
-    assert all(dc_short(by_sku[s]) for s in held["SKU"]) and len(held) < n
+    assert set(held["SKU"]) == app.session_state["dc_warn"]
+    assert all(dc_short(by_sku[s]) for s in held["SKU"]) and 0 < len(held) < n
     assert held["Statut"].str.contains("confirmer quand même").all()
     assert download(app, "Télécharger le LT").disabled
-    app.button(key="confirm_pending").click().run()  # second « Tout confirmer » : toujours exclues
-    assert len(pending(app)) == len(held)
+    app.button(key="confirm_shown").click().run()  # second lot : toujours exclues
+    assert len(grid(app)) == len(held)
     for sku in held["SKU"]:  # seconde confirmation, une par une (« Confirmer la ligne »)
         app.session_state["why_sku"] = sku
         app.run()
         app.button(key="why_seen").click().run()
-    assert pending(app) is None
+    assert len(grid(app)) == 0
     assert any("Tout est confirmé" in m.value for m in app.markdown)
+    assert not [b for b in app.button if b.key == "see_pending"]
     assert app.session_state["dc_forced"] == set(held["SKU"])
     assert not download(app, "Télécharger le LT").disabled
     assert not download(app, "Télécharger tous les LT").disabled  # une boutique prête
@@ -356,6 +379,7 @@ def test_quantity_change_counts_immediately_with_deduced_context(app: AppTest) -
     un avertissement ; le contexte déduit n'apparaît que dans « Pourquoi »."""
     app.selectbox(key="author").set_value("Camille").run()
     compute_b80(app)
+    status_tab(app, "Toutes")  # 7005.70 est OK : hors de l'onglet « À vérifier » (D-050)
     assert "Catégorie modif." not in grid(app).columns
     app.session_state["why_sku"] = "7005.70"
     app.run()
@@ -394,34 +418,35 @@ def test_changing_a_quantity_never_changes_the_status(app: AppTest) -> None:
     """D-039 : modifier et confirmer sont deux actions distinctes."""
     app.selectbox(key="author").set_value("Camille").run()
     compute_b80(app)
-    next(b for b in app.button_group if b.key == "f_status").set_value("REVIEW").run()
-    df = grid(app)
-    sku, qty, multiple = df.iloc[0][["SKU", "Qty finale", "Multiple"]]
-    n_review = len(df)
+    df = grid(app)  # onglet « À vérifier » : première ligne REVIEW (après les BLOCKED)
+    pos = int(df["Statut"].str.contains("REVIEW").values.argmax())
+    sku, qty, multiple = df.iloc[pos][["SKU", "Qty finale", "Multiple"]]
+    n_check = len(df)
     app.session_state["why_sku"] = sku
     app.run()
     app.number_input(key=f"dlg_qty_{sku}").set_value(int(qty + multiple)).run()
     app.button(key="dlg_save").click().run()
     assert sku in app.session_state["overrides"]
-    df = grid(app)  # toujours dans le filtre REVIEW, même place, statut REVIEW + marqueur
-    assert len(df) == n_review and df.iloc[0]["SKU"] == sku
-    assert df.iloc[0]["Statut"] == "● REVIEW · modifié"
-    assert df.iloc[0]["Qty finale"] == qty + multiple
-    next(b for b in app.button_group if b.key == "f_status").set_value("Modifié").run()
+    df = grid(app)  # toujours dans « À vérifier », même place, statut REVIEW + marqueur
+    assert len(df) == n_check and df.iloc[pos]["SKU"] == sku
+    assert df.iloc[pos]["Statut"] == "● REVIEW · modifié"
+    assert df.iloc[pos]["Qty finale"] == qty + multiple
+    app.checkbox(key="f_mod").check().run()  # « Modifiées seulement »
     assert list(grid(app)["SKU"]) == [sku]
-    # Confirmer (case « Confirmé » ou bouton du panneau) : la ligne sort du filtre REVIEW.
-    next(b for b in app.button_group if b.key == "f_status").set_value("REVIEW").run()
+    app.checkbox(key="f_mod").uncheck().run()
+    # Confirmer (case « Confirmé » ou bouton du panneau) : la ligne quitte « À vérifier ».
     app.button(key="why_seen").click().run()
-    assert sku not in set(grid(app)["SKU"]) and len(grid(app)) == n_review - 1
-    assert download(app, "Télécharger le LT").disabled  # d'autres REVIEW non confirmés
-    next(b for b in app.button_group if b.key == "f_status").set_value("Confirmé").run()
+    assert sku not in set(grid(app)["SKU"]) and len(grid(app)) == n_check - 1
+    assert download(app, "Télécharger le LT").disabled  # d'autres lignes à vérifier
+    status_tab(app, "Confirmées")
     row = grid(app).set_index("SKU").loc[sku]
     assert row["Statut"] == "● Confirmé · modifié" and row["Confirmé"]
-    # Décocher la ramène dans REVIEW.
+    # Décocher la ramène dans « À vérifier » ; « Voir » sous la table y ramène aussi.
     app.session_state["why_sku"] = sku
     app.run()
     app.button(key="why_seen").click().run()
-    next(b for b in app.button_group if b.key == "f_status").set_value("REVIEW").run()
+    app.button(key="see_pending").click().run()
+    assert app.session_state["f_status"] == "À vérifier"
     assert sku in set(grid(app)["SKU"])
 
 
@@ -476,6 +501,7 @@ def test_expected_and_cover_follow_the_final_quantity(app: AppTest) -> None:
     """D-044 / D-046 : « Expected + commande » et « Couverture » suivent chaque saisie."""
     app.selectbox(key="author").set_value("Camille").run()
     compute_b80(app)
+    status_tab(app, "Toutes")
     line = next(x for x in app.session_state["base"].lines if x.sku == "7005.70")
     inp = line.explanation["inputs"]
     today, sales = inp["expected_total"], inp["sales_total"]

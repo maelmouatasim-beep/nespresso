@@ -69,7 +69,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-v
 .params .gear { position: relative; }
 .pop { position: absolute; right: 0; top: calc(100% + 6px); width: 300px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 12px; box-shadow: 0 10px 30px rgba(0,0,0,.18); z-index: 6; display: flex; flex-direction: column; gap: 10px; font-weight: 400; color: var(--text); }
 .ctx { margin: 14px 0 10px; font-size: 14.5px; }
-.tiles { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; margin-bottom: 12px; }
+.tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-bottom: 12px; }
 .tile { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; min-width: 0; }
 .tile .k { font-size: 12.5px; color: var(--muted); font-weight: 600; }
 .tile .v { font-size: 26px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.15; }
@@ -130,6 +130,11 @@ td.vu { text-align: center; }
 .st.G { color: var(--ok); background: var(--ok-bg); } .st.Y { color: var(--review); background: var(--review-bg); } .st.X { color: var(--blocked); background: var(--blocked-bg); } .st.U { color: var(--muted); background: var(--surface-2); }
 details.zero { margin-top: 6px; }
 details.zero summary { cursor: pointer; font-size: 14px; color: var(--muted); padding: 4px 0; }
+details.recap { margin: 2px 0 10px; }
+details.recap summary { cursor: pointer; font-size: 13.5px; color: var(--muted); padding: 4px 0; }
+.seg.tabs button { font-size: 14px; padding: 7px 14px; }
+.xline { display: flex; align-items: center; gap: 12px; margin: 10px 0 6px; }
+.xline h3 { margin: 0; }
 .drop.live { display: block; cursor: pointer; border-color: var(--accent); background: var(--accent-soft); color: var(--text); padding: 26px 16px; }
 .drop.live.over { border-style: solid; box-shadow: 0 0 0 3px var(--accent-soft); }
 .busy { font-weight: 600; }
@@ -275,9 +280,12 @@ const EV_FILTERS = ["Actifs", "À venir", "Terminés", "Brouillons", "Tous"];
 const MSRC = { multiple_list: "Multiple list", multiple_list_family: "famille (deux multiples)", inferred_family: "inféré (famille)", excel_default_1: "absent → 1 (Excel)", missing_default_1: "absent" };
 const CAT = Object.fromEntries(M.categories);  // anciennes catégories (D-036), pour l'historique
 const CATEGORY_FILTERS = ["Tous", ...DATA.category_names];
-// D-039 : « À traiter » = OK + REVIEW non confirmés ; REVIEW / BLOCKED = non confirmés ;
-// « Modifié » = Qty finale différente de la Qty proposée, quel que soit le statut.
-const STATUS_FILTERS = ["Tous", "À traiter", "REVIEW", "BLOCKED", "Confirmé", "Modifié"];
+// D-050 : une seule table, quatre onglets de statut par priorité. « À vérifier » = lignes non
+// confirmées qui ne partiront pas sans confirmation (BLOCKED, REVIEW, OK flaguée par un
+// événement) ; « OK » = OK non confirmées sans événement ; « Confirmées » ; « Toutes ».
+// « Modifiées seulement » (case) = Qty finale différente de la Qty proposée, quel que soit le statut.
+const VERIFY = "À vérifier";
+const STATUS_FILTERS = [VERIFY, "OK", "Confirmées", "Toutes"];
 const MODES = { "Standard": "standard", "Parité Excel": "excel_parity" };
 const MODE_LABEL = { standard: "Standard", excel_parity: "Parité Excel" };
 // Deux sources : la démo (calculée d'avance) et « Mes fichiers » (moteur Python dans le navigateur).
@@ -328,7 +336,7 @@ const st = {
   page: (p => PAGES.includes(p) ? p : PAGES[0])(store.get("spc2_page", PAGES[0])), author: store.get("spc_author", ""),
   // Commandes : une entrée par boutique ajoutée (onglet) ; la boutique affichée a son état dans st.* (ORDER_KEYS).
   tabs: null, active: null, order: null,
-  overrides: {}, roundNotes: [], seen: new Set(), dcWarn: new Set(), dcForced: new Set(), f: { cat: "Tous", status: "Tous", qty: false, ev: null }, sort: null, q: "", why: null, rowOrder: null, savedId: null, xmsg: null,
+  overrides: {}, roundNotes: [], seen: new Set(), dcWarn: new Set(), dcForced: new Set(), f: { cat: "Tous", status: VERIFY, qty: false, mod: false, ev: null }, sort: null, q: "", why: null, rowOrder: null, savedId: null, xmsg: null,
   showInactive: false,  // D-049 : « Afficher les SKU inactifs (N) »
   refTab: 0, source: "demo", busy: "", depotErr: [],
   // Événements : reprises (session seulement), demandes terminées, validations avant export.
@@ -681,7 +689,7 @@ function tableOf(head, rows, numCols = []) {
 // Une boutique = une commande simple, plusieurs = une journée. Rien n'est présélectionné (plus de
 // Schedule). La boutique affichée garde son état dans st.* ; les autres onglets dans st.tabs.states.
 const ORDER_KEYS = ["order", "overrides", "seen", "confirmed", "dcWarn", "dcForced", "savedId", "why", "f", "sort", "q", "rowOrder", "roundNotes", "xmsg"];
-function emptyState() { return { order: null, overrides: {}, seen: new Set(), confirmed: new Set(), dcWarn: new Set(), dcForced: new Set(), savedId: null, why: null, f: { cat: "Tous", status: "Tous", qty: false, ev: null }, sort: null, q: "", rowOrder: null, roundNotes: [], xmsg: null }; }
+function emptyState() { return { order: null, overrides: {}, seen: new Set(), confirmed: new Set(), dcWarn: new Set(), dcForced: new Set(), savedId: null, why: null, f: { cat: "Tous", status: VERIFY, qty: false, mod: false, ev: null }, sort: null, q: "", rowOrder: null, roundNotes: [], xmsg: null }; }
 function tabs() { if (!st.tabs || st.tabs.source !== st.source) { st.tabs = { source: st.source, list: [], params: {}, states: {}, computed: {}, errors: {} }; st.active = null; Object.assign(st, emptyState()); } return st.tabs; }
 function parkActive() { const t = tabs(); if (st.active && t.list.includes(st.active)) t.states[st.active] = Object.fromEntries(ORDER_KEYS.map(k => [k, st[k]])); }
 function activate(b) { if (b === st.active) return; parkActive(); Object.assign(st, tabs().states[b] || emptyState()); st.active = b; render(); }
@@ -726,7 +734,8 @@ async function computeFor(b) {
 }
 async function computeOne(b) { if (await computeFor(b)) activate(b); render(); }
 async function computeAll() { for (const b of [...tabs().list]) await computeFor(b); if (!st.active && tabs().list.length) activate(tabs().list[0]); render(); }
-const READY_DOT = { "à calculer": "○", "calculé": "◐", "confirmé": "●" };
+const READY_DOT = { "à calculer": "○", "à vérifier": "◐", "prête": "●" };
+const readyState = r => r.status === "à vérifier" ? r.pending + " à vérifier" : r.status;
 // Où en est une boutique : lignes à confirmer, garde-fou des événements, ce qui bloque son LT.
 function readiness(b) {
   const t = tabs(), s = b === st.active ? st : t.states[b];
@@ -734,9 +743,9 @@ function readiness(b) {
   if (t.computed[b] !== JSON.stringify(t.params[b])) return { b, status: "à calculer", reason: "paramètres modifiés, à recalculer" };
   return withState(b, () => {
     const ls = lines(), sum = summarize(ls), base = ls.map(x => baseLine(x.j)), open = ls.filter(x => !isConf(x.m.sku));
-    const review = open.filter(x => x.s === "R").length, blocked = open.filter(x => x.s === "B").length, toTreat = open.filter(x => x.s !== "B").length;
+    const review = open.filter(x => x.s === "R").length, blocked = open.filter(x => x.s === "B").length;
     const pending = pendingLines(ls).length;
-    return { b, status: review || blocked ? "calculé" : "confirmé", ls, sum, base, review, blocked, toTreat, pending, delivery: st.order.delivery, reason: pending ? pending + " ligne(s) à confirmer" : "", ready: !pending };
+    return { b, status: pending ? "à vérifier" : "prête", ls, sum, base, review, blocked, pending, delivery: st.order.delivery, reason: pending ? pending + " ligne(s) à vérifier" : "", ready: !pending };
   });
 }
 function coverSelect(id, value, optional) {
@@ -779,16 +788,18 @@ function tabBar(states) {
   return el("div", "tabbar", tabs().list.map(b => {
     const r = states[b];
     return el("span", "tag" + (b === st.active ? " on" : ""),
-      el("button", { class: "tb", id: "tab_open_" + b, onclick: () => activate(b) }, READY_DOT[r.status] + " " + b + " · " + r.status + (r.ls ? " · REVIEW " + r.review + " · BLOCKED " + r.blocked : "")),
+      el("button", { class: "tb", id: "tab_open_" + b, onclick: () => activate(b) }, READY_DOT[r.status] + " " + b + " · " + readyState(r)),
       el("button", { "aria-label": "Retirer " + b, id: "tab_close_" + b, title: "Retirer " + b, onclick: () => removeBoutique(b) }, "×"));
   }));
 }
+// D-050 : récapitulatif de la journée replié par défaut (unités, palettes, lignes à vérifier).
 function recapTable(states) {
   const list = tabs().list, done = list.map(b => states[b]).filter(r => r.ls);
-  const rows = list.map(b => { const r = states[b]; return [el("span", "mono", b), r.status, r.ls ? fdate(r.delivery) : "—", r.ls ? fmt(r.sum.units) : "—", r.ls ? fmt1(r.sum.palTotal) : "—", r.ls ? fmt(r.toTreat) : "—", r.ls ? el("span", "st R", String(r.review)) : "—", r.ls ? el("span", "st B", String(r.blocked)) : "—"]; });
-  rows.push([el("b", "", "Total"), done.length + " / " + list.length + " calculée(s)", "", el("b", "", fmt(done.reduce((a, r) => a + r.sum.units, 0))), el("b", "", fmt1(done.reduce((a, r) => a + r.sum.palTotal, 0))),
-    el("b", "", fmt(done.reduce((a, r) => a + r.toTreat, 0))), el("b", "", fmt(done.reduce((a, r) => a + r.review, 0))), el("b", "", fmt(done.reduce((a, r) => a + r.blocked, 0)))]);
-  return tableOf(["Boutique", "Statut", "Livraison", "Unités", "Palettes", "À traiter", "REVIEW", "BLOCKED"], rows, [3, 4, 5, 6, 7]);
+  const units = done.reduce((a, r) => a + r.sum.units, 0), pal = done.reduce((a, r) => a + r.sum.palTotal, 0), pend = done.reduce((a, r) => a + r.pending, 0);
+  const rows = list.map(b => { const r = states[b]; return [el("span", "mono", b), readyState(r), r.ls ? fdate(r.delivery) : "—", r.ls ? fmt(r.sum.units) : "—", r.ls ? fmt1(r.sum.palTotal) : "—", r.ls ? fmt(r.pending) : "—"]; });
+  rows.push([el("b", "", "Total"), done.length + " / " + list.length + " calculée(s)", "", el("b", "", fmt(units)), el("b", "", fmt1(pal)), el("b", "", fmt(pend))]);
+  return el("details", { class: "recap", id: "order_recap" }, el("summary", "", "Récapitulatif · " + list.length + " boutique(s) · " + fmt(units) + " unités · " + fmt1(pal) + " palettes · " + fmt(pend) + " à vérifier"),
+    tableOf(["Boutique", "État", "Livraison", "Unités", "Palettes", "À vérifier"], rows, [3, 4, 5]));
 }
 function renderOrders() {
   const t = tabs(), out = [el("h1", "", "Commandes"), addRow()];
@@ -807,11 +818,13 @@ function categoryOf(m) { return categories()[(m.type || "").trim().toUpperCase()
 const isConf = sku => st.seen.has(sku) || st.confirmed.has(sku);
 const isMod = x => !!x.ov && x.qty !== x.bq;
 function statusKey(x) { return isConf(x.m.sku) ? "Confirmé" : STATUS[x.s]; }
+const needsCheck = x => x.s !== "O" || x.ev.length > 0;  // ne partira pas sans confirmation
+const verifyRank = x => x.s === "B" ? 0 : x.s === "R" ? 1 : 2;  // BLOCKED → REVIEW → événement
 function statusMatch(x, f) {
-  if (f === "Tous") return true;
-  if (f === "Modifié") return isMod(x);
-  if (f === "À traiter") return !isConf(x.m.sku) && x.s !== "B";
-  return statusKey(x) === f;
+  if (f === "Toutes") return true;
+  if (f === "Confirmées") return isConf(x.m.sku);
+  if (isConf(x.m.sku)) return false;
+  return f === VERIFY ? needsCheck(x) : !needsCheck(x);
 }
 // D-048 : une ligne DC à 0 (ou insuffisant) avec Qty finale > 0 n'est pas confirmée au premier
 // clic : elle passe en attente (orange, « confirmer quand même ? ») ; le second clic confirme,
@@ -838,6 +851,7 @@ function matches(x) {
   if (f.cat !== "Tous" && categoryOf(x.m) !== f.cat) return false;
   if (!statusMatch(x, f.status)) return false;
   if (f.qty && x.qty <= 0) return false;
+  if (f.mod && !isMod(x)) return false;
   if (f.ev !== null && (!x.ev.length || (f.ev !== "all" && !x.ev.some(e => e.id === f.ev)))) return false;
   return !st.q || x.m.sku.toLowerCase().includes(st.q) || x.m.desc.toLowerCase().includes(st.q);
 }
@@ -879,7 +893,11 @@ function coverCell(x) {
   const cls = after === null ? "" : after < x.cover ? " cov-low" : " cov-ok";
   return el("td", { class: "n cov" + cls, title: "actuelle " + fmt1(cur) + " j → après commande " + fmt1(after) + " j (cible " + fmt1(x.cover) + " j)" }, fmt1(after));
 }
-function defaultCmp(baseQty) { return (a, b) => ((a.s === "O") - (b.s === "O")) || (baseQty[b.m.sku] - baseQty[a.m.sku]) || a.m.sku.localeCompare(b.m.sku); }
+function defaultCmp(baseQty) {
+  // Onglet « À vérifier » : BLOCKED → REVIEW → événements ; ailleurs REVIEW et BLOCKED en haut. Puis Qty proposée décroissante.
+  const rank = st.f.status === VERIFY ? x => verifyRank(baseLine(x.j)) : x => (x.s === "O" ? 1 : 0);
+  return (a, b) => (rank(a) - rank(b)) || (baseQty[b.m.sku] - baseQty[a.m.sku]) || a.m.sku.localeCompare(b.m.sku);
+}
 // D-039 : l'ordre des lignes est figé ; il ne se refait qu'au clic sur un en-tête ou au
 // changement de filtre, jamais après une saisie (la ligne ne bouge pas pendant que tu tapes).
 function stableRows(rows, baseQty) {
@@ -945,34 +963,36 @@ function segmented(label, options, value, counts, onpick) {
   return el("div", "f", label, el("div", "seg", options.map(o => el("button", { class: value === o ? "on" : "", onclick: () => onpick(o) }, o, el("b", "", String(counts[o] || 0))))));
 }
 function orderBody() {
-  const out = [], o = st.order, ls = lines(), s = summarize(ls), v = V(o);
+  const out = [], o = st.order, ls = lines(), s = summarize(ls), v = V(o), pend = pendingLines(ls);
   const baseQty = {}; for (const x of ls) baseQty[x.m.sku] = baseLine(x.j).qty;
   out.push(el("div", "ctx", el("b", "", btqLabel(o.boutique)), " · DC " + v.dc + " · livraison ", el("b", "", fdate(o.delivery)),
     " · cover " + fmt1(M.covers[+o.cover]) + " j" + (o.coffee !== "" ? " (café " + fmt1(M.covers[+o.coffee]) + " j)" : "") + " · historique " + v.hd + " j · " + MODE_LABEL[o.mode] + (o.live ? (st.source === "live" ? " · tes fichiers" : " · démo recalculée avec tes modifications") : " · démo")));
   out.push(el("div", "tiles",
     tile("Unités", fmt(s.units), fmt(s.ordered) + " lignes commandées"),
     tile("Palettes estimées", fmt1(s.palTotal), "VL " + fmt1(s.pal.VL) + " · OL " + fmt1(s.pal.OL) + " · Mach. " + fmt1(s.pal.MACHINES) + " · Autres " + fmt1(s.pal.OTHERS)),
-    tile("OK", fmt(ls.filter(x => x.s === "O" && !isConf(x.m.sku)).length), null, "O"),
-    tile("REVIEW", fmt(ls.filter(x => x.s === "R" && !isConf(x.m.sku)).length), null, "R"),
-    tile("BLOCKED", fmt(ls.filter(x => x.s === "B" && !isConf(x.m.sku)).length), null, "B"),
-    tile("Confirmé", fmt(ls.filter(x => isConf(x.m.sku)).length), null, "O")));
+    tile("À vérifier", fmt(pend.length), "BLOCKED " + pend.filter(x => x.s === "B").length + " · REVIEW " + pend.filter(x => x.s === "R").length + " · événement " + pend.filter(x => x.s === "O").length, pend.length ? "R" : "O")));
   v.warnings.forEach(w => out.push(el("div", "msg warn", w)));
   out.push(...eventBanner(o, ls));
-  const byCat = { Tous: ls.length }, bySt = { Tous: ls.length };
-  ls.forEach(x => { const c = categoryOf(x.m); byCat[c] = (byCat[c] || 0) + 1; STATUS_FILTERS.slice(1).forEach(f => { if (statusMatch(x, f)) bySt[f] = (bySt[f] || 0) + 1; }); });
+  const byCat = { Tous: ls.length }, bySt = {};
+  ls.forEach(x => { const c = categoryOf(x.m); byCat[c] = (byCat[c] || 0) + 1; STATUS_FILTERS.forEach(f => { if (statusMatch(x, f)) bySt[f] = (bySt[f] || 0) + 1; }); });
   const search = el("input", { type: "search", id: "search", placeholder: "Rechercher un SKU ou une description", value: st.q });
   search.oninput = () => { st.q = search.value.trim().toLowerCase(); clearTimeout(search._t); search._t = setTimeout(() => { render(); const s2 = $("search"); s2.focus(); s2.setSelectionRange(s2.value.length, s2.value.length); }, 200); };
-  out.push(el("div", "filters",
-    segmented("Catégorie", CATEGORY_FILTERS, st.f.cat, byCat, c => { st.f.cat = c; render(); }),
-    segmented("Statut", STATUS_FILTERS, st.f.status, bySt, c => { st.f.status = c; render(); }),
+  // D-050 : onglets de statut (sans libellé) au-dessus, filtres secondaires dessous.
+  const tabsEl = segmented("", STATUS_FILTERS, st.f.status, bySt, c => { st.f.status = c; render(); }); tabsEl.id = "f_status"; tabsEl.querySelector(".seg").classList.add("tabs");
+  out.push(el("div", "filters", { style: "margin-bottom:4px" }, tabsEl));
+  out.push(el("div", "filters", { style: "margin-top:4px" },
+    segmented("", CATEGORY_FILTERS, st.f.cat, byCat, c => { st.f.cat = c; render(); }),
     el("label", "chk", el("input", { type: "checkbox", id: "f_qty", checked: st.f.qty, onchange: e => { st.f.qty = e.target.checked; render(); } }), "Qty > 0 seulement"),
+    el("label", { class: "chk", title: "Qty finale différente de la Qty proposée, quel que soit le statut" }, el("input", { type: "checkbox", id: "f_mod", checked: st.f.mod, onchange: e => { st.f.mod = e.target.checked; render(); } }), "Modifiées seulement"),
     el("div", "grow", search)));
   if (st.roundNotes.length) { st.roundNotes.forEach(n => out.push(el("div", "small", { style: "color:#94600F;margin:4px 0" }, "⚠ " + n))); st.roundNotes = []; }
   const shown = stableRows(ls.filter(matches), baseQty), todo = shown.filter(x => !isConf(x.m.sku)).map(x => x.m.sku);
-  out.push(el("div", "row", { style: "margin:6px 0" },
-    el("button", { class: "btn", id: "accept_ok", onclick: () => { setConfirmed(ls.filter(x => x.s === "O").map(x => x.m.sku), true, true); render(); } }, ic("checks"), "Accepter toutes les lignes OK"),
+  // Un bouton de lot par onglet (D-039, D-050) ; les lignes DC à 0 sont toujours exclues du lot (D-048).
+  if (st.f.status === "OK") out.push(el("div", "row", { style: "margin:6px 0" },
+    el("button", { class: "btn", id: "accept_ok", onclick: () => { setConfirmed(ls.filter(x => x.s === "O" && !x.ev.length).map(x => x.m.sku), true, true); render(); } }, ic("checks"), "Accepter toutes les lignes OK")));
+  else if (st.f.status !== "Confirmées") out.push(el("div", "row", { style: "margin:6px 0" },
     el("button", { class: "btn", id: "confirm_shown", disabled: !todo.length, onclick: () => { setConfirmed(todo, true, true); render(); } }, ic("check"), "Confirmer les lignes affichées (" + todo.length + ")")));
-  out.push(shown.length ? orderTable(shown, baseQty) : el("div", "msg info", "Aucune ligne pour ces filtres."));
+  out.push(shown.length ? orderTable(shown, baseQty) : el("div", "msg info", st.f.status === VERIFY && !pend.length ? "Rien à vérifier : toutes les lignes REVIEW, BLOCKED et flaguées sont confirmées." : "Aucune ligne pour ces filtres."));
   out.push(el("div", "row", { style: "justify-content:space-between;margin-top:8px" },
     el("span", "small muted", shown.length + " ligne(s) affichée(s) sur " + ls.length + " · lignes confirmées : " + ls.filter(x => isConf(x.m.sku)).length + " / " + ls.length + " · clic sur un en-tête pour trier, sur une ligne pour le détail · ",
       el("label", { class: "chk", style: "display:inline-flex;padding:0", title: "Anciens SKU : Expected, Available, Incoming, ventes et stock DC à 0. Calculés quand même, masqués de la table et des tuiles (D-049)." },
@@ -981,18 +1001,14 @@ function orderBody() {
   return out;
 }
 // Fichiers LT : la boutique affichée, ou toutes (zip). Chaque téléchargement passe par le garde-fou :
-// lignes REVIEW et BLOCKED confirmées (D-039) et les 3 points des événements SKU.
+// lignes de l'onglet « À vérifier » confirmées (D-039, D-050) et les 3 points des événements SKU.
 function ltBlock(states) {
   const out = [], ls = lines(), s = summarize(ls), now = new Date(), b0 = st.order.boutique, name = ltName(b0, now);
-  // D-043 : une seule liste. Vide → « Tout est confirmé » et les téléchargements sont actifs.
-  const pending = pendingLines(ls), baseQty = {}; ls.forEach(x => { baseQty[x.m.sku] = baseLine(x.j).qty; });
-  if (!pending.length) out.push(el("h3", "", "✓ Tout est confirmé"));
-  else {
-    out.push(el("div", "row", { style: "justify-content:space-between;align-items:center" },
-      el("h3", { style: "margin:8px 0" }, pending.length + " ligne(s) ne partiront pas si tu ne les confirmes pas"),
-      el("button", { class: "btn", id: "confirm_pending", onclick: () => { setConfirmed(pending.map(x => x.m.sku), true, true); render(); } }, ic("checks"), "Tout confirmer")));
-    out.push(orderTable(sortRows(pending, baseQty), baseQty, [0, 1, 2, 3, 7, 13]));
-  }
+  // D-050 : plus de seconde liste, une ligne d'état avec « Voir » (ouvre l'onglet « À vérifier »).
+  const pending = pendingLines(ls);
+  if (!pending.length) out.push(el("div", "xline", el("h3", { style: "color:var(--ok)" }, "✓ Tout est confirmé")));
+  else out.push(el("div", "xline", el("h3", { style: "color:#94600F" }, "⚠ " + pending.length + " ligne(s) à vérifier avant l'export"),
+    el("button", { class: "btn", id: "see_pending", title: "Ouvrir l'onglet « À vérifier » de la table", onclick: () => { st.f.status = VERIFY; render(); $("f_status") && $("f_status").scrollIntoView({ block: "start", behavior: "smooth" }); } }, "Voir")));
   const na = needAuthor(); if (na) out.push(na);
   const mine = states[b0], box = el("div");
   if (st.xmsg) box.append(st.xmsg);

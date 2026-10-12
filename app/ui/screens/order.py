@@ -47,45 +47,68 @@ from app.ui.common import (
 )
 
 CATEGORY_FILTERS = ("Tous", *CATEGORIES)
-# D-039 : « À traiter » = OK + REVIEW non confirmés ; REVIEW / BLOCKED = non confirmés ;
-# « Modifié » = Qty finale différente de la Qty proposée, quel que soit le statut.
-STATUS_FILTERS = ("Tous", "À traiter", "REVIEW", "BLOCKED", "Confirmé", "Modifié")
+# D-050 : une seule table, quatre onglets de statut par priorité. « À vérifier » = lignes non
+# confirmées qui ne partiront pas sans confirmation (BLOCKED, REVIEW, ou OK flaguée par un
+# événement) ; « OK » = OK non confirmées sans événement ; « Confirmées » ; « Toutes ».
+VERIFY, OK_TAB, CONFIRMED_TAB, ALL_TAB = "À vérifier", "OK", "Confirmées", "Toutes"
+STATUS_TABS = (VERIFY, OK_TAB, CONFIRMED_TAB, ALL_TAB)
 TABLE_HEIGHT = 600
 FALLBACK_WEEKS_DEFAULT = 4
 
 
-def _tiles(res, hidden: set[str] = frozenset()) -> None:  # noqa: ANN001
-    """Unités, palettes, puis OK / REVIEW / BLOCKED non confirmés et Confirmé (D-039).
-    Les SKU inactifs masqués (D-049) ne comptent pas."""
+def needs_check(base: RecommendationLine) -> bool:
+    """Ligne qui ne partira pas sans confirmation : REVIEW, BLOCKED ou flaguée par un
+    événement (lancement, demande boutique, promo…)."""
+    return base.status is not Status.OK or bool(event_tags(base))
+
+
+def verify_rank(base: RecommendationLine) -> int:
+    """Ordre de l'onglet « À vérifier » : BLOCKED, puis REVIEW, puis flaguées par un événement."""
+    if base.status is Status.BLOCKED:
+        return 0
+    return 1 if base.status is Status.REVIEW else 2
+
+
+def verify_order(
+    lines: list[RecommendationLine], base: dict[str, RecommendationLine]
+) -> list[RecommendationLine]:
+    """Tri de l'onglet « À vérifier » : BLOCKED → REVIEW → événements, puis Qty proposée
+    décroissante (statut et qty du calcul : une ligne ne bouge pas pendant la saisie, D-039)."""
+    return sorted(lines, key=lambda x: (verify_rank(base[x.sku]), -base[x.sku].qty, x.sku))
+
+
+def _tiles(res, pool: list[RecommendationLine]) -> None:  # noqa: ANN001
+    """Unités, palettes estimées, et lignes à vérifier (BLOCKED · REVIEW · événement).
+    Les SKU inactifs masqués (D-049) ne comptent pas (`pool` = lignes visibles)."""
     s, p = res.summary, res.pallets
-    cols = st.columns(6)
+    base = {x.sku: x for x in res.base_lines}
+    cols = st.columns(3)
     cols[0].metric("Unités", fmt_int(s.units_total))
     cols[1].metric("Palettes estimées", fmt_1(p.total_pallets))
     cols[1].caption(f"VL {fmt_1(p.pallets[VL])} · OL {fmt_1(p.pallets[OL])} · "
                     f"Mach. {fmt_1(p.pallets[MACHINES])} · Autres {fmt_1(p.pallets[OTHERS])}")  # fmt: skip
-    counts = {"OK": 0, "REVIEW": 0, "BLOCKED": 0, "Confirmé": 0}
-    for b in res.base_lines:
-        if b.sku not in hidden:
-            counts[shown_status(b.sku, b.status)] += 1
-    cols[2].metric(STATUS_MD["OK"], fmt_int(counts["OK"]))
-    cols[3].metric(STATUS_MD["REVIEW"], fmt_int(counts["REVIEW"]))
-    cols[4].metric(STATUS_MD["BLOCKED"], fmt_int(counts["BLOCKED"]))
-    cols[5].metric(CONFIRMED_MD, fmt_int(counts["Confirmé"]))
+    counts = [0, 0, 0]
+    for x in pool:
+        b = base[x.sku]
+        if not is_confirmed(x.sku) and needs_check(b):
+            counts[verify_rank(b)] += 1
+    cols[2].metric("À vérifier", fmt_int(sum(counts)))
+    cols[2].caption(f"{STATUS_MD['BLOCKED']} {counts[0]} · {STATUS_MD['REVIEW']} {counts[1]} · "
+                    f"événement {counts[2]}")  # fmt: skip
 
 
 def _status_match(x: RecommendationLine, base: RecommendationLine, status: str) -> bool:
-    shown = shown_status(x.sku, base.status)
-    if status == "Tous":
+    if status == ALL_TAB:
         return True
-    if status == "Modifié":
-        return x.qty != base.qty
-    if status == "À traiter":
-        return shown in ("OK", "REVIEW")
-    return shown == status
+    if status == CONFIRMED_TAB:
+        return is_confirmed(x.sku)
+    if is_confirmed(x.sku):
+        return False
+    return needs_check(base) if status == VERIFY else not needs_check(base)
 
 
 def _matches(x: RecommendationLine, base: RecommendationLine, cat: str, status: str,
-             qty_only: bool, search: str, mapping: dict[str, str],
+             qty_only: bool, mod_only: bool, search: str, mapping: dict[str, str],
              event: str | int | None = None) -> bool:  # fmt: skip
     if cat != "Tous" and category_of_line(x, mapping) != cat:
         return False
@@ -96,6 +119,8 @@ def _matches(x: RecommendationLine, base: RecommendationLine, cat: str, status: 
     if not _status_match(x, base, status):
         return False
     if qty_only and x.qty <= 0:
+        return False
+    if mod_only and x.qty == base.qty:  # « Modifiées seulement » : Qty finale ≠ Qty proposée
         return False
     return not search or search in x.sku.lower() or search in (x.description or "").lower()
 
@@ -141,40 +166,49 @@ def _others_personal(res) -> list:  # noqa: ANN001
 
 def _filters(
     lines: list[RecommendationLine], base: dict[str, RecommendationLine], mapping: dict[str, str]
-) -> tuple[str, str, bool, str]:
-    """Barre de filtres : catégorie, statut, Qty > 0, recherche (aucun recalcul)."""
+) -> tuple[str, str, bool, bool, str]:
+    """Onglets de statut (D-050), puis filtres secondaires : catégorie, Qty > 0, Modifiées
+    seulement, recherche. Aucun recalcul."""
     by_cat = {c: 0 for c in CATEGORY_FILTERS}
-    by_status = {s: 0 for s in STATUS_FILTERS}
+    by_status = {s: 0 for s in STATUS_TABS}
     for x in lines:
         by_cat["Tous"] += 1
         by_cat[category_of_line(x, mapping)] += 1
-        for s in STATUS_FILTERS:
+        for s in STATUS_TABS:
             by_status[s] += _status_match(x, base[x.sku], s)
-    c1, c2 = st.columns([5.2, 1], vertical_alignment="bottom")
+    status = st.segmented_control("Statut", STATUS_TABS, default=VERIFY, key="f_status",
+                                  format_func=lambda c: f"{c} ({by_status[c]})",
+                                  label_visibility="collapsed") or VERIFY  # fmt: skip
+    c1, c2, c3, c4 = st.columns([4.2, 1, 1.2, 2.2], vertical_alignment="bottom")
     cat = c1.segmented_control("Catégorie", CATEGORY_FILTERS, default="Tous", key="f_cat",
-                               format_func=lambda c: f"{c} ({by_cat[c]})") or "Tous"  # fmt: skip
+                               format_func=lambda c: f"{c} ({by_cat[c]})",
+                               label_visibility="collapsed") or "Tous"  # fmt: skip
     qty_only = c2.checkbox("Qty > 0 seulement", key="f_qty")
-    c3, c4 = st.columns([4.4, 3.4], vertical_alignment="bottom")
-    status = c3.segmented_control("Statut", STATUS_FILTERS, default="Tous", key="f_status",
-                                  format_func=lambda c: f"{c} ({by_status[c]})") or "Tous"  # fmt: skip
+    mod_only = c3.checkbox("Modifiées seulement", key="f_mod",
+                           help="Qty finale différente de la Qty proposée, quel que soit le statut")  # fmt: skip
     search = c4.text_input("Recherche", placeholder="Rechercher un SKU ou une description",
                            key="f_search", label_visibility="collapsed").strip().lower()  # fmt: skip
-    return cat, status, qty_only, search
+    return cat, status, qty_only, mod_only, search
 
 
 def _bulk_buttons(lines: list[RecommendationLine], shown: list[RecommendationLine],
-                  base: dict[str, RecommendationLine]) -> None:  # fmt: skip
-    """« Accepter toutes les lignes OK » et « Confirmer les lignes affichées » (D-039)."""
-    c1, c2, _ = st.columns([1.6, 1.6, 3])
-    if c1.button("Accepter toutes les lignes OK", icon=":material/done_all:", key="accept_ok",
-                 width="stretch"):  # fmt: skip
-        set_confirmed([x.sku for x in lines if base[x.sku].status is Status.OK], True, bulk=True)
-        st.rerun()
-    todo = [x.sku for x in shown if not is_confirmed(x.sku)]
-    if c2.button(f"Confirmer les lignes affichées ({len(todo)})", icon=":material/checklist:",
-                 key="confirm_shown", disabled=not todo, width="stretch"):  # fmt: skip
-        set_confirmed(todo, True, bulk=True)
-        st.rerun()
+                  base: dict[str, RecommendationLine], status: str) -> None:  # fmt: skip
+    """Un bouton de lot par onglet (D-039, D-050) : « Accepter toutes les lignes OK » sur
+    l'onglet OK, « Confirmer les lignes affichées » sur À vérifier et Toutes, rien sur
+    Confirmées. Les lignes à stock DC à 0 sont toujours exclues du lot (D-048)."""
+    c1, _ = st.columns([1.8, 4.6])
+    if status == OK_TAB:
+        if c1.button("Accepter toutes les lignes OK", icon=":material/done_all:", key="accept_ok",
+                     width="stretch"):  # fmt: skip
+            # Les OK flaguées par un événement restent dans « À vérifier » (D-050).
+            set_confirmed([x.sku for x in lines if not needs_check(base[x.sku])], True, bulk=True)
+            st.rerun()
+    elif status != CONFIRMED_TAB:
+        todo = [x.sku for x in shown if not is_confirmed(x.sku)]
+        if c1.button(f"Confirmer les lignes affichées ({len(todo)})", icon=":material/checklist:",
+                     key="confirm_shown", disabled=not todo, width="stretch"):  # fmt: skip
+            set_confirmed(todo, True, bulk=True)
+            st.rerun()
 
 
 DC_NOTE = "Confirmé malgré DC à 0"
@@ -401,19 +435,17 @@ def render_order(res, data) -> None:  # noqa: ANN001 - PlanningResult (avec modi
     # pas dans les tuiles ; « Afficher les SKU inactifs (N) » sous la table les montre.
     inactive = {x.sku for x in res.lines if is_inactive_line(x)}
     pool = res.lines if ss.show_inactive else [x for x in res.lines if x.sku not in inactive]
-    _tiles(res, inactive)
+    _tiles(res, pool)
     for w in res.rule_warnings:
         st.warning(w)
 
     event = _event_banner(res)
     base = {x.sku: x for x in res.base_lines}
-    cat, status, qty_only, search = _filters(pool, base, mapping)
-    shown = default_order(
-        [x for x in pool
-         if _matches(x, base[x.sku], cat, status, qty_only, search, mapping, event)],
-        base,
-    )  # fmt: skip
-    _bulk_buttons(pool, shown, base)
+    cat, status, qty_only, mod_only, search = _filters(pool, base, mapping)
+    picked = [x for x in pool
+              if _matches(x, base[x.sku], cat, status, qty_only, mod_only, search, mapping, event)]  # fmt: skip
+    shown = verify_order(picked, base) if status == VERIFY else default_order(picked, base)
+    _bulk_buttons(pool, shown, base, status)
     for note in ss.pop("round_notes", None) or []:
         st.caption(f":orange[:material/warning:] {note}")
     side = bool(ss.why_sku)
@@ -423,7 +455,10 @@ def render_order(res, data) -> None:  # noqa: ANN001 - PlanningResult (avec modi
         # Même grille tant que les lignes affichées ne changent pas : taper une qty ne recrée
         # pas la table, la ligne reste en place et le tri choisi au clic est gardé (D-039).
         rows_id = hash(tuple(x.sku for x in shown))
-        key = f"grid_{p.boutique}_{cat}_{status}_{qty_only}_{search}_{event}_{ss.nonce}_{rows_id}"
+        key = (
+            f"grid_{p.boutique}_{cat}_{status}_{qty_only}_{mod_only}_{search}_{event}_"
+            f"{ss.nonce}_{rows_id}"
+        )
         targets = {x.sku: cover_target(x) for x in shown}
         edited = st.data_editor(style_order_frame(df, targets), key=key, hide_index=True, width="stretch", height=TABLE_HEIGHT, placeholder="—",
                                 column_config=ORDER_COLUMN_CONFIG,
