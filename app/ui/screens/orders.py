@@ -41,6 +41,7 @@ from app.ui.common import (
     order_state,
     reset_order,
     run_date,
+    short_reasons,
     ss,
     style_order_frame,
     workspace,
@@ -312,7 +313,7 @@ PENDING_COLUMNS = ["Confirmé", "Statut", "SKU", "Description", "Qty proposée",
 def _short_reason(line, base) -> str:  # noqa: ANN001
     """Raison en quelques mots : les raisons du calcul, sinon le titre de l'événement."""
     if line.reasons:
-        return " | ".join(line.reasons)
+        return short_reasons(line, base)
     return ", ".join(dict.fromkeys(t["title"] for t in event_tags(base)))
 
 

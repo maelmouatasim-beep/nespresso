@@ -99,15 +99,16 @@ table.order tr.sel td { box-shadow: inset 0 2px 0 var(--accent), inset 0 -2px 0 
 .chip b { font-weight: 600; font-variant-numeric: tabular-nums; margin-left: 4px; opacity: .7; }
 .tablewrap { overflow: auto; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); max-height: 470px; }
 table { border-collapse: separate; border-spacing: 0; width: 100%; }
-table.order { table-layout: fixed; width: 1410px; }
+table.order { table-layout: fixed; width: 100%; min-width: 996px; }
 th, td { padding: 5px 8px; border-bottom: 1px solid var(--border); text-align: left; white-space: nowrap; vertical-align: middle; overflow: hidden; text-overflow: ellipsis; font-size: 14px; }
+table.order th, table.order td { padding: 4px 6px; font-size: 13px; }
 th { position: sticky; top: 0; background: var(--surface-2); font-size: 12.5px; color: var(--muted); z-index: 2; font-weight: 600; white-space: normal; line-height: 1.2; vertical-align: bottom; }
 td.n, th.n { text-align: right; font-variant-numeric: tabular-nums; }
 /* Bloc figé à gauche : Confirmé (76) + Statut (150) + SKU (110), collés ; le reste défile. */
 table.order td:nth-child(-n+3), table.order th:nth-child(-n+3) { position: sticky; z-index: 1; background: var(--surface); }
 table.order td:nth-child(1), table.order th:nth-child(1) { left: 0; }
-table.order td:nth-child(2), table.order th:nth-child(2) { left: 76px; }
-table.order td:nth-child(3), table.order th:nth-child(3) { left: 226px; box-shadow: inset -1px 0 0 var(--border); }
+table.order td:nth-child(2), table.order th:nth-child(2) { left: 50px; }
+table.order td:nth-child(3), table.order th:nth-child(3) { left: 154px; box-shadow: inset -1px 0 0 var(--border); }
 table.order th:nth-child(-n+3) { z-index: 3; background: var(--surface-2); }
 table.order tbody tr { cursor: pointer; }
 table.order tbody tr:hover td { background: var(--surface-2); }
@@ -821,13 +822,37 @@ function matches(x) {
   return !st.q || x.m.sku.toLowerCase().includes(st.q) || x.m.desc.toLowerCase().includes(st.q);
 }
 // Colonnes : [titre, largeur, numérique, valeur de tri]
+// D-047 : en-têtes abrégés et largeurs serrées (somme 1000 px) pour qu'un 13 pouces montre tout ;
+// le nom complet est dans l'info-bulle de l'en-tête. Les 3 premières colonnes restent figées
+// (décalages dans le CSS : 0 / 50 / 154 px).
 const COLS = [
-  ["Confirmé", 76, 0, x => isConf(x.m.sku) ? "1" : "0"], ["Statut", 150, 0, x => statusKey(x)], ["SKU", 110, 0, x => x.m.sku], ["Description", 210, 0, x => x.m.desc],
-  ["Expected", 80, 1, x => x.m.exp], ["Available", 80, 1, x => x.m.avail], ["Ventes", 68, 1, x => x.m.sales],
-  ["Proposée", 78, 1, (x, b) => b[x.m.sku]], ["Qty finale", 92, 1, x => x.qty],
+  ["Conf.", 50, 0, x => isConf(x.m.sku) ? "1" : "0", "Confirmé"], ["Statut", 104, 0, x => statusKey(x), "Statut"], ["SKU", 84, 0, x => x.m.sku, "SKU"], ["Description", 108, 0, x => x.m.desc, "Description"],
+  ["Exp.", 58, 1, x => x.m.exp, "Expected : stock attendu du jour (dispo + en route)"], ["Avail.", 58, 1, x => x.m.avail, "Available : stock physiquement en boutique"], ["Ventes", 58, 1, x => x.m.sales, "Ventes sur l'historique"],
+  ["Prop.", 58, 1, (x, b) => b[x.m.sku], "Qty proposée par le calcul"], ["Finale", 64, 1, x => x.qty, "Qty finale (modifiable)"],
   // D-044 / D-046 : Expected + commande et Couverture suivent la Qty finale.
-  ["Expected + commande", 110, 1, x => x.m.exp + x.qty], ["Couverture", 86, 1, x => postCover(x.m, x.qty)],
-  ["Multiple", 68, 1, x => x.multiple], ["Stock DC", 80, 1, x => x.m.dc], ["Raisons", 300, 0, x => x.reasons.join(" | ")]];
+  ["Exp.+cmd", 76, 1, x => x.m.exp + x.qty, "Expected + commande : Expected du jour + Qty finale"], ["Couv.", 50, 1, x => postCover(x.m, x.qty), "Couverture (jours) sur Expected + Qty finale ; rouge sous la cible, vert au-dessus"],
+  ["Mult.", 44, 1, x => x.multiple, "Multiple"], ["DC", 70, 1, x => x.m.dc, "Stock DC"], ["Raisons", 118, 0, x => shortReasons(x), "Source, événements et raisons en texte court ; détail dans le « Pourquoi »"]];
+// Colonne Raisons (D-047) : source, événements (« Promo Festive AOS », « Demande B19 »…), puis
+// chaque raison coupée au premier « : », « ( », « , » ou « → ». Le détail reste dans le « Pourquoi ».
+const EVENT_SHORT = { promotion: "Promo", launch: "Lancement", stop: "Arrêt d'envoi", ban: "Interdiction d'envoi", conversion: "Conversion", urgent: "Urgence", store_request: "Demande", watch: "À surveiller", target_stock: "Stock cible" };
+function shortReason(r) { return r.split(/ : | \(|, | → /, 1)[0].trim(); }
+function eventShortTags(x) {
+  const tags = [];
+  for (const e of x.ev) {
+    const short = EVENT_SHORT[e.type] || e.type, title = (e.title || "").trim();
+    const tag = !title || e.type === "stop" || e.type === "ban" ? short : title.toLowerCase().startsWith(short.toLowerCase().split(" ")[0]) ? title : short + " " + title;
+    if (!tags.includes(tag)) tags.push(tag);
+  }
+  return tags;
+}
+function shortReasons(x) {
+  // « Événement » et « Modifié » sont déjà dits par le tag de l'événement / « Modifié par … ».
+  const titles = x.ev.map(e => (e.title || "").trim()).filter(Boolean);
+  const tags = [...(x.source === "event" || x.source === "override" ? [] : [SRC[x.source]]), ...eventShortTags(x)];
+  for (const r of x.reasons) { if (r.startsWith("Source : ") || titles.some(t => r.includes(t))) continue; const t = shortReason(r); if (t && !tags.includes(t)) tags.push(t); }
+  return tags.join(" | ");
+}
+function incomingTitle(m) { const inc = m.avail === null || m.avail === undefined ? null : m.exp - m.avail; return inc === null ? "" : inc >= 0 ? "+ " + fmt(inc) + " en route" : "− " + fmt(-inc) + " en attente de sortie"; }
 // Couleur discrète de la couverture : rouge sous la cible saisie, vert au-dessus (D-046).
 function coverCell(x) {
   const m = x.m, after = postCover(m, x.qty), cur = postCover(m, 0);
@@ -867,9 +892,9 @@ function clickSort(i) {
 function orderTable(rows, baseQty, keep) {
   const cols = keep ? COLS.filter((_, i) => keep.includes(i)) : COLS, pick = cells => keep ? cells.filter((_, i) => keep.includes(i)) : cells;
   const head = el("tr", "", cols.map((c, i) => {
-    if (keep) return el("th", { class: c[2] ? "n" : "" }, c[0]);
+    if (keep) return el("th", { class: c[2] ? "n" : "", title: c[4] || c[0] }, c[0]);
     const on = st.sort && st.sort.col === i, arrow = on ? (st.sort.dir > 0 ? " ▲" : " ▼") : "";
-    return el("th", { class: (c[2] ? "n " : "") + "sortable" + (on ? " on" : ""), title: "Trier", onclick: () => clickSort(i) }, c[0] + arrow);
+    return el("th", { class: (c[2] ? "n " : "") + "sortable" + (on ? " on" : ""), title: (c[4] || c[0]) + " · clic pour trier", onclick: () => clickSort(i) }, c[0] + arrow);
   }));
   const t = el("table", { class: "order", style: keep ? "width:100%;min-width:" + cols.reduce((a, c) => a + c[1], 0) + "px" : "" }, el("colgroup", "", cols.map(c => el("col", { style: "width:" + c[1] + "px" }))), el("thead", "", head));
   const body = el("tbody");
@@ -878,18 +903,17 @@ function orderTable(rows, baseQty, keep) {
     const tr = el("tr", st.why === sku ? "sel" : "");
     tr.onclick = e => { if (e.target.closest("input,select")) return; openWhy(sku); };
     const shownQty = x.qty, conf = isConf(sku), mod = isMod(x);
-    const stCell = el("span", "", conf ? el("span", "st O", "Confirmé") : el("span", "st " + x.s, STATUS[x.s]), mod ? el("span", "modmark", "● modifié") : null);
+    const stCell = el("span", "", conf ? el("span", "st O", "Confirmé") : el("span", "st " + x.s, STATUS[x.s]), mod ? el("span", { class: "modmark", title: "Qty finale modifiée" }, "●") : null);
     const cb = el("input", { type: "checkbox", checked: conf, "aria-label": "Confirmé " + sku, title: "Cocher = ligne vérifiée (Confirmé). Décocher pour la remettre à traiter." });
     cb.onchange = () => { setConfirmed([sku], cb.checked); render(); };
     const qi = el("input", { type: "number", min: 0, step: x.multiple || 1, value: shownQty, "aria-label": "Qty finale " + sku });
     qi.onchange = () => { const v = Math.round(Number(qi.value)); if (!Number.isFinite(v) || v < 0) { qi.value = shownQty; return; } if (v !== shownQty) { applyOverride(sku, v); render(); } };
     // Liste à confirmer : raison en quelques mots (sinon le titre de l'événement).
-    const reasons = x.reasons.length || !keep ? x.reasons.join(" | ") : [...new Set(x.ev.map(e => e.title))].join(", ");
-    const evText = evCell(x);
-    tr.append(...pick([el("td", "conf", cb), el("td", "", stCell), el("td", "mono", sku), el("td", { title: m.desc + (evText ? " · " + evText : "") }, m.desc || "—"),
-      el("td", "n", fmt(m.exp)), el("td", "n", fmt(m.avail)), el("td", "n", fmt(m.sales)), el("td", "n", fmt(baseQty[sku])),
+    const reasons = x.reasons.length || !keep ? shortReasons(x) : [...new Set(x.ev.map(e => e.title))].join(", ");
+    tr.append(...pick([el("td", "conf", cb), el("td", "", stCell), el("td", { class: "mono", title: sku }, sku), el("td", { title: m.desc }, m.desc || "—"),
+      el("td", { class: "n", title: "Expected " + fmt(m.exp) }, fmt(m.exp)), el("td", { class: "n", title: incomingTitle(m) }, fmt(m.avail)), el("td", "n", fmt(m.sales)), el("td", "n", fmt(baseQty[sku])),
       el("td", "n q" + (mod ? " modq" : ""), qi), el("td", { class: "n", title: "Expected du jour " + fmt(m.exp) + " + Qty finale " + fmt(x.qty) }, fmt(m.exp + x.qty)), coverCell(x), el("td", "n", fmt(x.multiple)),
-      el("td", "n", m.dc === null ? "—" : fmt(m.dc)), el("td", { title: reasons, class: "small" }, reasons || "")]));
+      el("td", "n", m.dc === null ? "—" : fmt(m.dc)), el("td", { title: x.reasons.join("\n") || reasons, class: "small" }, reasons || "")]));
     body.append(tr);
   }
   t.append(body);
@@ -1059,6 +1083,7 @@ function renderWhy() {
     el("h3", "", "Pourquoi cette quantité ?"),
     el("ol", "steps", steps(x).map(([a, v]) => el("li", "", a, v !== undefined ? el("b", "", v) : null)), el("li", "tot", "Quantité finale : " + fmt(x.qty))),
     el("p", "small", "Expected après commande : ", el("b", "", fmt(m.exp + x.qty)), " (Expected du jour " + fmt(m.exp) + " + Qty finale " + fmt(x.qty) + ")"),
+    m.avail === null || m.avail === undefined ? null : el("p", "small", "Available (en boutique) : ", el("b", "", fmt(m.avail)), " · " + incomingTitle(m)),
     el("p", "small", "Couverture : actuelle " + fmt1(postCover(m, 0)) + " j → après commande ", el("b", "", fmt1(postCover(m, x.qty)) + " j"), " · cible " + fmt1(x.cover) + " j"),
     el("p", "small", "Stock DC " + V().dc + " : ", el("b", "", m.dc === null ? "absent" : fmt(m.dc)), " · stock projeté le jour de la livraison (" + days + " j) : ", el("b", "", fmt(proj)),
       x.qty > 0 && m.dc !== null && m.dc < x.qty ? el("span", "", " · ", el("span", "st R", "DC insuffisant")) : null),

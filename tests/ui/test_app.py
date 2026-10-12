@@ -251,9 +251,11 @@ def test_personal_event_applies_only_to_its_planner_until_taken_over(app: AppTes
     compute_b80(app)
     lines = {x.sku: x for x in app.session_state["base"].lines}
     assert lines["7042.70"].qty == 1440  # 1200 + 240 demandés par la boutique
+    assert grid(app).set_index("SKU").loc["7042.70", "Raisons"].startswith("Demande B80")
     app.session_state["why_sku"] = "7042.70"
     app.run()
     assert any("○ Demande B80" in m.value for m in app.markdown)  # dans le « Pourquoi » (D-046)
+    assert any("en route" in m.value for m in app.markdown)  # Available + écart (D-047)
 
 
 def pending(at: AppTest):  # noqa: ANN201
@@ -451,6 +453,8 @@ def test_expected_and_cover_follow_the_final_quantity(app: AppTest) -> None:
     row = grid(app).set_index("SKU").loc["7005.70"]
     assert row["Expected"] == today
     assert row["Available"] == inp["available_total"]
+    # D-047 : Raisons en texte court = source, événement, raisons coupées ; sans doublon
+    assert row["Raisons"].split(" | ")[0] == "Prévision"
     assert row["Expected + commande"] == today + 3120
     assert row["Couverture"] == round((today + 3120) / sales * days, 1)
     app.session_state["why_sku"] = "7005.70"

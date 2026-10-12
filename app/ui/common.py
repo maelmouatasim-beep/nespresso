@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import date, datetime
@@ -265,6 +266,60 @@ def event_cell(line: RecommendationLine) -> str:
     return " · ".join(f"{EVENT_DOT[scope]} {title}" for scope, title in sorted(tags))
 
 
+# Texte court des événements dans la colonne Raisons (D-047) : « Promo Festive AOS »,
+# « Lancement Advent », « Demande B19 », « Arrêt d'envoi »…
+EVENT_SHORT = {
+    "promotion": "Promo",
+    "launch": "Lancement",
+    "stop": "Arrêt d'envoi",
+    "ban": "Interdiction d'envoi",
+    "conversion": "Conversion",
+    "urgent": "Urgence",
+    "store_request": "Demande",
+    "watch": "À surveiller",
+    "target_stock": "Stock cible",
+}
+_REASON_CUT = re.compile(r" : | \(|, | → ")
+
+
+def short_reason(reason: str) -> str:
+    """Une raison en quelques mots : coupée au premier « : », « ( », « , » ou « → »."""
+    return _REASON_CUT.split(reason, maxsplit=1)[0].strip()
+
+
+def event_short_tags(line: RecommendationLine) -> list[str]:
+    tags: list[str] = []
+    for t in event_tags(line):
+        short, title = EVENT_SHORT.get(t["type"], t["type"]), (t.get("title") or "").strip()
+        if not title or t["type"] in ("stop", "ban"):
+            tag = short
+        elif title.lower().startswith(short.lower().split()[0]):
+            tag = title
+        else:
+            tag = f"{short} {title}"
+        if tag not in tags:
+            tags.append(tag)
+    return tags
+
+
+def short_reasons(line: RecommendationLine, base: RecommendationLine | None = None) -> str:
+    """Colonne Raisons (D-047) : source, événements, puis chaque raison en texte court.
+
+    Le détail complet reste dans le panneau « Pourquoi ».
+    """
+    titles = [t.get("title") or "" for t in event_tags(base or line)]
+    # « Événement » et « Modifié » sont déjà dits par le tag de l'événement / « Modifié par … ».
+    tags = [] if line.source.value in ("event", "override") else [SOURCE_LABEL[line.source.value]]
+    tags += event_short_tags(base or line)
+    for r in line.reasons:
+        if r.startswith("Source : ") or any(t and t in r for t in titles):  # déjà dit par le tag
+            continue
+        short = short_reason(r)
+        if short and short not in tags:
+            tags.append(short)
+    return " | ".join(tags)
+
+
 def boutique_label(code: str, names: dict[str, str]) -> str:
     return f"{code} — {names[code]}" if code in names else code
 
@@ -377,10 +432,17 @@ def order_frame(
                 "Couverture": num(_round1(cover_after(x))),
                 "Multiple": num(e["multiple"]),
                 "Stock DC": num(inp["dc_available"]),
-                "Raisons": " | ".join(x.reasons),
+                "Raisons": short_reasons(x, b),
             }
         )
     return pd.DataFrame(rows, columns=ORDER_COLUMNS)
+
+
+def incoming_of(line: RecommendationLine) -> float | None:
+    """Écart Expected − Available = ce qui est en route, pas encore reçu (D-047)."""
+    inp = line.explanation["inputs"]
+    avail = inp.get("available_total")
+    return None if avail is None else float(inp["expected_total"]) - float(avail)
 
 
 def cover_after(line: RecommendationLine, qty: int | None = None) -> float | None:
@@ -406,45 +468,55 @@ ORDER_COLUMNS = [
 ]  # fmt: skip
 
 _INT = {"format": "localized"}
+# En-têtes abrégés et largeurs serrées pour qu'un écran 13 pouces montre toutes les colonnes
+# (barre latérale repliée) ; le nom complet est dans l'aide de la colonne (D-047).
 ORDER_COLUMN_CONFIG = {
     "Confirmé": st.column_config.CheckboxColumn(
         "Confirmé",
-        width=80,
+        width=62,
         pinned=True,
         help="Cocher = ligne vérifiée (statut « Confirmé »). Décocher pour la remettre à traiter.",
     ),  # fmt: skip
     "Détail": st.column_config.CheckboxColumn(
-        "Détail", width=72, help="Pourquoi cette quantité ?", pinned=True
+        "Détail", width=54, help="Pourquoi cette quantité ?", pinned=True
     ),
     # Bloc figé à gauche (Confirmé, Détail, Statut, SKU) : le reste défile.
-    "Statut": st.column_config.TextColumn(width=150, pinned=True),
-    "SKU": st.column_config.TextColumn(width=100, pinned=True),
-    "Description": st.column_config.TextColumn(width=210),
+    "Statut": st.column_config.TextColumn(width=118, pinned=True),
+    "SKU": st.column_config.TextColumn(width=86, pinned=True),
+    "Description": st.column_config.TextColumn(width=150),
     "Expected": st.column_config.NumberColumn(
-        width=80, help="Stock attendu du jour (Stock Situation)", **_INT
+        "Exp.", width=62, help="Expected : stock attendu du jour (dispo + en route)", **_INT
     ),
     "Available": st.column_config.NumberColumn(
-        width=80, help="Stock disponible du jour (Stock Situation)", **_INT
+        "Avail.",
+        width=62,
+        help="Available : stock physiquement en boutique. L'écart avec Expected = en route, "
+        "pas encore reçu (détail dans le « Pourquoi »)",
+        **_INT,
+    ),  # fmt: skip
+    "Ventes": st.column_config.NumberColumn("Ventes", width=62, **_INT),
+    "Qty proposée": st.column_config.NumberColumn(
+        "Prop.", width=62, help="Qty proposée par le calcul", **_INT
     ),
-    "Ventes": st.column_config.NumberColumn(width=70, **_INT),
-    "Qty proposée": st.column_config.NumberColumn("Proposée", width=80, **_INT),
     "Qty finale": st.column_config.NumberColumn(
-        "Qty finale", width=90, min_value=0, step=1, help="Modifiable", **_INT
+        "Finale", width=72, min_value=0, step=1, help="Qty finale, modifiable", **_INT
     ),
     "Expected + commande": st.column_config.NumberColumn(
-        "Expected + commande", width=120, help="Expected du jour + Qty finale", **_INT
+        "Exp.+cmd", width=76, help="Expected + commande : Expected du jour + Qty finale", **_INT
     ),
     "Couverture": st.column_config.NumberColumn(
-        "Couverture",
-        width=90,
+        "Couv.",
+        width=60,
         format="%.1f",
         help="Jours de couverture sur Expected + Qty finale (Qty finale 0 = couverture actuelle). "
         "Rouge : sous la cible saisie · vert : au-dessus. Le détail actuelle → après est dans "
         "le « Pourquoi ».",
     ),  # fmt: skip
-    "Multiple": st.column_config.NumberColumn(width=70, **_INT),
-    "Stock DC": st.column_config.NumberColumn(width=85, **_INT),
-    "Raisons": st.column_config.TextColumn(width=340),
+    "Multiple": st.column_config.NumberColumn("Mult.", width=54, help="Multiple", **_INT),
+    "Stock DC": st.column_config.NumberColumn("DC", width=66, help="Stock DC", **_INT),
+    "Raisons": st.column_config.TextColumn(
+        width=200, help="Source, événements et raisons en texte court ; détail dans le « Pourquoi »"
+    ),
 }
 EDITABLE_COLUMNS = ("Confirmé", "Détail", "Qty finale")
 
