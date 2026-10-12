@@ -87,7 +87,9 @@ EVENT_COLUMNS = [
     "Anticipation (j)", "Effet", "Qty (toutes boutiques)", "Fichier source", "Propriétaire",
     "Planner responsable", "Statut", "Demandé par", "Date de la demande", "Échéance",
 ]  # fmt: skip
-QTY_COLUMNS = ["Réf", "Boutique", "SKU", "Qty"]
+QTY_COLUMNS = ["Réf", "Boutique", "SKU", "Qty", "Min", "Max", "Déjà envoyé", "Vagues (%)",
+               "Vague en cours"]  # fmt: skip
+QTY_EXTRA = QTY_COLUMNS[4:]  # facultatives : allocation (vagues) et stock cible (min / max)
 SKU_COLUMNS = ["Réf", "SKU", "Multiple", "Nouveau SKU"]
 NEXT_ORDER = "Prochaine commande"
 README = [
@@ -104,6 +106,15 @@ README = [
     ("Dates", "AAAA-MM-JJ ou JJ/MM/AAAA. Fin vide permise pour Arrêt et Interdiction."),
     ("Qty", "« Qty (toutes boutiques) » ou, plus précis, l'onglet « Quantités » "
             "(Boutique vide ou * = toutes ; SKU vide = tous)."),
+    ("Allocation", "Type Promotion, effet « Allocation officielle (vagues) » : Qty = total, "
+                   "« Déjà envoyé », « Vagues (%) » (ex. 75/25, vide = une vague) et « Vague en "
+                   "cours » dans l'onglet « Quantités ». Fin vide permise. Remplace "
+                   "l'ancien allocations.xlsx."),
+    ("Lancement", "Effet « Quantité initiale − Expected » : Qty = quantité initiale, Début = "
+                  "date de lancement. Remplace l'ancien launches.xlsx."),
+    ("Stock cible", "Type Stock cible : Qty = cible, « Min » et « Max » obligatoires (onglet "
+                    "« Quantités »). Sous le min après commande → cible − Expected, arrondie au "
+                    "multiple ; au-dessus du max → plafonné. Remplace l'ancien target_stock.xlsx."),
     ("SKU détail", "Facultatif : multiple d'un lancement absent de la Multiple list ; "
                    "« Nouveau SKU » pour une conversion."),
     ("Demande boutique", "Portée Personnel, une seule boutique ; « Demandé par » = prénom ou "
@@ -156,10 +167,52 @@ def example_events() -> list[SkuEvent]:
                  effect=EventEffect.ADD_QTY, quantities=(EventQty(qty=240),),
                  planner="Camille", requested_by="Gérance B80", requested_on=base,
                  until_next_order=True),
+        # Ex-onglets Allocations, Lancements, Stocks cibles (D-042), mêmes valeurs qu'avant.
+        SkuEvent(scope=EventScope.TEAM, type=EventType.PROMOTION, title="Allocation AOS 14-21 oct",
+                 description="Allocation officielle en deux vagues (exemple fictif)",
+                 skus=(EventSku(sku="7005.70"),), boutiques=("B80",), start=base, end=None,
+                 effect=EventEffect.ALLOCATION,
+                 quantities=(EventQty(boutique="B80", sku="7005.70", qty=4800, waves=(75, 25),
+                                      current_wave=1),),
+                 owner="Business (exemple)", planner="Camille"),
+        SkuEvent(scope=EventScope.TEAM, type=EventType.LAUNCH, title="Lancement Festive",
+                 description="Quantité initiale avant le lancement (exemple fictif)",
+                 skus=(EventSku(sku="7200.70"),), boutiques=("B80",), start=date(2026, 10, 14),
+                 end=date(2026, 10, 14), lead_days=9, effect=EventEffect.INITIAL_QTY,
+                 quantities=(EventQty(boutique="B80", sku="7200.70", qty=3600),),
+                 planner="Camille"),
+        SkuEvent(scope=EventScope.TEAM, type=EventType.TARGET_STOCK, title="Stock cible 142172",
+                 description="Min / cible / max en boutique (exemple fictif)",
+                 skus=(EventSku(sku="142172"),), boutiques=("B80",), start=base, end=None,
+                 effect=EventEffect.TARGET,
+                 quantities=(EventQty(boutique="B80", sku="142172", qty=30, min_qty=20,
+                                      max_qty=60),),
+                 planner="Camille"),
     ]  # fmt: skip
 
 
 DEMO_PLANNERS = ("Camille", "Léa", "Sami")  # prénoms fictifs
+
+
+def _qty_extra(q: EventQty) -> list[Any]:
+    """Min, Max, Déjà envoyé, Vagues (%), Vague en cours ("" = non saisi)."""
+    return [
+        "" if q.min_qty is None else q.min_qty,
+        "" if q.max_qty is None else q.max_qty,
+        q.already_sent or "",
+        "/".join(map(str, q.waves)),
+        q.current_wave if q.waves else "",
+    ]
+
+
+def _waves(text: str) -> tuple[int, ...]:
+    parts = [p for p in re.split(r"[/;,+\s]+", text or "") if p]
+    out = []
+    for part in parts:
+        value = _int(part.rstrip("%"), "Vague")
+        if value is not None:
+            out.append(value)
+    return tuple(out)
 
 
 def events_workbook(events: Iterable[SkuEvent]) -> bytes:
@@ -179,7 +232,8 @@ def events_workbook(events: Iterable[SkuEvent]) -> bytes:
         sheet.freeze_panes = "A2"
     for i, e in enumerate(events, start=1):
         ref = f"#{e.id}" if e.id else f"E{i}"
-        single = [q for q in e.quantities if q.boutique == ALL and q.sku == ALL]
+        single = [q for q in e.quantities if q.boutique == ALL and q.sku == ALL
+                  and not any(v != "" for v in _qty_extra(q))]  # fmt: skip
         ws.append([
             ref, SCOPE_LABELS[e.scope], TYPE_LABELS[e.type], e.title, e.description,
             ", ".join(e.sku_codes()), ", ".join(e.boutiques) or ("" if e.dcs else "Toutes"),
@@ -189,8 +243,9 @@ def events_workbook(events: Iterable[SkuEvent]) -> bytes:
             NEXT_ORDER if e.until_next_order else "",
         ])  # fmt: skip
         for q in e.quantities:
-            if not (q.boutique == ALL and q.sku == ALL):
-                qty_ws.append([ref, q.boutique, "" if q.sku == ALL else q.sku, q.qty])
+            extra = _qty_extra(q)
+            if not (q.boutique == ALL and q.sku == ALL) or any(v != "" for v in extra):
+                qty_ws.append([ref, q.boutique, "" if q.sku == ALL else q.sku, q.qty, *extra])
         for s in e.skus:
             if s.multiple or s.new_sku:
                 sku_ws.append([ref, s.sku, s.multiple, s.new_sku or ""])
@@ -336,8 +391,14 @@ def _event_from(rec: dict[str, str], ref: str, extras: dict[str, Any], author: s
             if value is None:
                 raise ValueError(f"quantité vide dans l'onglet {QTY_SHEET}")
             b = q.get("Boutique", "").upper()
-            quantities.append(EventQty(boutique=ALL if b in ("", "*", "TOUTES") else b,
-                                       sku=q.get("SKU") or ALL, qty=value))  # fmt: skip
+            quantities.append(EventQty(
+                boutique=ALL if b in ("", "*", "TOUTES") else b, sku=q.get("SKU") or ALL,
+                qty=value, min_qty=_int(q.get("Min", ""), "Min"),
+                max_qty=_int(q.get("Max", ""), "Max"),
+                already_sent=_int(q.get("Déjà envoyé", ""), "Déjà envoyé") or 0,
+                waves=_waves(q.get("Vagues (%)", "")),
+                current_wave=_int(q.get("Vague en cours", ""), "Vague en cours") or 1,
+            ))  # fmt: skip
     lead = _int(rec.get("Anticipation (j)", ""), "Anticipation")
     existing = int(ref[1:]) if re.fullmatch(r"#\d+", ref) else None
     return SkuEvent(

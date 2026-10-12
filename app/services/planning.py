@@ -116,9 +116,14 @@ def run_planning(
     if any(e.effect is EventEffect.REPLACE for e in active):
         merged = events.merge_conversions(inputs.conversions, active, params.run_date)
         inputs, problems = replace(inputs, conversions=merged.index), merged.problems
-    forced = [
-        x.sku for x in (*business_inputs.allocations, *business_inputs.launches) if x.boutique == b
-    ]
+    # Allocations, lancements et stocks cibles : événements actifs (D-042) + anciens fichiers
+    # pas encore convertis. Une contradiction bloque le SKU.
+    biz = events.business_from_events(
+        active, boutique=b, allocations=business_inputs.allocations,
+        launches=business_inputs.launches, targets=business_inputs.targets,
+    )  # fmt: skip
+    problems.update(biz.problems)
+    forced = [x.sku for x in (*biz.allocations, *biz.launches) if x.boutique == b]
     forced += [s for s in events.forced_skus(active) if s not in forced]
     if skus is None:
         if mode is ForecastMode.EXCEL_PARITY:
@@ -139,9 +144,9 @@ def run_planning(
         lines,
         boutique=b,
         run_date=params.run_date,
-        allocations=business_inputs.allocations,
-        launches=business_inputs.launches,
-        targets=business_inputs.targets,
+        allocations=biz.allocations,
+        launches=biz.launches,
+        targets=biz.targets,
     )
     lines = events.apply_events(
         lines, active, boutique=b, delivery=params.delivery_date, problems=problems

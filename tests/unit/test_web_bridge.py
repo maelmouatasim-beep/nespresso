@@ -113,4 +113,4 @@ def test_browser_engine_applies_the_same_sku_events(day) -> None:  # noqa: ANN00
               {}).get("applied", [])]) for x in res.lines}  # fmt: skip
     assert web == native
     assert web["7042.70"][0] == 1440 and web["7928.70"][:2] == (0, "B")  # repris + arrêt
-    assert web["ADV-2026-CA"] == (24, "R", [2]) and out["events"] == [1, 2, 3, 4]
+    assert web["ADV-2026-CA"] == (24, "R", [2]) and out["events"] == [1, 2, 3, 4, 5, 6, 7]

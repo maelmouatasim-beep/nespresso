@@ -19,36 +19,6 @@ from app.engines.categories import CATEGORIES, DEFAULT_CATEGORY_MAP  # noqa: E40
 from app.ingestion.events import events_workbook, example_events  # noqa: E402
 
 TEMPLATES = {
-    "allocations.xlsx": (
-        ["boutique", "sku", "total_qty", "already_sent", "wave_plan", "current_wave", "comment"],
-        [
-            "boutique : code boutique (ex. B80).",
-            "sku : SKU en TEXTE (formater la colonne en Texte avant de coller).",
-            "total_qty : quantité totale allouée à la boutique.",
-            "already_sent : quantité déjà envoyée lors des vagues précédentes (0 sinon).",
-            "wave_plan : pourcentages des vagues séparés par /, total 100 (ex. 100/0 ou 75/25).",
-            "current_wave : numéro de la vague à envoyer maintenant (1, 2…).",
-            "Quantité envoyée = total × % cumulé jusqu'à la vague en cours − déjà envoyé.",
-            "Une allocation REMPLACE la prévision pour ce SKU (elle n'est jamais écrasée).",
-        ],
-    ),
-    "launches.xlsx": (
-        ["boutique", "sku", "launch_date", "qty", "comment"],
-        [
-            "launch_date : date de lancement (format AAAA-MM-JJ ou date Excel).",
-            "qty : quantité initiale à avoir en boutique au lancement.",
-            "Jusqu'à la date de lancement : commande = qty − Expected, arrondi au multiple.",
-            "Après la date : la prévision normale reprend.",
-        ],
-    ),
-    "target_stock.xlsx": (
-        ["boutique", "sku", "min_qty", "target_qty", "max_qty"],
-        [
-            "Stock après commande (Expected + commande) comparé à min / cible / max.",
-            "En dessous du min : on remonte à la cible. Au-dessus du max : on plafonne.",
-            "Ne s'applique pas aux allocations ni aux lancements.",
-        ],
-    ),
     "exclusions.xlsx": (
         ["sku", "boutiques", "reason", "author", "updated_on"],
         [
@@ -116,7 +86,8 @@ def main() -> None:
         help_ws.column_dimensions["A"].width = 100
         wb.save(OUT / name)
         print(f"Modèle écrit : {OUT / name}")
-    # Événements SKU : template rempli avec 4 exemples FICTIFS (à remplacer).
+    # Événements SKU : template rempli d'exemples FICTIFS (à remplacer). Il remplace aussi les
+    # anciens modèles allocations, launches et target_stock (D-042).
     (OUT / "evenements_sku.xlsx").write_bytes(events_workbook(example_events()))
     print(f"Modèle écrit : {OUT / 'evenements_sku.xlsx'}")
 

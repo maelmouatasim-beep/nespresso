@@ -138,11 +138,11 @@ def test_business_templates_read() -> None:
     assert t[0].target_qty == 2 and not rep.has_errors
 
 
-def test_generated_templates_are_readable(tmp_path: Path) -> None:
-    for name, reader in (("allocations.xlsx", read_allocations), ("launches.xlsx", read_launches),
-                         ("target_stock.xlsx", read_targets)):  # fmt: skip
-        items, rep = reader(ROOT / "templates" / name, name)
-        assert items == [] and not rep.has_errors, rep.as_rows()
+def test_old_business_templates_are_gone(tmp_path: Path) -> None:
+    """D-042 : allocations, lancements et stocks cibles passent par evenements_sku.xlsx."""
+    for name in ("allocations.xlsx", "launches.xlsx", "target_stock.xlsx"):
+        assert not (ROOT / "templates" / name).exists()
+    assert (ROOT / "templates" / "evenements_sku.xlsx").exists()
 
 
 # --- Extraction du calculateur -----------------------------------------------------------------

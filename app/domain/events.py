@@ -33,6 +33,7 @@ class EventType(StrEnum):
     URGENT = "urgent"  # envoi de dernière minute
     STORE_REQUEST = "store_request"  # demande d'une boutique à son planner
     WATCH = "watch"  # à surveiller
+    TARGET_STOCK = "target_stock"  # stock min / cible / max par boutique (D-042)
 
 
 class EventEffect(StrEnum):
@@ -41,6 +42,11 @@ class EventEffect(StrEnum):
     ADD_QTY = "add_qty"  # quantité ajoutée au besoin calculé
     BLOCK = "block"  # quantité 0, BLOCKED
     REPLACE = "replace"  # conversion : ancien SKU bloqué, nouveau avec historique agrégé
+    # Arbitrage métier (D-042, ex-onglets Allocations, Lancements, Stocks cibles) : calculé
+    # par app/engines/business.py, inchangé.
+    ALLOCATION = "allocation"  # total en vagues − déjà envoyé, jamais écrasé (règle 5)
+    INITIAL_QTY = "initial_qty"  # lancement : quantité initiale − Expected avant le début
+    TARGET = "target"  # stock cible : sous le min → cible − Expected ; au-dessus du max → plafond
 
 
 class EventStatus(StrEnum):
@@ -60,6 +66,7 @@ TYPE_LABELS = {
     EventType.URGENT: "Urgence",
     EventType.STORE_REQUEST: "Demande boutique",
     EventType.WATCH: "À surveiller",
+    EventType.TARGET_STOCK: "Stock cible",
 }
 EFFECT_LABELS = {
     EventEffect.FLAG: "Flag seulement",
@@ -67,6 +74,9 @@ EFFECT_LABELS = {
     EventEffect.ADD_QTY: "Quantité ajoutée",
     EventEffect.BLOCK: "Bloquer l'envoi",
     EventEffect.REPLACE: "Remplacer par un autre SKU",
+    EventEffect.ALLOCATION: "Allocation officielle (vagues)",
+    EventEffect.INITIAL_QTY: "Quantité initiale − Expected",
+    EventEffect.TARGET: "Min / cible / max",
 }
 STATUS_LABELS = {
     EventStatus.DRAFT: "Brouillon",
@@ -77,20 +87,35 @@ STATUS_LABELS = {
 
 # Effets permis par type (le premier est le défaut proposé).
 ALLOWED_EFFECTS: dict[EventType, tuple[EventEffect, ...]] = {
-    EventType.PROMOTION: (EventEffect.FLAG, EventEffect.SET_QTY, EventEffect.ADD_QTY),
-    EventType.LAUNCH: (EventEffect.SET_QTY, EventEffect.FLAG, EventEffect.ADD_QTY),
+    EventType.PROMOTION: (
+        EventEffect.FLAG,
+        EventEffect.SET_QTY,
+        EventEffect.ADD_QTY,
+        EventEffect.ALLOCATION,
+    ),
+    EventType.LAUNCH: (
+        EventEffect.SET_QTY,
+        EventEffect.FLAG,
+        EventEffect.ADD_QTY,
+        EventEffect.INITIAL_QTY,
+    ),
     EventType.STOP: (EventEffect.BLOCK, EventEffect.FLAG),
     EventType.BAN: (EventEffect.BLOCK,),
     EventType.CONVERSION: (EventEffect.REPLACE,),
     EventType.URGENT: (EventEffect.SET_QTY, EventEffect.ADD_QTY, EventEffect.FLAG),
     EventType.STORE_REQUEST: (EventEffect.SET_QTY, EventEffect.ADD_QTY),
     EventType.WATCH: (EventEffect.FLAG,),
+    EventType.TARGET_STOCK: (EventEffect.TARGET,),
 }
+# Effets calculés par l'arbitrage métier (app/engines/business.py), pas par apply_events.
+BUSINESS_EFFECTS = frozenset({EventEffect.ALLOCATION, EventEffect.INITIAL_QTY, EventEffect.TARGET})
+QTY_EFFECTS = frozenset({EventEffect.SET_QTY, EventEffect.ADD_QTY} | BUSINESS_EFFECTS)
 PERSONAL_ONLY = frozenset({EventType.STORE_REQUEST, EventType.WATCH})
 # Un planner peut-il modifier l'événement Personnel d'un collègue ? (D-029 : non, seulement
 # « Reprendre ».) Voir docs/decision_log.md.
 PERSONAL_EDITABLE_BY_OTHERS = False
-OPEN_END_TYPES = frozenset({EventType.STOP, EventType.BAN})  # fin vide = jusqu'à nouvel ordre
+# Fin vide = jusqu'à nouvel ordre (aussi pour une allocation : elle se termine à la main).
+OPEN_END_TYPES = frozenset({EventType.STOP, EventType.BAN, EventType.TARGET_STOCK})
 # Types à confirmer explicitement avant l'export (« à inclure »).
 INCLUDE_TYPES = frozenset({EventType.LAUNCH, EventType.URGENT, EventType.STORE_REQUEST})
 
@@ -110,11 +135,46 @@ class EventSku(_Frozen):
 
 
 class EventQty(_Frozen):
-    """Quantité saisie : par boutique et par SKU, « * » = toutes / tous."""
+    """Quantité saisie : par boutique et par SKU, « * » = toutes / tous.
+
+    `qty` = quantité imposée ou ajoutée ; pour une allocation, le TOTAL ; pour un lancement
+    « quantité initiale », la quantité initiale ; pour un stock cible, la CIBLE.
+    Allocation : `already_sent`, `waves` (% par vague, total 100 ; vide = une vague) et
+    `current_wave`. Stock cible : `min_qty` et `max_qty` (min ≤ cible ≤ max).
+    """
 
     boutique: str = ALL
     sku: str = ALL
     qty: int = Field(ge=0)
+    min_qty: int | None = Field(default=None, ge=0)
+    max_qty: int | None = Field(default=None, ge=0)
+    already_sent: int = Field(default=0, ge=0)
+    waves: tuple[int, ...] = ()
+    current_wave: int = Field(default=1, ge=1)
+
+    @property
+    def wave_plan(self) -> tuple[int, ...]:
+        return self.waves or (100,)
+
+    def problem(self, effect: EventEffect) -> str | None:
+        """Champ manquant ou incohérent pour cet effet (message en français), sinon None."""
+        where = f"{'toutes' if self.boutique == ALL else self.boutique} / " \
+                f"{'tous' if self.sku == ALL else self.sku}"  # fmt: skip
+        if effect is EventEffect.ALLOCATION:
+            if any(w < 0 for w in self.waves) or sum(self.wave_plan) != 100:
+                return f"{where} : les vagues doivent totaliser 100 % (reçu {sum(self.wave_plan)})"
+            if self.current_wave > len(self.wave_plan):
+                n = len(self.wave_plan)
+                return f"{where} : vague en cours {self.current_wave} > {n} vague(s)"
+        if effect is EventEffect.INITIAL_QTY and self.qty <= 0:
+            return f"{where} : la quantité initiale doit être positive"
+        if effect is EventEffect.TARGET:
+            if self.min_qty is None or self.max_qty is None:
+                return f"{where} : min et max sont obligatoires pour un stock cible"
+            if not self.min_qty <= self.qty <= self.max_qty:
+                return f"{where} : il faut min ≤ cible ≤ max ({self.min_qty} / {self.qty} / " \
+                       f"{self.max_qty})"  # fmt: skip
+        return None
 
 
 class SkuEvent(_Frozen):
@@ -159,6 +219,7 @@ class SkuEvent(_Frozen):
             raise ValueError("Un événement personnel doit avoir son planner")
         if self.end is None and not (
             self.type in OPEN_END_TYPES
+            or self.effect is EventEffect.ALLOCATION
             or (self.type is EventType.STORE_REQUEST and self.until_next_order)
         ):
             raise ValueError("La date de fin est obligatoire pour ce type d'événement")
@@ -176,8 +237,12 @@ class SkuEvent(_Frozen):
             same = [s.sku for s in self.skus if s.new_sku == s.sku]
             if same:
                 raise ValueError(f"Un SKU ne peut pas se remplacer lui-même : {', '.join(same)}")
-        if self.effect in (EventEffect.SET_QTY, EventEffect.ADD_QTY) and not self.quantities:
+        if self.effect in QTY_EFFECTS and not self.quantities:
             raise ValueError("Saisir au moins une quantité (par boutique ou pour toutes)")
+        for q in self.quantities:
+            why = q.problem(self.effect)
+            if why:
+                raise ValueError(why)
         keys = [(q.boutique, q.sku) for q in self.quantities]
         if len(keys) != len(set(keys)):
             raise ValueError("Quantité saisie deux fois pour la même boutique et le même SKU")
@@ -211,13 +276,17 @@ class SkuEvent(_Frozen):
     def sku_codes(self) -> list[str]:
         return [s.sku for s in self.skus]
 
-    def qty_for(self, boutique: str, sku: str) -> int | None:
-        """Quantité la plus précise : (boutique, SKU) > (boutique, *) > (*, SKU) > (*, *)."""
-        table = {(q.boutique, q.sku): q.qty for q in self.quantities}
+    def qty_row_for(self, boutique: str, sku: str) -> EventQty | None:
+        """Ligne la plus précise : (boutique, SKU) > (boutique, *) > (*, SKU) > (*, *)."""
+        table = {(q.boutique, q.sku): q for q in self.quantities}
         for key in ((boutique, sku), (boutique, ALL), (ALL, sku), (ALL, ALL)):
             if key in table:
                 return table[key]
         return None
+
+    def qty_for(self, boutique: str, sku: str) -> int | None:
+        row = self.qty_row_for(boutique, sku)
+        return None if row is None else row.qty
 
     @property
     def label(self) -> str:

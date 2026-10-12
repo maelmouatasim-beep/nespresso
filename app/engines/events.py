@@ -12,6 +12,10 @@ Ordre de priorité sur un même SKU :
    choix silencieux.
 4. Flag → REVIEW, la quantité du moteur reste.
 
+Allocation (vagues), quantité initiale de lancement et stock cible (D-042) ne sont pas
+calculés ici : `business_from_events` les transforme en entrées de l'arbitrage métier
+(app/engines/business.py, calcul inchangé), et `apply_events` cite l'événement.
+
 Une allocation officielle n'est jamais écrasée (règle 5) et une ligne déjà bloquée par
 le moteur (exclusion, portfolio, ancien SKU) le reste : la contradiction est écrite.
 """
@@ -25,6 +29,7 @@ from fractions import Fraction
 from typing import Any
 
 from app.domain.events import (
+    BUSINESS_EFFECTS,
     INCLUDE_TYPES,
     SCOPE_LABELS,
     EventEffect,
@@ -34,12 +39,21 @@ from app.domain.events import (
     EventType,
     SkuEvent,
 )
-from app.domain.models import Override, QtySource, RecommendationLine, SkuConversion, Status
+from app.domain.models import (
+    Allocation,
+    Launch,
+    Override,
+    QtySource,
+    RecommendationLine,
+    SkuConversion,
+    Status,
+    TargetStock,
+)
 from app.engines.conversion import ConversionError, ConversionIndex, build_conversion_index
 from app.engines.forecast import ceiling_to_multiple
 from app.engines.portfolio import numeric_key
 
-RULE_VERSION = "events-1.1.0"
+RULE_VERSION = "events-1.2.0"
 REASON_CONFLICT = "Deux événements contradictoires"
 _SOURCE_FR = {"launch": "lancement du référentiel", "target_stock": "stock cible",
               "dc_return": "retour DC (historique de secours)"}  # fmt: skip
@@ -176,6 +190,100 @@ def merge_conversions(
     return EventConversions(merged, problems)
 
 
+# --- Allocations, lancements et stocks cibles apportés par les événements -------------
+
+
+@dataclass(frozen=True)
+class EventBusiness:
+    """Entrées de l'arbitrage métier : celles déjà connues + celles des événements actifs."""
+
+    allocations: tuple[Allocation, ...] = ()
+    launches: tuple[Launch, ...] = ()
+    targets: tuple[TargetStock, ...] = ()
+    problems: dict[str, str] = field(default_factory=dict)  # SKU -> raison du blocage
+
+
+_KIND_FR = {EventEffect.ALLOCATION: "allocations", EventEffect.INITIAL_QTY: "lancements",
+            EventEffect.TARGET: "stocks cibles"}  # fmt: skip
+
+
+def _business_item(
+    e: SkuEvent, boutique: str, sku: str
+) -> Allocation | Launch | TargetStock | None:
+    q = e.qty_row_for(boutique, sku)
+    if q is None:
+        return None  # signalé par apply_events (« quantité non définie »)
+    note = f"Événement {e.id or ''} {e.title}".strip()
+    if e.effect is EventEffect.ALLOCATION:
+        return Allocation(boutique=boutique, sku=sku, total_qty=q.qty,
+                          already_sent=q.already_sent, wave_plan=q.wave_plan,
+                          current_wave=q.current_wave, comment=note)  # fmt: skip
+    if e.effect is EventEffect.INITIAL_QTY:
+        return Launch(boutique=boutique, sku=sku, launch_date=e.start, qty=q.qty, comment=note)
+    return TargetStock(boutique=boutique, sku=sku, min_qty=q.min_qty or 0, target_qty=q.qty,
+                       max_qty=q.max_qty if q.max_qty is not None else q.qty)  # fmt: skip
+
+
+def _same_item(a: object, b: object) -> bool:
+    def strip(x: object) -> dict[str, Any]:
+        d = x.model_dump(mode="json")  # type: ignore[attr-defined]
+        d.pop("comment", None)
+        return d
+
+    return strip(a) == strip(b)
+
+
+def business_from_events(
+    events: Iterable[SkuEvent],
+    *,
+    boutique: str,
+    allocations: Iterable[Allocation] = (),
+    launches: Iterable[Launch] = (),
+    targets: Iterable[TargetStock] = (),
+) -> EventBusiness:
+    """Ajoute aux entrées métier les allocations, lancements et stocks cibles des événements
+    actifs pour la boutique. Deux valeurs différentes pour un même SKU (deux événements, ou
+    un événement et un ancien fichier) → le SKU est BLOCKED « deux événements
+    contradictoires » : jamais de choix silencieux. Deux valeurs identiques comptent une fois.
+    """
+    kinds: dict[EventEffect, list[Any]] = {
+        EventEffect.ALLOCATION: list(allocations),
+        EventEffect.INITIAL_QTY: list(launches),
+        EventEffect.TARGET: list(targets),
+    }
+    origin: dict[tuple[EventEffect, str], str] = {}
+    problems: dict[str, str] = {}
+    for kind, items in kinds.items():
+        for item in items:
+            if item.boutique == boutique:
+                origin[(kind, item.sku)] = f"ancien fichier des {_KIND_FR[kind]}"
+    for e in events:
+        if e.effect not in BUSINESS_EFFECTS:
+            continue
+        for s in e.skus:
+            item = _business_item(e, boutique, s.sku)
+            if item is None:
+                continue
+            key = (e.effect, s.sku)
+            same = [x for x in kinds[e.effect] if x.boutique == boutique and x.sku == s.sku]
+            if not same:
+                kinds[e.effect].append(item)
+                origin[key] = e.label
+            elif not _same_item(same[0], item):
+                problems[s.sku] = (
+                    f"{REASON_CONFLICT} : {e.label} et {origin.get(key, 'un autre')} donnent "
+                    f"deux {_KIND_FR[e.effect]} différents pour {s.sku} → quantité 0, à trancher"
+                )
+    if problems:  # le SKU contradictoire n'entre pas dans l'arbitrage : il est bloqué
+        for kind in kinds:
+            kinds[kind] = [x for x in kinds[kind]
+                           if not (x.boutique == boutique and x.sku in problems)]  # fmt: skip
+    return EventBusiness(
+        tuple(kinds[EventEffect.ALLOCATION]), tuple(kinds[EventEffect.INITIAL_QTY]),
+        tuple(kinds[EventEffect.TARGET]), problems,
+    )  # fmt: skip
+
+
 # --- Application sur les lignes -----------------------------------------------------
 
 
@@ -302,6 +410,18 @@ def _apply_line(
     quantities = [h for h in hits if h.event.effect in (EventEffect.SET_QTY, EventEffect.ADD_QTY)]
     flags = [h for h in hits if h.event.effect is EventEffect.FLAG]
     new_side = [h for h in hits if h.event.effect is EventEffect.REPLACE and h.role == "new"]
+    business = [h for h in hits if h.event.effect in BUSINESS_EFFECTS]
+    if business and not quantities:
+        decision = "business"
+    for h in business:
+        if h.event.qty_for(boutique, line.sku) is None:
+            raise_to(Status.REVIEW)
+            reasons.append(
+                f"{h.event.label} ({_who(h.event)}) : quantité non définie pour {boutique}, "
+                f"quantité du moteur gardée ({line.qty}){lead(h.event)}"
+            )
+        else:
+            reasons.append(f"Source : {h.event.label} ({_who(h.event)}){lead(h.event)}")
 
     for h in flags:
         raise_to(Status.REVIEW)
@@ -322,8 +442,8 @@ def _apply_line(
                 reasons.append(f"{h.event.label} : remplacé par {h.item.new_sku}, ne plus envoyer")
             else:
                 reasons.append(f"{h.event.label} ({_who(h.event)}) : envoi bloqué{lead(h.event)}")
-        if quantities:
-            others = ", ".join(h.event.label for h in quantities)
+        if quantities or business:
+            others = ", ".join(h.event.label for h in (*quantities, *business))
             reasons.append(f"Le blocage prime sur {others} : quantité 0")
     elif quantities:
         defined = [(h, h.event.qty_for(boutique, line.sku)) for h in quantities]
