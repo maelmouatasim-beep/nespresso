@@ -35,11 +35,8 @@ from app.domain.events import (  # noqa: E402
 )
 from app.domain.models import (  # noqa: E402
     OVERRIDE_CATEGORY_LABELS,
-    Allocation,
     ForecastMode,
-    Launch,
     PlanningParameters,
-    TargetStock,
 )
 from app.engines.categories import CATEGORIES, DEFAULT_CATEGORY_MAP  # noqa: E402
 from app.ingestion import referential_checks as checks  # noqa: E402
@@ -56,7 +53,6 @@ from app.ingestion.product_table import ProductSources, build_product_rows  # no
 from app.ingestion.referential_edit import DEFAULT_COLUMNS  # noqa: E402
 from app.services.planning import (  # noqa: E402
     RULE_VERSIONS,
-    BusinessInputs,
     EventContext,
     run_planning,
 )
@@ -94,36 +90,6 @@ EVENT_VARIANTS = {"team": "", "all": "Camille"}
 BOUTIQUE = "B80"
 PREVIEW_ROWS = 150
 
-EXAMPLES = BusinessInputs(
-    allocations=(
-        Allocation(
-            boutique="B80",
-            sku="7005.70",
-            total_qty=4800,
-            already_sent=0,
-            wave_plan=(75, 25),
-            current_wave=1,
-            comment="Exemple : promo AOS 14-21 oct",
-        ),
-    ),  # fmt: skip
-    launches=(
-        Launch(
-            boutique="B80",
-            sku="7200.70",
-            launch_date=date(2026, 10, 14),
-            qty=3600,
-            comment="Exemple : lancement Festive",
-        ),
-    ),  # fmt: skip
-    targets=(TargetStock(boutique="B80", sku="142172", min_qty=20, target_qty=30, max_qty=60),),
-)
-EXAMPLE_ROWS = {
-    "allocations": [{"Boutique": "B80", "SKU": "7005.70", "Total": "4800", "Déjà envoyé": "0",
-                     "Vagues": "75/25", "Vague en cours": "1", "Commentaire": "Exemple : promo AOS 14-21 oct"}],
-    "launches": [{"Boutique": "B80", "SKU": "7200.70", "Date de lancement": "14/10/2026",
-                  "Quantité": "3600", "Commentaire": "Exemple : lancement Festive"}],
-    "targets": [{"Boutique": "B80", "SKU": "142172", "Min": "20", "Cible": "30", "Max": "60"}],
-}  # fmt: skip
 FIXTURE_FILES = {
     "multiples": "master_multiples.csv",
     "conversions": "master_sku_conversions.csv",
@@ -142,12 +108,6 @@ def _preview_rows(key: str) -> tuple[int, list[dict]]:
 
 
 # Lignes des exemples métier dans les colonnes des modèles (lues par les mêmes lecteurs).
-EXAMPLE_TABLE_ROWS = {
-    "allocations": [["B80", "7005.70", "4800", "0", "75/25", "1", "Exemple : promo AOS 14-21 oct"]],
-    "launches": [["B80", "7200.70", "2026-10-14", "3600", "Exemple : lancement Festive"]],
-    "targets": [["B80", "142172", "20", "30", "60"]],
-    "rules": [],
-}
 
 
 def write_tables(exclusions) -> None:  # noqa: ANN001
@@ -159,13 +119,12 @@ def write_tables(exclusions) -> None:  # noqa: ANN001
     for key, name in FIXTURE_FILES.items():
         columns, records = read_csv_records(FIXTURES / name)
         tables[key] = {"columns": columns, "rows": [[r[c] for c in columns] for r in records]}
-    for key, rows in EXAMPLE_TABLE_ROWS.items():
-        tables[key] = {"columns": DEFAULT_COLUMNS[key], "rows": rows}
     tables["exclusions"] = {
         "columns": ["sku", "boutiques", "reason", "author", "updated_on"],
         "rows": [[e.sku, ";".join(e.boutiques) or "ALL", e.reason, e.author,
                   e.updated_on.isoformat()] for e in exclusions],
     }  # fmt: skip
+    tables["rules"] = {"columns": DEFAULT_COLUMNS["rules"], "rows": []}
     tables["boutiques"] = {"columns": EXTRA_COLUMNS, "rows": []}
     # Lignes des onglets Produits et Boutiques, calculées d'avance (sans modification).
     recs = {
@@ -215,7 +174,7 @@ def write_engine(masters, exclusions) -> None:  # noqa: ANN001
     data = (ENGINE_DIR / "app.zip").read_bytes()
     (ENGINE_DIR / "app.zip.b64.txt").write_text(base64.b64encode(data).decode(), "ascii")
     (ENGINE_DIR / "blobs.json").write_text(json.dumps(index), encoding="utf-8")
-    payload = masters_payload(masters, exclusions, EXAMPLES)
+    payload = masters_payload(masters, exclusions)
     (ENGINE_DIR / "masters.json").write_text(
         json.dumps(payload, ensure_ascii=False, separators=(",", ":")), encoding="utf-8"
     )
@@ -240,12 +199,10 @@ def build() -> Path:  # noqa: PLR0915 - un seul script linéaire, plus simple à
     meta: list[dict] = []
     meta_idx: dict[str, int] = {}
     variants: dict[str, dict] = {}
-    combos = [(v, b, ev) for v, b in (("none", BusinessInputs()), ("examples", EXAMPLES))
-              for ev in EVENT_VARIANTS]  # fmt: skip
-    for variant, business, ev in combos:
+    for ev in EVENT_VARIANTS:
         context = EventContext(DEMO_EVENTS, EVENT_VARIANTS[ev])
         for mode in ForecastMode:
-            key = f"{mode.value}|{variant}|{ev}"
+            key = f"{mode.value}|{ev}"
             sel: list[int] = []
             per_line: list[list] = []
             warnings: list[str] = []
@@ -254,8 +211,7 @@ def build() -> Path:  # noqa: PLR0915 - un seul script linéaire, plus simple à
                     boutique=BOUTIQUE, run_date=RUN_DATE, delivery_date=DEMO_DELIVERY,
                     cover_days=cover, coffee_cover_days=None,
                 )  # fmt: skip
-                res = run_planning(inputs, params, mode, dc=dc, business_inputs=business,
-                                   event_context=context)  # fmt: skip
+                res = run_planning(inputs, params, mode, dc=dc, event_context=context)
                 if c_i == 0:
                     warnings = list(res.rule_warnings)
                     for line in res.lines:
@@ -297,7 +253,6 @@ def build() -> Path:  # noqa: PLR0915 - un seul script linéaire, plus simple à
             "owner": m.get("owner", ""), "updated": m.get("updated_at", ""),
             "by": m.get("updated_by", ""), "src": m.get("source_file", ""),
             "anomalies": anomalies.get(ref.key, []), "count": count, "rows": rows,
-            "examples": EXAMPLE_ROWS.get(ref.key, []),
         })  # fmt: skip
 
     # Dépôt du jour.

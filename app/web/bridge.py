@@ -22,17 +22,14 @@ from pydantic import ValidationError
 
 from app.domain.events import SkuEvent
 from app.domain.models import (
-    Allocation,
     Exclusion,
     ForecastMode,
-    Launch,
     PlanningParameters,
     Product,
     ScheduleSlot,
     SkuConversion,
     StockMovement,
     StockSnapshotLine,
-    TargetStock,
 )
 from app.engines.schedule import boutiques_ordering_on
 from app.ingestion import referential_checks as checks
@@ -42,7 +39,7 @@ from app.ingestion.boutique_table import (
     build_boutique_rows,
     replace_boutique_rows,
 )
-from app.ingestion.business_inputs import read_allocations, read_launches, read_rules, read_targets
+from app.ingestion.business_inputs import read_rules
 from app.ingestion.depot import MOVES_KIND, STOCK_KIND, _header_found, date_from_filename
 from app.ingestion.exclusions import read_exclusions
 from app.ingestion.fixtures_loader import (
@@ -91,9 +88,7 @@ def _data(dataset: str) -> dict[str, Any]:
 # --- Référentiels (écrits par tools/build_demo_app.py) -------------------------------------
 
 
-def masters_payload(
-    masters: Masters, exclusions: list[Exclusion], examples: BusinessInputs
-) -> dict:
+def masters_payload(masters: Masters, exclusions: list[Exclusion]) -> dict:
     """Référentiels en JSON, pour la page web."""
     return {
         "products": [p.model_dump(mode="json") for p in masters.products.values()],
@@ -103,11 +98,6 @@ def masters_payload(
         "schedule": [s.model_dump(mode="json") for s in masters.schedule],
         "names": masters.boutique_names,
         "exclusions": [e.model_dump(mode="json") for e in exclusions],
-        "examples": {
-            "allocations": [a.model_dump(mode="json") for a in examples.allocations],
-            "launches": [la.model_dump(mode="json") for la in examples.launches],
-            "targets": [t.model_dump(mode="json") for t in examples.targets],
-        },
     }
 
 
@@ -123,24 +113,14 @@ def init(payload: str) -> str:
         boutique_names=d["names"],
     )
     _STATE["exclusions"] = [Exclusion.model_validate(e) for e in d["exclusions"]]
-    ex = d["examples"]
-    _STATE["business"] = {
-        "allocations": tuple(Allocation.model_validate(a) for a in ex["allocations"]),
-        "launches": tuple(Launch.model_validate(la) for la in ex["launches"]),
-        "targets": tuple(TargetStock.model_validate(t) for t in ex["targets"]),
-        "rules": (),
-    }
+    # Allocations, lancements et stocks cibles : événements SKU envoyés par la page (D-042).
+    _STATE["business"] = {"rules": ()}
     return json.dumps({"products": len(_STATE["masters"].products)})
 
 
 # --- Référentiels modifiés dans la page ------------------------------------------------------
 
-_BUSINESS_READERS = {
-    "allocations": read_allocations,
-    "launches": read_launches,
-    "targets": read_targets,
-    "rules": read_rules,
-}
+_BUSINESS_READERS = {"rules": read_rules}
 
 
 def _apply_table(key: str, csv_text: str) -> None:
@@ -187,7 +167,13 @@ def _apply_table(key: str, csv_text: str) -> None:
     _STATE["masters"] = dataclasses.replace(masters, **update)
 
 
+LEGACY_TABLES = ("allocations", "launches", "targets")
+
+
 def _check(key: str, csv_text: str) -> tuple[list[str], list[str]]:
+    if key in LEGACY_TABLES:  # D-042 : une table gardée par un ancien navigateur
+        return [f"Ancienne table « {key} » non appliquée : allocations, lancements et stocks "
+                "cibles se saisissent maintenant dans Événements SKU"], []  # fmt: skip
     if key == "boutiques":
         return [], []
     if key == "exclusions":
@@ -443,7 +429,7 @@ def plan(params_json: str) -> str:
         )  # fmt: skip
     except ValueError as exc:  # données absentes pour cette boutique, paramètre invalide
         return json.dumps({"error": f"Calcul impossible : {exc}"})
-    business = BusinessInputs(**_STATE["business"]) if p.get("examples") else BusinessInputs()
+    business = BusinessInputs(**_STATE["business"])
     # Événements SKU envoyés par la page : le moteur choisit lui-même ceux qui sont actifs
     # (date de livraison, boutique, planner, « Reprendre »).
     events = EventContext(

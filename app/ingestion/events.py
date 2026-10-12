@@ -141,10 +141,11 @@ def _fmt_day(d: date | None) -> str:
     return d.isoformat() if d else ""
 
 
-def example_events() -> list[SkuEvent]:
-    """Exemples FICTIFS (template et démo B80 du 05-oct-2026)."""
+def example_events(business: bool = True) -> list[SkuEvent]:
+    """Exemples FICTIFS (template et démo B80 du 05-oct-2026). `business=False` : sans les
+    exemples d'allocation, de lancement « quantité initiale » et de stock cible (D-042)."""
     base = date(2026, 10, 5)
-    return [
+    events = [
         SkuEvent(scope=EventScope.TEAM, type=EventType.PROMOTION, title="Festive AOS Oct 14-21",
                  description="Mise en avant des cafés de saison (exemple fictif)",
                  skus=(EventSku(sku="7072.70"), EventSku(sku="7087.70"), EventSku(sku="7094.70")),
@@ -167,6 +168,11 @@ def example_events() -> list[SkuEvent]:
                  effect=EventEffect.ADD_QTY, quantities=(EventQty(qty=240),),
                  planner="Camille", requested_by="Gérance B80", requested_on=base,
                  until_next_order=True),
+    ]  # fmt: skip
+    if not business:
+        return events
+    return [
+        *events,
         # Ex-onglets Allocations, Lancements, Stocks cibles (D-042), mêmes valeurs qu'avant.
         SkuEvent(scope=EventScope.TEAM, type=EventType.PROMOTION, title="Allocation AOS 14-21 oct",
                  description="Allocation officielle en deux vagues (exemple fictif)",

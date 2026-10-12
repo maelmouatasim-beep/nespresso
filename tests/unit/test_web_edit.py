@@ -9,7 +9,6 @@ from pathlib import Path
 import pytest
 
 from app.ingestion.referential_edit import DEFAULT_COLUMNS, table_csv
-from app.services.planning import BusinessInputs
 from app.web import bridge
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "b80_2026-10-05"
@@ -28,7 +27,7 @@ def demo(tmp_path):  # noqa: ANN001, ANN201
             os.environ.pop("COPILOT_DATA_DIR", None)
         else:
             os.environ["COPILOT_DATA_DIR"] = old
-    bridge.init(json.dumps(bridge.masters_payload(data.masters, data.exclusions, BusinessInputs())))
+    bridge.init(json.dumps(bridge.masters_payload(data.masters, data.exclusions)))
     for name in ("stock_situation_B80_CY1.csv", "stock_movements_B80.csv"):
         text = (FIXTURES / name).read_text(encoding="utf-8")
         assert json.loads(bridge.ingest_csv(text, name, bridge.DEMO))["kind"]
@@ -37,7 +36,7 @@ def demo(tmp_path):  # noqa: ANN001, ANN201
 
 def plan(**kw) -> dict:  # noqa: ANN003
     params = {"boutique": "B80", "run_date": "2026-10-05", "delivery": "2026-10-08",
-              "cover": 9, "coffee": None, "mode": "standard", "examples": True,
+              "cover": 9, "coffee": None, "mode": "standard",
               "dataset": "demo"} | kw  # fmt: skip
     return json.loads(bridge.plan(json.dumps(params)))
 
@@ -70,14 +69,25 @@ def test_invalid_table_is_not_applied(demo) -> None:  # noqa: ANN001
     assert plan()["dc"] == "CY1"
 
 
-def test_edited_exclusion_and_launch_are_used(demo) -> None:  # noqa: ANN001
+def test_edited_exclusion_and_launch_event_are_used(demo) -> None:  # noqa: ANN001
     excl = "sku,boutiques,reason,author,updated_on\n7072.70,ALL,test,Amine,2026-10-12\n"
-    launch = table_csv(DEFAULT_COLUMNS["launches"], [["B80", "7200.70", "2026-10-14", "3600", ""]])
-    out = json.loads(bridge.set_tables(json.dumps({"exclusions": excl, "launches": launch})))
+    out = json.loads(bridge.set_tables(json.dumps({"exclusions": excl})))
     assert all(not v["errors"] for v in out["tables"].values())
-    res = plan()
+    launch = {"id": 9, "scope": "team", "type": "launch", "title": "Festive",
+              "skus": [{"sku": "7200.70"}], "boutiques": ["B80"], "start": "2026-10-14",
+              "end": "2026-10-14", "lead_days": 9, "effect": "initial_qty",
+              "quantities": [{"qty": 3600}]}  # fmt: skip
+    checked = json.loads(bridge.check_event(json.dumps(launch)))
+    assert checked["errors"] == []
+    res = plan(events=[checked["event"]])
     assert qty(res, "7072.70") == 0
     assert qty(res, "7200.70") > 0
+
+
+def test_old_business_table_from_a_browser_is_refused_with_its_reason(demo) -> None:  # noqa: ANN001
+    launch = table_csv(DEFAULT_COLUMNS["launches"], [["B80", "7200.70", "2026-10-14", "3600", ""]])
+    out = json.loads(bridge.set_tables(json.dumps({"launches": launch})))
+    assert "Événements SKU" in out["tables"]["launches"]["errors"][0]
 
 
 def test_event_checked_with_the_same_rules() -> None:

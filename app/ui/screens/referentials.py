@@ -9,7 +9,6 @@ onglet garde son propriétaire, sa date de mise à jour et l'historique des modi
 from __future__ import annotations
 
 import io
-from pathlib import Path
 
 import pandas as pd
 import streamlit as st
@@ -18,11 +17,10 @@ from app.engines.categories import CATEGORIES
 from app.ingestion.boutique_table import ANOMALIES as B_ANOMALIES
 from app.ingestion.boutique_table import BOUTIQUE_COLUMNS, CODE, PLANNER, PORTFOLIO, SLOTS
 from app.ingestion.product_table import ANOMALIES, CAT, PRODUCT_COLUMNS, SKU, build_product_rows
-from app.ingestion.referential_edit import DEFAULT_COLUMNS, table_csv
 from app.ingestion.tables import read_raw
 from app.storage import events as event_store
 from app.ui.common import author, db_conn, fmt_date, reset_all, ss, workspace
-from app.ui.workspace import REF_BY_KEY, ROOT, Referential
+from app.ui.workspace import ROOT
 
 TEMPLATES = ROOT / "templates"
 ANOMALY_FILTER = "Anomalies"
@@ -256,57 +254,6 @@ def _boutiques_tab() -> None:
         _portfolio_tab()
 
 
-def _business_block() -> None:
-    """Allocations, lancements et stocks cibles : en attendant leur passage aux Événements SKU."""
-    with st.expander("Allocations, lancements et stocks cibles (bientôt dans Événements SKU)"):
-        for key in ("allocations", "launches", "targets"):
-            st.markdown(f"**{REF_BY_KEY[key].label}**")
-            _table_editor(REF_BY_KEY[key])
-
-
-def _read_table(path: Path) -> pd.DataFrame:
-    if path.suffix == ".csv":
-        return pd.read_csv(path, dtype=str, keep_default_na=False)
-    return pd.read_excel(path, dtype=str).fillna("")
-
-
-def _table_editor(ref: Referential) -> None:
-    """Grille modifiable : cellules, lignes ajoutées ou supprimées, puis « Enregistrer »."""
-    files = workspace().ref_files(ref)
-    targets: list[Path | None] = list(files) or [None]
-    for i, f in enumerate(targets):
-        df = _read_table(f) if f else pd.DataFrame(columns=DEFAULT_COLUMNS[ref.key], dtype=str)
-        st.caption((f"{f.name} · {len(df)} lignes" if f else "Aucun fichier : saisis les lignes ici.")
-                   + " · clic sur une cellule pour la modifier, « + » en bas pour ajouter une ligne, "
-                   "case à gauche puis Suppr pour retirer une ligne.")  # fmt: skip
-        edited = st.data_editor(
-            df, num_rows="dynamic", hide_index=True, width="stretch", height=320,
-            key=f"tbl_{ref.key}_{i}_{ss.nonce}",
-            column_config={c: st.column_config.TextColumn() for c in df.columns},
-        )  # fmt: skip
-        if st.button(f"Enregistrer {ref.label.lower()}" + (f" ({f.name})" if len(targets) > 1 and f else ""),
-                     type="primary", key=f"save_tbl_{ref.key}_{i}"):  # fmt: skip
-            if not author():
-                st.error("Choisis ton prénom (Planner, barre de gauche).")
-                return
-            text = table_csv(list(edited.columns), edited.to_numpy(dtype=object).tolist())
-            try:
-                errors, warnings = workspace().save_table(
-                    ref.key, text, author(), f.name if f else None
-                )
-            except ValueError as exc:
-                errors, warnings = [str(exc)], []
-            if errors:
-                st.error("Rien n'est enregistré : " + " · ".join(errors))
-                return
-            reset_all()
-            for w in warnings:
-                st.warning(w)
-            st.success(
-                f"{ref.label} enregistré ({len(edited)} lignes). La commande sera recalculée."
-            )
-
-
 def calculator_import_block(key: str) -> None:
     """Importe multiples, conversions, DC, portfolio et Schedule depuis le calculateur."""
     c1, c2 = st.columns([3, 1], vertical_alignment="bottom")
@@ -387,4 +334,3 @@ def render() -> None:
     with tabs[2]:
         _tab_header("planners")
         _planners_block()
-    _business_block()

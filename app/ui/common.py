@@ -240,7 +240,8 @@ def planners() -> list[str]:
 
 
 def seed_demo_events() -> None:
-    """Démo : 3 planners et 4 événements FICTIFS sur B80, créés une seule fois."""
+    """Démo : 3 planners et 4 événements FICTIFS sur B80, créés une seule fois (sans les
+    exemples d'allocation, de lancement et de stock cible, montrés dans la démo web)."""
     from app.ingestion.events import DEMO_PLANNERS, example_events
 
     with db_conn() as conn:
@@ -248,7 +249,7 @@ def seed_demo_events() -> None:
             return
         for name in DEMO_PLANNERS:
             event_store.add_planner(conn, name)
-        for e in example_events():
+        for e in example_events(business=False):
             event_store.save_event(conn, e, "Démo")
 
 

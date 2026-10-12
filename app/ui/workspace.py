@@ -69,9 +69,10 @@ REFERENTIALS = (
     Referential("schedule", "Schedule", "master", "master_schedule.csv"),
     Referential("exclusions", "Exclusions", "exclusions", "exclusions.csv", "exclusions.xlsx"),
     Referential("categories", "Catégories", "categories", "categories.csv", "categories.xlsx"),
-    Referential("allocations", "Allocations", "business", "allocations", "allocations.xlsx"),
-    Referential("launches", "Lancements", "business", "launches", "launches.xlsx"),
-    Referential("targets", "Stocks cibles", "business", "target_stock", "target_stock.xlsx"),
+    # Anciens fichiers (D-042) : lus tant qu'ils ne sont pas convertis en événements SKU.
+    Referential("allocations", "Allocations", "business", "allocations"),
+    Referential("launches", "Lancements", "business", "launches"),
+    Referential("targets", "Stocks cibles", "business", "target_stock"),
     Referential("rules", "Règles boutique", "business", "boutique_rules", "boutique_rules.xlsx"),
 )
 REF_BY_KEY = {r.key: r for r in REFERENTIALS}
@@ -90,6 +91,7 @@ CALCULATOR_SHEET_KEYS = {
     "boutique portfolio": "portfolio", "portfolio": "portfolio",
     "schedule": "schedule",
 }  # fmt: skip
+LEGACY_BUSINESS_KEYS = ("allocations", "launches", "targets")
 BUSINESS_READERS = {
     "allocations": read_allocations,
     "launches": read_launches,
@@ -451,6 +453,44 @@ class Workspace:
             allocations=items["allocations"], launches=items["launches"],
             targets=items["targets"], rules=items["rules"],
         ), reports  # fmt: skip
+
+    # --- anciens fichiers allocations, lancements, stocks cibles (D-042) ------------------
+
+    def legacy_business(self) -> tuple[BusinessInputs, list[Path], list[ValidationReport]]:
+        """Allocations, lancements et stocks cibles des anciens fichiers, pas encore
+        convertis en événements SKU. Ils comptent encore dans la commande d'ici là."""
+        items: dict[str, tuple] = {}
+        files: list[Path] = []
+        reports = []
+        for key in LEGACY_BUSINESS_KEYS:
+            found = self.ref_files(REF_BY_KEY[key])
+            files += found
+            if not found:
+                items[key] = ()
+                continue
+            parsed, rep = BUSINESS_READERS[key](found[0], found[0].name)
+            items[key] = tuple(parsed)
+            reports.append(rep)
+        return BusinessInputs(
+            allocations=items["allocations"], launches=items["launches"], targets=items["targets"]
+        ), files, reports  # fmt: skip
+
+    def archive_legacy_business(self, author: str, created: int) -> list[Path]:
+        """Range les anciens fichiers dans masters/_archives/ (jamais supprimés)."""
+        _, files, _ = self.legacy_business()
+        folder = self.masters_dir / "_archives"
+        folder.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now().strftime("%Y-%m-%d_%H%M")
+        moved = []
+        for f in files:
+            target = folder / f"{stamp}_{f.name}"
+            f.rename(target)
+            moved.append(target)
+        self.log_changes("evenements", author, [
+            f"{created} événement(s) créé(s) depuis les anciens fichiers "
+            + ", ".join(f.name for f in files) + " (rangés dans masters/_archives)"
+        ])  # fmt: skip
+        return moved
 
     def import_calculator(
         self, filename: str, data: bytes, boutique: str | None, author: str

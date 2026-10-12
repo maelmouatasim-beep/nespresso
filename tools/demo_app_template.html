@@ -249,9 +249,23 @@ const M = DATA.meta, L = DATA.lines, T = DATA.text;
 const PAGES = ["1. Dépôt du jour", "2. Commandes", "3. Export", "4. Événements SKU", "5. Référentiels", "6. Historique"];
 const STATUS = { O: "OK", R: "REVIEW", B: "BLOCKED" };
 const SRC = { forecast: "Prévision", allocation: "Allocation", launch: "Lancement", target_stock: "Stock cible", dc_return: "Retour DC", exclusion: "Exclusion", event: "Événement", override: "Modifié" };
-// Événements SKU (démo : 4 événements fictifs, mêmes règles que l'outil installé).
-const TYPE_LABELS = { promotion: "Promotion", launch: "Lancement", stop: "Arrêt d'envoi", ban: "Interdiction d'envoi", conversion: "Conversion de SKU", urgent: "Urgence", store_request: "Demande boutique", watch: "À surveiller" };
-const EFFECT_LABELS = { flag: "Flag seulement", set_qty: "Quantité imposée", add_qty: "Quantité ajoutée", block: "Bloquer l'envoi", replace: "Remplacer par un autre SKU" };
+// Événements SKU (démo : 7 événements fictifs, mêmes règles que l'outil installé).
+const TYPE_LABELS = { promotion: "Promotion", launch: "Lancement", stop: "Arrêt d'envoi", ban: "Interdiction d'envoi", conversion: "Conversion de SKU", urgent: "Urgence", store_request: "Demande boutique", watch: "À surveiller", target_stock: "Stock cible" };
+const EFFECT_LABELS = { flag: "Flag seulement", set_qty: "Quantité imposée", add_qty: "Quantité ajoutée", block: "Bloquer l'envoi", replace: "Remplacer par un autre SKU", allocation: "Allocation officielle (vagues)", initial_qty: "Quantité initiale − Expected", target: "Min / cible / max" };
+// Champs de quantité par effet (D-042) : [clé, libellé] ; qty = total, quantité initiale ou cible.
+const QTY_FIELDS = {
+  set_qty: [["qty", "Quantité"]], add_qty: [["qty", "Quantité"]],
+  allocation: [["qty", "Total alloué"], ["already_sent", "Déjà envoyé"], ["waves", "Vagues (%)"], ["current_wave", "Vague en cours"]],
+  initial_qty: [["qty", "Quantité initiale"]],
+  target: [["min_qty", "Min"], ["qty", "Cible"], ["max_qty", "Max"]],
+};
+const QTY_HELP = {
+  set_qty: "Pour chaque SKU et chaque boutique visée ; arrondie au multiple par le moteur",
+  add_qty: "Pour chaque SKU et chaque boutique visée ; arrondie au multiple par le moteur",
+  allocation: "Envoyé = total × % cumulé jusqu'à la vague en cours − déjà envoyé, arrondi au multiple. Vagues : ex. 75/25. Jamais écrasée par la prévision.",
+  initial_qty: "Jusqu'au début (date de lancement) : quantité initiale − Expected, arrondie au multiple",
+  target: "Sous le min après commande : quantité = cible − Expected, arrondie au multiple ; au-dessus du max : plafonnée",
+};
 const INCLUDE_TYPES = new Set(["launch", "urgent", "store_request"]);
 const DOT = { t: "●", p: "○", team: "●", personal: "○" };
 const EV_CLS = { "Actif": "G", "À venir": "Y", "Bloqué": "X", "Terminé": "U", "Annulé": "U", "Brouillon": "M" };
@@ -309,7 +323,7 @@ const store = { get(k, d) { try { const v = localStorage.getItem(k); return v ? 
                 set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); return true; } catch (e) { return false; } } };
 
 const st = {
-  page: (p => PAGES.includes(p) ? p : PAGES[0])(store.get("spc2_page", PAGES[0])), author: store.get("spc_author", ""), examples: store.get("spc2_examples", true),
+  page: (p => PAGES.includes(p) ? p : PAGES[0])(store.get("spc2_page", PAGES[0])), author: store.get("spc_author", ""),
   // Commandes : une entrée par boutique ajoutée (onglet) ; la boutique affichée a son état dans st.* (ORDER_KEYS).
   tabs: null, active: null, order: null,
   overrides: {}, roundNotes: [], seen: new Set(), f: { cat: "Tous", status: "Tous", qty: false, ev: null }, sort: null, q: "", why: null, rowOrder: null, savedId: null, xmsg: null,
@@ -340,7 +354,7 @@ function invalidateOrder(why) {
 }
 
 // ---------- Résultat pré-calculé ----------
-function variantKey(mode) { return mode + "|" + (st.examples ? "examples" : "none") + "|" + (personalApplied() ? "all" : "team"); }
+function variantKey(mode) { return mode + "|" + (personalApplied() ? "all" : "team"); }
 // Résultat de la commande en cours : démo (calculé d'avance) ou moteur dans le navigateur.
 function V(o = st.order) {
   if (o.live) return { L: o.live.lines, T: o.live.text, sel: o.live.lines.map((_, i) => i), res: o.live.res, warnings: o.live.warnings, dc: o.live.dc, hd: o.live.history_days, period: o.live.period };
@@ -590,7 +604,7 @@ async function depositFiles(files) {
 function livePlan(p) {
   const out = JSON.parse(ENGINE.bridge.plan(JSON.stringify({
     boutique: p.boutique, run_date: RUN(), delivery: p.delivery, cover: M.covers[+p.cover],
-    coffee: p.coffee === "" ? null : M.covers[+p.coffee], mode: p.mode, examples: st.examples,
+    coffee: p.coffee === "" ? null : M.covers[+p.coffee], mode: p.mode,
     events: evAll(), planner: st.author, taken: [...st.taken], dataset: st.source === "live" ? "live" : "demo" })));
   return out;
 }
@@ -776,7 +790,6 @@ function paramsTable() {
     else if (t.computed[b] && t.computed[b] !== JSON.stringify(t.params[b])) out.push(el("p", "small", { style: "color:#94600F;margin:4px 0" }, "⚠ " + b + " : paramètres modifiés depuis le calcul, recalcule pour les appliquer."));
   }
   out.push(el("div", "row small muted", { style: "margin:4px 0 10px" },
-    el("label", { style: "display:flex;gap:8px;align-items:center" }, el("input", { type: "checkbox", checked: st.examples, onchange: e => setExamples(e.target.checked) }), "Exemples d'allocation, lancement, stock cible"),
     el("span", "", "Codes de mouvement comptés : " + (M.codes.join(", ") || "—") + " (tous, ventes et déstockages) · semaines de secours : 4")));
   if (st.busy) out.push(el("div", "msg info busy", st.busy));
   return out;
@@ -807,12 +820,6 @@ function renderOrders() {
   out.push(el("hr", { style: "border:0;border-top:1px solid var(--border);margin:14px 0" }));
   out.push(...orderBody(), ...ltBlock(states));
   return out;
-}
-function setExamples(on) {
-  st.examples = on; store.set("spc2_examples", on);
-  const t = tabs(), live = t.list.some(b => { const s = b === st.active ? st : t.states[b]; return s.order && s.order.live; });
-  if (live) invalidateOrder("Entrées métier changées"); else { t.list.forEach(b => { (b === st.active ? st : t.states[b]).overrides = {}; }); st.savedId = null; }
-  render();
 }
 function categoryOf(m) { return categories()[(m.type || "").trim().toUpperCase()] || "Autres"; }
 // Confirmé = case cochée par le planner, ou blocage d'événement confirmé.
@@ -915,7 +922,7 @@ function orderBody() {
   const out = [], o = st.order, ls = lines(), s = summarize(ls), v = V(o);
   const baseQty = {}; for (let j = 0; j < ls.length; j++) baseQty[ls[j].m.sku] = baseLine(j).qty;
   out.push(el("div", "ctx", el("b", "", btqLabel(o.boutique)), " · DC " + v.dc + " · livraison ", el("b", "", fdate(o.delivery)),
-    " · cover " + fmt1(M.covers[+o.cover]) + " j" + (o.coffee !== "" ? " (café " + fmt1(M.covers[+o.coffee]) + " j)" : "") + " · historique " + v.hd + " j · " + MODE_LABEL[o.mode] + (st.examples ? " · entrées métier" : "") + (o.live ? (st.source === "live" ? " · tes fichiers" : " · démo recalculée avec tes modifications") : " · démo")));
+    " · cover " + fmt1(M.covers[+o.cover]) + " j" + (o.coffee !== "" ? " (café " + fmt1(M.covers[+o.coffee]) + " j)" : "") + " · historique " + v.hd + " j · " + MODE_LABEL[o.mode] + (o.live ? (st.source === "live" ? " · tes fichiers" : " · démo recalculée avec tes modifications") : " · démo")));
   out.push(el("div", "tiles",
     tile("Unités", fmt(s.units), fmt(s.ordered) + " lignes commandées"),
     tile("Palettes estimées", fmt1(s.palTotal), "VL " + fmt1(s.pal.VL) + " · OL " + fmt1(s.pal.OL) + " · Mach. " + fmt1(s.pal.MACHINES) + " · Autres " + fmt1(s.pal.OTHERS)),
@@ -1180,7 +1187,7 @@ function zipStore(files) {
 }
 
 // ---------- 4. Événements SKU ----------
-// Démo : 4 événements fictifs au départ. Créer, modifier, dupliquer, terminer ou annuler :
+// Démo : 7 événements fictifs au départ (dont une allocation, un lancement et un stock cible). Créer, modifier, dupliquer, terminer ou annuler :
 // l'événement est vérifié par le moteur Python (mêmes règles que l'outil installé), gardé
 // dans ce navigateur, et la commande B80 est recalculée avec lui.
 const STATUS_TXT = { draft: "Brouillon", active: "Actif", done: "Terminé", cancelled: "Annulé" };
@@ -1228,9 +1235,23 @@ function eventForm(d) {
   const select = (v, opts, on) => { const s = el("select", { onchange: e => on(e.target.value) }, opts.map(([k, t]) => el("option", { value: k }, t))); s.value = v; return s; };
   const effects = DATA.allowed_effects[d.type] || Object.keys(EFFECT_LABELS);
   if (!effects.includes(d.effect)) d.effect = effects[0];
-  const conv = d.effect === "replace", withQty = d.effect === "set_qty" || d.effect === "add_qty";
+  const conv = d.effect === "replace", withQty = !!QTY_FIELDS[d.effect];
   const skuText = d.skus.map(x => x.sku + (x.new_sku ? ">" + x.new_sku : "")).filter(x => x !== "").join(", ");
-  const qty = d.quantities.length ? d.quantities[0].qty : "";
+  const q0 = () => { if (!d.quantities.length) d.quantities = [{ boutique: "*", sku: "*", qty: 0 }]; return d.quantities[0]; };
+  const qtyInput = ([key, label]) => {
+    const q = d.quantities[0] || {};
+    const shown = key === "waves" ? (q.waves || []).join("/") : (q[key] ?? (key === "current_wave" ? 1 : key === "already_sent" ? 0 : ""));
+    const on = v => {
+      const t = String(v).trim(), q = q0();
+      if (key === "waves") q.waves = t ? t.split(/[\/;,+\s]+/).filter(Boolean).map(x => Math.round(+x.replace("%", ""))) : [];
+      else if (key === "min_qty" || key === "max_qty") q[key] = t === "" ? null : Math.max(0, Math.round(+t));
+      else q[key] = t === "" ? (key === "current_wave" ? 1 : 0) : Math.max(0, Math.round(+t));
+    };
+    return f(label, el("input", key === "waves" ? { type: "text", id: "ev_f_waves", value: shown, placeholder: "ex. 75/25", oninput: e => on(e.target.value) }
+      : { type: "number", min: 0, step: 1, id: key === "qty" ? "ev_f_qty" : "ev_f_" + key, value: shown, oninput: e => on(e.target.value) }));
+  };
+  const qtyBox = withQty ? el("div", "", el("div", QTY_FIELDS[d.effect].length > 1 ? "two" : "", QTY_FIELDS[d.effect].map(qtyInput)),
+    el("div", { class: "small muted" }, QTY_HELP[d.effect] + (d.quantities.length > 1 ? " · " + d.quantities.length + " lignes (boutique, SKU) : la première est affichée ici, les autres sont gardées." : ""))) : null;
   const types = Object.keys(TYPE_LABELS).filter(t => d.scope === "personal" || !DATA.personal_only.includes(t));
   const out = [
     el("h2", "", d.id ? "Modifier l'événement" : (d.type === "store_request" ? "Nouvelle demande boutique" : "Nouvel événement")),
@@ -1242,11 +1263,11 @@ function eventForm(d) {
       conv ? "Ancien>nouveau, séparés par des virgules (ex. 7882.70>7965.70)" : "Séparés par des virgules"),
     el("div", "two", f("Boutiques", text(d.boutiques.join(", "), v => { d.boutiques = splitList(v).map(x => x.toUpperCase()); }), "Vide = toutes"),
       f("DC", text(d.dcs.join(", "), v => { d.dcs = splitList(v).map(x => x.toUpperCase()); }), "MT1, TO1, CY1, VA1")),
-    el("div", "two", f("Début", date(d.start, v => { d.start = v; })), f("Fin", date(d.end, v => { d.end = v; }), "Vide : arrêt ou interdiction jusqu'à nouvel ordre")),
+    el("div", "two", f("Début", date(d.start, v => { d.start = v; })), f("Fin", date(d.end, v => { d.end = v; }), "Vide : arrêt, interdiction, allocation ou stock cible jusqu'à nouvel ordre")),
     d.type === "store_request" ? el("label", "chk", el("input", { type: "checkbox", checked: d.until_next_order, onchange: e => { d.until_next_order = e.target.checked; } }), "Jusqu'à la prochaine commande") : null,
-    el("div", "two", f("Effet", select(d.effect, effects.map(x => [x, EFFECT_LABELS[x]]), v => { d.effect = v; render(); })),
+    el("div", "two", f("Effet", select(d.effect, effects.map(x => [x, EFFECT_LABELS[x]]), v => { d.effect = v; d.quantities = []; render(); })),
       f("Anticipation (j)", el("input", { type: "number", min: 0, max: 120, value: d.lead_days, oninput: e => { d.lead_days = +e.target.value || 0; } }))),
-    withQty ? f("Quantité", el("input", { type: "number", min: 0, step: 1, id: "ev_f_qty", value: qty, oninput: e => { d.quantities = e.target.value === "" ? [] : [{ boutique: "*", sku: "*", qty: Math.max(0, Math.round(+e.target.value)) }]; } }), "Pour chaque SKU et chaque boutique visée ; arrondie au multiple par le moteur") : null,
+    qtyBox,
     d.type === "store_request" ? f("Qui a demandé", text(d.requested_by, v => { d.requested_by = v; }, { placeholder: "Prénom ou rôle, pas d'email" })) : null,
     f("Description", text(d.description, v => { d.description = v; })),
     f("Statut", select(d.status, [["active", "Actif"], ["draft", "Brouillon"]], v => { d.status = v; })),
@@ -1259,7 +1280,12 @@ function eventForm(d) {
 function evTargets(e) { return !e.boutiques.length && !e.dcs.length ? "Toutes" : [...e.dcs.map(d => "DC " + d), ...e.boutiques].join(", "); }
 function evEffect(e) {
   let t = EFFECT_LABELS[e.effect];
-  if (e.quantities.length) { const q = e.quantities[0]; t += " (" + fmt(q.qty) + (q.boutique === "*" ? "" : " " + q.boutique) + (e.quantities.length > 1 ? " …)" : ")"); }
+  if (e.quantities.length) {
+    const q = e.quantities[0];
+    const v = e.effect === "target" ? fmt(q.min_qty) + " / " + fmt(q.qty) + " / " + fmt(q.max_qty)
+      : e.effect === "allocation" ? fmt(q.qty) + ((q.waves || []).length ? ", vagues " + q.waves.join("/") + ", vague " + q.current_wave : "") : fmt(q.qty);
+    t += " (" + v + (q.boutique === "*" ? "" : " " + q.boutique) + (e.quantities.length > 1 ? " …)" : ")");
+  }
   if (e.effect === "replace") t += " : " + e.skus.slice(0, 2).map(x => x.sku + "→" + x.new_sku).join(", ");
   return t;
 }
@@ -1314,7 +1340,7 @@ function renderEvents() {
   const mineN = personal.filter(e => me && e.planner === me && live(e)).length;
   const out = [el("div", "row", { style: "justify-content:space-between;align-items:baseline" }, el("h1", { style: "margin:0" }, "Événements SKU"),
     el("span", "", el("b", "", String(active)), " actif(s), ", el("b", "", String(soon)), " à venir cette semaine · au " + fdate(day)))];
-  out.push(el("p", "small muted", "Promotions, lancements, arrêts, interdictions, conversions, urgences et demandes boutique : saisis une fois, ils flaguent ou bloquent les SKU dans toutes les commandes tant qu'ils sont actifs. Le planner valide."));
+  out.push(el("p", "small muted", "Promotions et allocations, lancements, stocks cibles, arrêts, interdictions, conversions, urgences et demandes boutique : saisis une fois, ils s'appliquent à toutes les commandes tant qu'ils sont actifs. Le planner valide."));
   out.push(el("div", "msg info", EDIT.events ? el("span", "", "Tes événements sont gardés dans ce navigateur ; la commande B80 est recalculée avec eux. ",
     el("button", { class: "btn link", id: "ev_reset", onclick: () => { if (!confirm("Revenir aux 4 événements fictifs de la démo ? Tes événements seront effacés de ce navigateur.")) return; EDIT.events = null; try { localStorage.removeItem("spc2_events"); } catch (e) { /* stockage bloqué */ } invalidateOrder("Événements de démo rétablis"); st.evSel = null; st.evEdit = null; render(); } }, "Revenir aux événements de démo"))
     : "Démo : 4 événements fictifs sur B80 pour commencer. Crée, modifie, duplique, termine ou annule : chaque événement est vérifié par le moteur et la commande B80 est recalculée avec lui."));

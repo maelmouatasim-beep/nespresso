@@ -372,3 +372,50 @@ def test_changing_a_quantity_never_changes_the_status(app: AppTest) -> None:
     app.button(key="why_seen").click().run()
     next(b for b in app.button_group if b.key == "f_status").set_value("REVIEW").run()
     assert sku in set(grid(app)["SKU"])
+
+
+def test_old_allocation_file_is_converted_into_an_event(app: AppTest, tmp_path) -> None:  # noqa: ANN001
+    """D-042 : l'ancien fichier compte encore, puis « Convertir » crée l'événement (même qty)."""
+    masters = tmp_path / "data" / "demo" / "masters"
+    (masters / "allocations.csv").write_text(
+        "boutique,sku,total_qty,already_sent,wave_plan,current_wave,comment\n"
+        "B80,7005.70,4800,0,75/25,1,promo test\n", encoding="utf-8")  # fmt: skip
+    app.selectbox(key="author").set_value("Camille").run()
+    app.session_state["day"] = None  # fichier posé après le chargement de la démo
+    goto(app, REFS)
+    assert not any("Allocations" in e.label for e in app.expander)
+    compute_b80(app)
+    assert {x.sku: x for x in app.session_state["base"].lines}["7005.70"].qty == 3600
+    goto(app, EVENTS)
+    assert any("Anciens fichiers encore utilisés" in w.value for w in app.warning)
+    app.button(key="ev_migrate").click().run()
+    assert not app.exception, app.exception
+    assert not (masters / "allocations.csv").exists()
+    assert list((masters / "_archives").glob("*_allocations.csv"))
+    from app.domain.events import EventEffect
+    from app.storage import db
+    from app.storage import events as store
+
+    created = [e for e in store.list_events(db.connect()) if e.effect is EventEffect.ALLOCATION]
+    assert [(e.title, e.quantities[0].waves) for e in created] == [("Allocations B80 (reprise)",
+                                                                    (75, 25))]  # fmt: skip
+    goto(app, EVENTS)
+    assert not any("Anciens fichiers" in w.value for w in app.warning)
+    app.session_state["orders"].clear()
+    compute_b80(app)
+    line = {x.sku: x for x in app.session_state["base"].lines}["7005.70"]
+    assert line.qty == 3600 and any("Allocations B80 (reprise)" in r for r in line.reasons)
+
+
+def test_create_a_target_stock_event(app: AppTest) -> None:
+    app.selectbox(key="author").set_value("Léa").run()
+    goto(app, EVENTS)
+    app.button(key="ev_new").click().run()
+    by_suffix(app.text_input, "_title").input("Cible test").run()
+    by_suffix(app.selectbox, "_type_team").set_value("target_stock").run()
+    by_suffix(app.text_area, "_skus").input("7005.70").run()
+    grid = next(d for d in app.dataframe if d.key and d.key.endswith("qty_target"))
+    assert list(grid.value.columns) == ["Boutique", "SKU", "Cible", "Min", "Max"]
+    # Sans cible ni min / max : la raison est affichée et l'enregistrement reste fermé.
+    assert by_suffix(app.button, "_save").disabled
+    assert any("Cible vide" in e.value for e in app.error)

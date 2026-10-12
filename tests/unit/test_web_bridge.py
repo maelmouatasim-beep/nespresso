@@ -32,7 +32,7 @@ def day(tmp_path_factory):  # noqa: ANN201
             os.environ.pop("COPILOT_DATA_DIR", None)
         else:
             os.environ["COPILOT_DATA_DIR"] = old
-    bridge.init(json.dumps(bridge.masters_payload(data.masters, data.exclusions, BusinessInputs())))
+    bridge.init(json.dumps(bridge.masters_payload(data.masters, data.exclusions)))
     for name in ("stock_situation_B80_CY1.csv", "stock_movements_B80.csv"):
         out = json.loads(bridge.ingest_csv((FIXTURES / name).read_text(encoding="utf-8"), name))
         assert out["kind"] and not out["errors"]
@@ -41,7 +41,7 @@ def day(tmp_path_factory):  # noqa: ANN201
 
 def plan(**kw) -> dict:  # noqa: ANN003
     params = {"boutique": "B80", "run_date": "2026-10-05", "delivery": "2026-10-08", "cover": 9,
-              "coffee": None, "mode": "standard", "examples": False} | kw  # fmt: skip
+              "coffee": None, "mode": "standard"} | kw  # fmt: skip
     return json.loads(bridge.plan(json.dumps(params)))
 
 

@@ -106,7 +106,8 @@ Décisions du planner (étape 2, 07-oct-2026) :
 - **Écran Commande = une seule grille, comme le calculateur Excel** : pas de blocs ni de sections repliées ; filtres Catégorie / Statut / Qty > 0 / recherche sans recalcul ; tri au clic sur chaque en-tête ; tri par défaut REVIEW et BLOCKED en haut puis Qty proposée décroissante ; panneau « Pourquoi » à droite, sans quitter la table.
 - **Modifier ≠ confirmer (D-039, 12-oct-2026).** Modifier une Qty finale ne change jamais le statut (marqueur « modifié » seulement). Confirmer est explicite : case « Confirmé » en début de ligne (décocher la remet à traiter), « Accepter toutes les lignes OK », « Confirmer les lignes affichées ». Filtres de statut : Tous / À traiter (OK + REVIEW non confirmés) / REVIEW / BLOCKED / Confirmé / Modifié (Qty finale ≠ Qty proposée). Tuiles : OK / REVIEW / BLOCKED non confirmés et Confirmé. Le fichier LT attend que toutes les lignes REVIEW et BLOCKED soient confirmées. Pas de re-tri après une saisie : le tri ne se refait qu'au clic sur un en-tête ou au changement de filtre.
 - **Rien en lecture seule (D-037, 12-oct-2026).** Tous les référentiels (multiples, conversions, portfolio, DC, Schedule, exclusions, catégories, allocations, lancements, stocks cibles, règles) et les événements SKU sont modifiables dans l'outil installé et dans la démo web. Une table modifiée est relue par le même lecteur qu'à l'import avant d'être écrite : une erreur bloque l'enregistrement avec sa raison.
-- **Référentiels = 3 onglets (D-041, 12-oct-2026)** : Produits (une ligne par SKU : Multiple list + catégorie + conversion + exclusion, puce orange par anomalie, filtre Anomalies, import / export Excel ; un multiple modifié vaut pour toutes les lignes du SKU), Boutiques (code, nom, DC, carrier, planner habituel ; règles et créneaux au clic ; portfolio en sous-onglet) et Planners. Propriétaire, date de mise à jour et historique des modifications sur chaque onglet.
+- **Référentiels = 3 onglets (D-041, 12-oct-2026)** : Produits (une ligne par SKU : Multiple list + catégorie + conversion + exclusion, puce orange par anomalie, filtre Anomalies, import / export Excel ; un multiple modifié vaut pour toutes les lignes du SKU), Boutiques (code, nom, DC, carrier, planner habituel ; règles et créneaux au clic ; portfolio en sous-onglet) et Planners. Propriétaire, date de mise à jour et historique des modifications sur chaque onglet. Plus d'onglet Allocations, Lancements ni Stocks cibles (D-042).
+- **Allocations, lancements et stocks cibles = événements SKU (D-042, 12-oct-2026).** Promotion effet « Allocation officielle (vagues) » (total, déjà envoyé, vagues %, vague en cours ; fin vide permise) ; Lancement effet « Quantité initiale − Expected » (début = date de lancement) ; nouveau type « Stock cible » (min / cible / max par boutique : sous le min après commande → cible − Expected, arrondie au multiple ; au-dessus du max → plafonné). Calcul inchangé : `business_from_events` (`app/engines/events.py`) les donne à l'arbitrage métier (`app/engines/business.py`). Deux valeurs différentes pour un SKU → `BLOCKED` « deux événements contradictoires ». Un seul template, `evenements_sku.xlsx` (onglet Quantités : Min, Max, Déjà envoyé, Vagues (%), Vague en cours) ; les anciens `allocations.xlsx`, `launches.xlsx`, `target_stock.xlsx` sont retirés. Les anciens fichiers déjà déposés comptent encore jusqu'au bouton « Convertir en événements » (page Événements SKU), qui les range dans `masters/_archives/`.
 
 ## Charte visuelle
 
@@ -128,13 +129,13 @@ Décisions du planner (étape 2, 07-oct-2026) :
 
 ## Façon de travailler
 
-Règles de travail (décision du propriétaire, 12-oct-2026) :
+Règles de travail (décision du propriétaire, 12-oct-2026, renforcée le même jour) :
 
-- Le propriétaire est seul sur ce dépôt : **travailler directement sur `main`**. Pas de branche ni de PR, sauf demande explicite.
+- Le propriétaire est seul sur ce dépôt : **toujours travailler directement sur `main`**. **Jamais de branche ni de PR**, même pour un changement risqué.
 - **Avant chaque push** : `ruff check .`, `ruff format --check .`, `mypy` et `pytest` doivent être verts, avec la parité Excel à 416/416. Si un test casse, corriger avant de pousser.
-- **Après chaque changement** : republier la démo web au même lien (`python tools/build_demo_app.py`, puis publication de `preview/outil_B80.html`), et résumer en 5 points maximum ce qui a changé et ce qu'il faut tester.
+- **Après chaque changement** : republier la démo web au même lien (`python tools/build_demo_app.py`, puis publication de `preview/outil_B80.html`), et dire au propriétaire **en 3 points ce qu'il doit tester**.
 - Pas de surveillance des PR ni de vérification programmée, sauf le contrôle hebdomadaire de parité du lundi.
-- **Changement risqué** (réécriture du moteur, migration de la base) : prévenir le propriétaire avant, et proposer une branche pour cette fois-là.
+- **Changement risqué** (réécriture du moteur, migration de données) : le dire en une phrase dans le résumé, c'est tout (toujours sur `main`, poussé quand tests et parité sont verts).
 
 - Avant un changement important, résumer en 3 à 5 puces ce qui a été compris et ce qui va être fait.
 - Petits commits, chacun avec ses tests. Toujours lancer `pytest` avant de dire « terminé ».

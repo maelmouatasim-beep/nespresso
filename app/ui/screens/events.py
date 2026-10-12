@@ -21,6 +21,7 @@ from app.domain.events import (
     OPEN_END_TYPES,
     PERSONAL_EDITABLE_BY_OTHERS,
     PERSONAL_ONLY,
+    QTY_EFFECTS,
     SCOPE_LABELS,
     STATUS_LABELS,
     TYPE_LABELS,
@@ -34,6 +35,7 @@ from app.domain.events import (
     default_lead_days,
 )
 from app.engines.events import ACTIVE, ENDED, applies_to_planner, days_left, time_state
+from app.ingestion.business_events import events_from_business
 from app.ingestion.events import (
     build_catalog,
     check_skus,
@@ -56,6 +58,7 @@ from app.ui.common import (
     planners,
     run_date,
     ss,
+    workspace,
 )
 
 TEMPLATE = Path(__file__).resolve().parents[3] / "templates" / "evenements_sku.xlsx"
@@ -374,38 +377,108 @@ def _targets_block(proto: SkuEvent | None, etype: EventType, boutiques: list[str
     return (), ()
 
 
+# Colonnes en plus de Boutique / SKU / Qty, selon l'effet (D-042).
+QTY_LABELS = {
+    EventEffect.SET_QTY: ("Quantité imposée", "Qty"),
+    EventEffect.ADD_QTY: ("Quantité ajoutée", "Qty"),
+    EventEffect.ALLOCATION: ("Allocation officielle : total, déjà envoyé, vagues", "Total"),
+    EventEffect.INITIAL_QTY: ("Quantité initiale à avoir au lancement", "Quantité initiale"),
+    EventEffect.TARGET: ("Stock min / cible / max", "Cible"),
+}
+QTY_EXTRA = {
+    EventEffect.ALLOCATION: ("Déjà envoyé", "Vagues (%)", "Vague en cours"),
+    EventEffect.TARGET: ("Min", "Max"),
+}
+QTY_HELP = {
+    EventEffect.SET_QTY: "La quantité la plus précise gagne ; arrondie au multiple supérieur.",
+    EventEffect.ADD_QTY: "La quantité la plus précise gagne ; arrondie au multiple supérieur.",
+    EventEffect.ALLOCATION: "Quantité envoyée = total × % cumulé jusqu'à la vague en cours − déjà "
+                            "envoyé, arrondie au multiple. Vagues : ex. 75/25 (vide = une vague). "
+                            "Jamais écrasée par la prévision.",
+    EventEffect.INITIAL_QTY: "Jusqu'au début (date de lancement) : quantité initiale − Expected, "
+                             "arrondie au multiple. Ensuite la prévision reprend.",
+    EventEffect.TARGET: "Si le stock après commande passe sous le min : quantité = cible − "
+                        "Expected, arrondie au multiple. Au-dessus du max : plafonnée.",
+}  # fmt: skip
+
+
+def _num(value: object, what: str, where: str) -> int | None:
+    if value is None or (isinstance(value, float) and pd.isna(value)) or value is pd.NA:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        number = float(text.replace(",", "."))
+    except ValueError as exc:
+        raise ValueError(f"{what} illisible pour {where} : « {text} »") from exc
+    if not number.is_integer() or number < 0:
+        raise ValueError(f"{what} doit être un entier positif pour {where}")
+    return int(number)
+
+
 def _qty_block(
     proto: SkuEvent | None, effect: EventEffect, etype: EventType
 ) -> tuple[EventQty, ...]:
-    if effect not in (EventEffect.SET_QTY, EventEffect.ADD_QTY):
+    if effect not in QTY_EFFECTS:
         return ()
-    rows = [{"Boutique": "Toutes" if q.boutique == ALL else q.boutique,
-             "SKU": "Tous" if q.sku == ALL else q.sku, "Qty": q.qty}
-            for q in (proto.quantities if proto else ())]  # fmt: skip
-    rows = rows or [{"Boutique": "Toutes", "SKU": "Tous", "Qty": None}]
-    label = "Quantité imposée" if effect is EventEffect.SET_QTY else "Quantité ajoutée"
+    label, qty_col = QTY_LABELS[effect]
+    extra = QTY_EXTRA.get(effect, ())
+
+    def row_of(q: EventQty) -> dict[str, object]:
+        row: dict[str, object] = {"Boutique": "Toutes" if q.boutique == ALL else q.boutique,
+                                  "SKU": "Tous" if q.sku == ALL else q.sku, qty_col: q.qty}  # fmt: skip
+        values = {"Déjà envoyé": q.already_sent, "Vagues (%)": "/".join(map(str, q.waves)),
+                  "Vague en cours": q.current_wave, "Min": q.min_qty, "Max": q.max_qty}  # fmt: skip
+        return {**row, **{c: values[c] for c in extra}}
+
+    rows = [row_of(q) for q in (proto.quantities if proto else ())]
+    blank: dict[str, object] = {"Boutique": "Toutes", "SKU": "Tous", qty_col: None}
+    if effect is EventEffect.ALLOCATION:
+        blank |= {"Déjà envoyé": 0, "Vagues (%)": "100", "Vague en cours": 1}
+    elif effect is EventEffect.TARGET:
+        blank |= {"Min": None, "Max": None}
+    df = pd.DataFrame(rows or [blank])
+    numeric = [qty_col, *[c for c in extra if c != "Vagues (%)"]]
+    types = {c: "Float64" for c in numeric}
+    if "Vagues (%)" in extra:
+        types["Vagues (%)"] = "string"
+    df = df.astype(types)
     st.markdown(f"**{label}** par boutique")
-    grid = st.data_editor(
-        pd.DataFrame(rows).astype({"Qty": "Float64"}), key=_k(f"qty_{effect}"), num_rows="dynamic",
-        hide_index=True, width="stretch",
-        column_config={
-            "Boutique": st.column_config.TextColumn(help="« Toutes » ou un code boutique"),
-            "SKU": st.column_config.TextColumn(help="« Tous » ou un SKU de la liste"),
-            "Qty": st.column_config.NumberColumn(min_value=0, step=1, format="localized"),
-        },
-    )  # fmt: skip
-    st.caption("Colle des lignes depuis Excel (Boutique, SKU, Qty). La quantité la plus précise "
-               "gagne ; elle est arrondie au multiple supérieur au calcul.")  # fmt: skip
+    config = {
+        "Boutique": st.column_config.TextColumn(help="« Toutes » ou un code boutique"),
+        "SKU": st.column_config.TextColumn(help="« Tous » ou un SKU de la liste"),
+        **{c: st.column_config.NumberColumn(min_value=0, step=1, format="localized")
+           for c in numeric},
+        "Vagues (%)": st.column_config.TextColumn(help="Pourcentages séparés par /, total 100"),
+    }  # fmt: skip
+    grid = st.data_editor(df, key=_k(f"qty_{effect}"), num_rows="dynamic", hide_index=True,
+                          width="stretch", column_config=config)  # fmt: skip
+    st.caption("Colle des lignes depuis Excel (Boutique, SKU, " + ", ".join([qty_col, *extra])
+               + "). " + QTY_HELP[effect])  # fmt: skip
     out = []
     for r in grid.to_dict("records"):
         b = str(r["Boutique"] or "").strip().upper()
         s = str(r["SKU"] or "").strip()
-        if pd.isna(r["Qty"]) and not s and b in ("", "TOUTES"):
+        where = f"{b or 'Toutes'} / {s or 'Tous'}"
+        q = _num(r[qty_col], qty_col, where)
+        if q is None and not s and b in ("", "TOUTES"):
             continue
-        if pd.isna(r["Qty"]):
-            raise ValueError(f"Quantité vide pour {b or 'Toutes'} / {s or 'Tous'}")
-        out.append(EventQty(boutique=ALL if b in ("", "TOUTES", "*") else b,
-                            sku=ALL if s.lower() in ("", "tous", "*") else s, qty=int(r["Qty"])))  # fmt: skip
+        if q is None:
+            raise ValueError(f"{qty_col} vide pour {where}")
+        waves_text = str(r.get("Vagues (%)") or "").strip() if "Vagues (%)" in extra else ""
+        if waves_text in ("<NA>", "nan"):
+            waves_text = ""
+        waves = tuple(_num(w.rstrip("%"), "Vague", where) or 0
+                      for w in waves_text.replace(";", "/").split("/") if w.strip())  # fmt: skip
+        out.append(EventQty(
+            boutique=ALL if b in ("", "TOUTES", "*") else b,
+            sku=ALL if s.lower() in ("", "tous", "*") else s, qty=q,
+            min_qty=_num(r.get("Min"), "Min", where), max_qty=_num(r.get("Max"), "Max", where),
+            already_sent=_num(r.get("Déjà envoyé"), "Déjà envoyé", where) or 0,
+            waves=(() if waves == (100,) else waves),
+            current_wave=_num(r.get("Vague en cours"), "Vague en cours", where) or 1,
+        ))  # fmt: skip
     del etype
     return tuple(out)
 
@@ -445,7 +518,10 @@ def _form(proto: SkuEvent | None, scope_default: EventScope, me: str) -> SkuEven
     end = None
     if not until_next:
         open_end = etype in OPEN_END_TYPES
-        end = c2.date_input("Fin" + (" (vide = jusqu'à nouvel ordre)" if open_end else " *"),
+        hint = (" (vide = jusqu'à nouvel ordre)" if open_end
+                else " (vide permis pour une allocation)" if etype is EventType.PROMOTION
+                else " *")  # fmt: skip
+        end = c2.date_input("Fin" + hint,
                             value=proto.end if proto else None, key=_k(f"end_{etype}"),
                             format="DD/MM/YYYY")  # fmt: skip
     same_type = proto is not None and proto.type is etype
@@ -735,6 +811,44 @@ def _excel_block(events: list[SkuEvent], me: str) -> None:
             st.caption("Choisis ton prénom (Planner) pour importer.")
 
 
+# --- Anciens fichiers allocations, lancements, stocks cibles (D-042) ------------------------------
+
+
+def _legacy_block(me: str) -> None:
+    """Les anciens fichiers comptent encore tant qu'ils ne sont pas convertis : on le dit."""
+    ws = workspace()
+    legacy, files, reports = ws.legacy_business()
+    if not files:
+        return
+    counts = [(len(legacy.allocations), "allocation(s)"), (len(legacy.launches), "lancement(s)"),
+              (len(legacy.targets), "stock(s) cible(s)")]  # fmt: skip
+    what = ", ".join(f"{n} {label}" for n, label in counts if n)
+    with st.container(border=True, key="ev_legacy"):
+        st.warning(f"Anciens fichiers encore utilisés par les commandes : {what or 'aucune ligne'} "
+                   f"({', '.join(f.name for f in files)}). Convertis-les en événements SKU : "
+                   "mêmes quantités, et les fichiers sont rangés dans masters/_archives.")  # fmt: skip
+        for rep in reports:
+            for issue in rep.issues:
+                st.caption(f"{rep.source} : {issue.message}")
+        if st.button("Convertir en événements", type="primary", key="ev_migrate", disabled=not me):
+            try:
+                created = events_from_business(legacy.allocations, legacy.launches, legacy.targets,
+                                               author=me, today=run_date(),
+                                               source=", ".join(f.name for f in files))  # fmt: skip
+            except (ValueError, ValidationError) as exc:
+                st.error(f"Conversion impossible, rien n'est changé : {exc}")
+                return
+            with db_conn() as conn:
+                for e in created:
+                    store.save_event(conn, e, me, "créé depuis un ancien fichier")
+            ws.archive_legacy_business(me, len(created))
+            ss.day, ss.day_error = None, None
+            st.toast(f"{len(created)} événement(s) créé(s)")
+            st.rerun()
+        if not me:
+            st.caption("Choisis ton prénom (Planner, barre de gauche) pour convertir.")
+
+
 # --- Écran --------------------------------------------------------------------------------------
 
 
@@ -752,9 +866,10 @@ def render() -> None:
     h1.header("Événements SKU")
     h2.markdown(f"<div style='text-align:right'><b>{active}</b> actif(s), <b>{soon}</b> à venir "
                 f"cette semaine · au {fmt_date(day)}</div>", unsafe_allow_html=True)  # fmt: skip
-    st.caption("Promotions, lancements, arrêts, interdictions, conversions, urgences et demandes "
-               "boutique : saisis une fois, ils flaguent ou bloquent les SKU dans toutes les "
-               "commandes tant qu'ils sont actifs. Le planner valide.")  # fmt: skip
+    st.caption("Promotions et allocations, lancements, stocks cibles, arrêts, interdictions, "
+               "conversions, urgences et demandes boutique : saisis une fois, ils s'appliquent à "
+               "toutes les commandes tant qu'ils sont actifs. Le planner valide.")  # fmt: skip
+    _legacy_block(me)
 
     def tab_label(t: str) -> str:
         group = team if t == TEAM_TAB else mine
