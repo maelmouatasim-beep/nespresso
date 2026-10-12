@@ -122,11 +122,11 @@ def test_second_boutique_takes_first_parameters_and_keeps_each_order(app: AppTes
 
 def test_referential_owner_is_saved(app: AppTest) -> None:
     goto(app, REFS)
-    app.text_input(key="owner_multiples").input("Équipe planning MTL").run()
+    app.text_input(key="owner_produits").input("Équipe planning MTL").run()
     assert not app.exception
     from app.ui.workspace import demo_workspace
 
-    assert demo_workspace().meta()["multiples"]["owner"] == "Équipe planning MTL"
+    assert demo_workspace().meta()["produits"]["owner"] == "Équipe planning MTL"
 
 
 def grid(at: AppTest):
@@ -323,19 +323,20 @@ def test_quantity_change_counts_immediately_with_deduced_context(app: AppTest) -
     assert not any("pas un multiple" in c.value for c in app.caption)
 
 
-def test_every_referential_is_editable_and_saved(app: AppTest) -> None:
+def test_referentials_have_three_tabs_all_editable(app: AppTest) -> None:
     goto(app, REFS)
+    assert {"Produits", "Boutiques", "Planners", "Portfolio"} <= {t.label for t in app.tabs}
     keys = {b.key for b in app.button}
-    for ref in ("multiples", "conversions", "portfolio", "dc_mapping", "schedule",
-                "allocations", "launches", "targets", "rules"):  # fmt: skip
-        assert f"save_tbl_{ref}_0" in keys, ref
+    assert {"save_products", "save_boutiques", "save_part_portfolio"} <= keys
+    app.toggle(key="prod_anom").set_value(True).run()
+    assert not app.exception
     app.selectbox(key="author").set_value("Sami").run()
-    app.button(key="save_tbl_dc_mapping_0").click().run()
+    app.button(key="save_products").click().run()
     assert not app.exception and not app.error
-    from app.ui.workspace import demo_workspace
-
-    meta = demo_workspace().meta()["dc_mapping"]
-    assert meta["updated_by"] == "Sami" and meta["source_file"] == "modifié dans l'outil"
+    app.selectbox(key="btq_open").set_value("B80").run()
+    assert {"save_part_rules", "save_part_slots"} <= {b.key for b in app.button}
+    app.button(key="save_boutiques").click().run()
+    assert not app.exception and not app.error
 
 
 def test_changing_a_quantity_never_changes_the_status(app: AppTest) -> None:

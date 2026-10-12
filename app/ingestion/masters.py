@@ -117,6 +117,10 @@ def load_masters_dir(directory: Path) -> Masters:
     if (directory / "master_schedule.csv").exists():
         schedule, schedule_issues = load_schedule(directory / "master_schedule.csv")
         names = load_boutique_names(directory / "master_schedule.csv")
+    if (directory / "master_boutiques.csv").exists():  # onglet Boutiques : nom modifié
+        _, extra = read_csv_records(directory / "master_boutiques.csv")
+        names.update({r["boutique"].strip(): r["name"].strip() for r in extra
+                      if r.get("boutique", "").strip() and r.get("name", "").strip()})  # fmt: skip
     return Masters(
         schedule=schedule,
         schedule_issues=schedule_issues,

@@ -17,6 +17,13 @@ from pathlib import Path
 
 from app.domain.models import Exclusion, StockMovement, StockSnapshotLine
 from app.engines.categories import DEFAULT_CATEGORY_MAP
+from app.ingestion.boutique_table import (
+    EXTRA_FILE,
+    BoutiqueSources,
+    apply_boutique_edits,
+    build_boutique_rows,
+    replace_boutique_rows,
+)
 from app.ingestion.business_inputs import (
     read_allocations,
     read_launches,
@@ -27,10 +34,12 @@ from app.ingestion.calculator import extract
 from app.ingestion.categories import categories_csv, read_categories
 from app.ingestion.depot import Extraction, detect_extraction_date
 from app.ingestion.exclusions import exclusions_csv, read_exclusions
+from app.ingestion.fixtures_loader import read_csv_records
 from app.ingestion.masters import Masters, load_masters_dir
 from app.ingestion.powerbi import read_movements, read_stock_situation
-from app.ingestion.referential_edit import check_table
-from app.ingestion.tables import ValidationReport
+from app.ingestion.product_table import ProductSources, apply_product_edits
+from app.ingestion.referential_edit import DEFAULT_COLUMNS, check_table
+from app.ingestion.tables import ValidationReport, read_raw
 from app.services.planning import BusinessInputs
 from app.storage.db import file_hash
 
@@ -224,6 +233,174 @@ class Workspace:
             raise ValueError(f"{ref.label} : enregistré par son propre éditeur")
         target.write_text(csv_text, encoding="utf-8")
         self._touch(key, author, "modifié dans l'outil")
+        return [], warnings
+
+    # --- historique des modifications --------------------------------------------------
+
+    def _history_path(self) -> Path:
+        return self.masters_dir / "_historique.jsonl"
+
+    def log_changes(self, key: str, author: str, changes: list[str]) -> None:
+        if not changes:
+            return
+        self.masters_dir.mkdir(parents=True, exist_ok=True)
+        entry = {"at": datetime.now().isoformat(timespec="minutes"), "by": author,
+                 "ref": key, "changes": changes}  # fmt: skip
+        with self._history_path().open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+    def history(self, key: str) -> list[dict]:
+        """Modifications d'un onglet, les plus récentes d'abord."""
+        try:
+            lines = self._history_path().read_text(encoding="utf-8").splitlines()
+        except OSError:
+            return []
+        out = [json.loads(x) for x in lines if x.strip()]
+        return [e for e in reversed(out) if e.get("ref") == key]
+
+    # --- onglet Produits -------------------------------------------------------------------
+
+    def _records(self, name: str) -> tuple[list[str], list[dict[str, str]]]:
+        path = self.masters_dir / name
+        return read_csv_records(path) if path.exists() else ([], [])
+
+    def product_sources(self) -> ProductSources:
+        categories, _ = self.load_categories()
+        return ProductSources(
+            multiples=self._records(REF_BY_KEY["multiples"].filename)[1],
+            conversions=self._records(REF_BY_KEY["conversions"].filename)[1],
+            exclusions=self._records(REF_BY_KEY["exclusions"].filename)[1],
+            categories=categories,
+        )
+
+    def save_products(
+        self, edited: list[dict], author: str, today: date | None = None
+    ) -> tuple[list[str], list[str]]:
+        """Enregistre le tableau Produits. Retourne (erreurs, avertissements)."""
+        res = apply_product_edits(self.product_sources(), edited, author, today or date.today())
+        if res.errors:
+            return res.errors, []
+        warnings: list[str] = []
+        for key, text in (("multiples", res.multiples_csv), ("conversions", res.conversions_csv)):
+            if key in res.touched:
+                errors, warns = check_table(key, text)
+                if errors:
+                    return errors, []
+                warnings += warns
+        if "exclusions" in res.touched:
+            _, report = read_exclusions(io.BytesIO(res.exclusions_csv.encode("utf-8")), "x.csv")
+            if report.has_errors:
+                return [i.message for i in report.issues if i.level == "error"], []
+        files = {"multiples": res.multiples_csv, "conversions": res.conversions_csv,
+                 "exclusions": res.exclusions_csv}  # fmt: skip
+        self.masters_dir.mkdir(parents=True, exist_ok=True)
+        for key, text in files.items():
+            if key in res.touched:
+                (self.masters_dir / REF_BY_KEY[key].filename).write_text(text, encoding="utf-8")
+                self._touch(key, author, "modifié dans l'outil")
+        if "categories" in res.touched:
+            self.save_categories(res.categories, author)
+        if res.changes:
+            self._touch("produits", author, "modifié dans l'outil")
+            self.log_changes("produits", author, res.changes)
+        return [], warnings
+
+    # --- onglet Boutiques ------------------------------------------------------------------
+
+    def boutique_sources(self) -> BoutiqueSources:
+        sched_cols, sched = self._records(REF_BY_KEY["schedule"].filename)
+        counts: dict[str, int] = {}
+        for f in self.ref_files(REF_BY_KEY["portfolio"]):
+            for r in read_csv_records(f)[1]:
+                counts[r["boutique"].strip()] = counts.get(r["boutique"].strip(), 0) + 1
+        return BoutiqueSources(
+            dc_mapping=self._records(REF_BY_KEY["dc_mapping"].filename)[1],
+            schedule=sched,
+            schedule_columns=sched_cols or DEFAULT_COLUMNS["schedule"],
+            extra=self._records(EXTRA_FILE)[1],
+            portfolio_counts=counts,
+        )
+
+    def boutique_rows(self) -> list[dict[str, str]]:
+        return build_boutique_rows(self.boutique_sources())
+
+    def save_boutiques(self, edited: list[dict], author: str) -> list[str]:
+        src = self.boutique_sources()
+        res = apply_boutique_edits(src, edited)
+        if res.errors:
+            return res.errors
+        for key, text in (("dc_mapping", res.dc_csv), ("schedule", res.schedule_csv)):
+            errors, _ = check_table(key, text)
+            if errors:
+                return errors
+        if not res.changes:
+            return []
+        self.masters_dir.mkdir(parents=True, exist_ok=True)
+        (self.masters_dir / REF_BY_KEY["dc_mapping"].filename).write_text(res.dc_csv, "utf-8")
+        if src.schedule:
+            (self.masters_dir / REF_BY_KEY["schedule"].filename).write_text(
+                res.schedule_csv, "utf-8"
+            )
+        (self.masters_dir / EXTRA_FILE).write_text(res.extra_csv, "utf-8")
+        self._touch("boutiques", author, "modifié dans l'outil")
+        self.log_changes("boutiques", author, res.changes)
+        return []
+
+    def boutique_part(self, part: str, boutique: str) -> tuple[list[str], list[dict[str, str]]]:
+        """Créneaux (Schedule), règles ou portfolio d'une boutique : (colonnes, lignes)."""
+        columns, records = self._part_records(part, boutique)[:2]
+        return columns, [r for r in records if r.get("boutique", "").strip() == boutique]
+
+    def _part_records(self, part: str, boutique: str) -> tuple[list[str], list[dict], Path]:
+        if part == "slots":
+            path = self.masters_dir / REF_BY_KEY["schedule"].filename
+            default = DEFAULT_COLUMNS["schedule"]
+        elif part == "rules":
+            files = self.ref_files(REF_BY_KEY["rules"])
+            path = files[0] if files else self.masters_dir / "boutique_rules.csv"
+            default = DEFAULT_COLUMNS["rules"]
+        elif part == "portfolio":
+            files = self.ref_files(REF_BY_KEY["portfolio"])
+            path = next((f for f in files if any(r["boutique"].strip() == boutique
+                                                 for r in read_csv_records(f)[1])),
+                        self.masters_dir / f"master_boutique_portfolio_{boutique}.csv")  # fmt: skip
+            default = DEFAULT_COLUMNS["portfolio"]
+        else:
+            raise ValueError(f"partie inconnue : {part}")
+        if path.suffix == ".csv" and path.exists():
+            columns, records = read_csv_records(path)
+        elif path.exists():  # règles en .xlsx : relues en texte
+            raw = read_raw(path, path.name)
+            columns = raw.rows[0] if raw.rows else list(default)
+            records = [dict(zip(columns, r, strict=False)) for r in raw.rows[1:]]
+        else:
+            columns, records = list(default), []
+        return columns or list(default), records, path
+
+    def save_boutique_part(
+        self, part: str, boutique: str, rows: list[dict], author: str
+    ) -> tuple[list[str], list[str]]:
+        columns, records, path = self._part_records(part, boutique)
+        old_name = next((r.get("boutique_name", "") for r in records
+                         if r.get("boutique", "").strip() == boutique
+                         and r.get("boutique_name", "").strip()), "")  # fmt: skip
+        if part == "slots" and old_name and rows:  # le nom reste sur le premier créneau
+            rows = [{**rows[0], "boutique_name": old_name}, *rows[1:]]
+        text = replace_boutique_rows(records, columns, boutique, rows)
+        key = {"slots": "schedule", "rules": "rules", "portfolio": "portfolio"}[part]
+        errors, warnings = check_table(key, text)
+        if errors:
+            return errors, warnings
+        self.masters_dir.mkdir(parents=True, exist_ok=True)
+        if path.suffix != ".csv":
+            path.unlink()
+            path = path.with_suffix(".csv")
+        path.write_text(text, encoding="utf-8")
+        label = {"slots": "créneaux", "rules": "règles", "portfolio": "portfolio"}[part]
+        self._touch("boutiques", author, "modifié dans l'outil")
+        self.log_changes(
+            "boutiques", author, [f"{boutique} : {label} modifiés ({len(rows)} ligne(s))"]
+        )
         return [], warnings
 
     def save_exclusions(self, exclusions: list[Exclusion], author: str) -> None:
@@ -452,10 +629,10 @@ def demo_workspace(reset: bool = False) -> Workspace:
     ws.masters_dir.mkdir(parents=True, exist_ok=True)
     for name in DEMO_MASTER_FILES.values():
         shutil.copy(DEMO_SOURCE / name, ws.masters_dir / name)
-    for ref in REFERENTIALS:
-        if ref.kind != "exclusions":
-            ws.set_meta(ref.key, owner="Équipe planning", updated_at="2026-10-05T08:20",
-                        updated_by="Démo", source_file="données de démonstration")  # fmt: skip
+    keys = [r.key for r in REFERENTIALS if r.kind != "exclusions"]
+    for key in [*keys, "produits", "boutiques", "planners"]:
+        ws.set_meta(key, owner="Équipe planning", updated_at="2026-10-05T08:20",
+                    updated_by="Démo", source_file="données de démonstration")  # fmt: skip
     ws.save_exclusions(
         [
             Exclusion(
