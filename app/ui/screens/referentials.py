@@ -1,8 +1,13 @@
-"""Écran 6 — Référentiels : propriétaire, mise à jour, import, anomalies."""
+"""Écran 6 — Référentiels : propriétaire, mise à jour, modification, import, anomalies.
+
+Tout est modifiable dans l'outil (décision du planner, 12-oct-2026) : aucune table en
+lecture seule.
+"""
 
 from __future__ import annotations
 
 from datetime import date
+from pathlib import Path
 
 import pandas as pd
 import streamlit as st
@@ -14,6 +19,7 @@ from app.ingestion import referential_checks as checks
 from app.ingestion.categories import check_mapping
 from app.ingestion.exclusions import parse_boutiques
 from app.ingestion.masters import load_masters_dir
+from app.ingestion.referential_edit import DEFAULT_COLUMNS, table_csv
 from app.storage import events as event_store
 from app.ui.common import author, db_conn, fmt_date, reset_all, ss, workspace
 from app.ui.workspace import REFERENTIALS, ROOT, Referential
@@ -58,18 +64,47 @@ def _anomalies(ref: Referential) -> list[str]:
             if i.level != "info" and r.source.startswith(ref.filename)]  # fmt: skip
 
 
-def _preview(ref: Referential) -> None:
+def _read_table(path: Path) -> pd.DataFrame:
+    if path.suffix == ".csv":
+        return pd.read_csv(path, dtype=str, keep_default_na=False)
+    return pd.read_excel(path, dtype=str).fillna("")
+
+
+def _table_editor(ref: Referential) -> None:
+    """Grille modifiable : cellules, lignes ajoutées ou supprimées, puis « Enregistrer »."""
     files = workspace().ref_files(ref)
-    if not files:
-        st.info("Aucun fichier.")
-        return
-    for f in files:
-        if f.suffix == ".csv":
-            df = pd.read_csv(f, dtype=str, keep_default_na=False)
-        else:
-            df = pd.read_excel(f, dtype=str).fillna("")
-        st.caption(f"{f.name} · {len(df)} lignes")
-        st.dataframe(df.head(300), hide_index=True, width="stretch", height=260)
+    targets: list[Path | None] = list(files) or [None]
+    for i, f in enumerate(targets):
+        df = _read_table(f) if f else pd.DataFrame(columns=DEFAULT_COLUMNS[ref.key], dtype=str)
+        st.caption((f"{f.name} · {len(df)} lignes" if f else "Aucun fichier : saisis les lignes ici.")
+                   + " · clic sur une cellule pour la modifier, « + » en bas pour ajouter une ligne, "
+                   "case à gauche puis Suppr pour retirer une ligne.")  # fmt: skip
+        edited = st.data_editor(
+            df, num_rows="dynamic", hide_index=True, width="stretch", height=320,
+            key=f"tbl_{ref.key}_{i}_{ss.nonce}",
+            column_config={c: st.column_config.TextColumn() for c in df.columns},
+        )  # fmt: skip
+        if st.button(f"Enregistrer {ref.label.lower()}" + (f" ({f.name})" if len(targets) > 1 and f else ""),
+                     type="primary", key=f"save_tbl_{ref.key}_{i}"):  # fmt: skip
+            if not author():
+                st.error("Choisis ton prénom (Planner, barre de gauche).")
+                return
+            text = table_csv(list(edited.columns), edited.to_numpy(dtype=object).tolist())
+            try:
+                errors, warnings = workspace().save_table(
+                    ref.key, text, author(), f.name if f else None
+                )
+            except ValueError as exc:
+                errors, warnings = [str(exc)], []
+            if errors:
+                st.error("Rien n'est enregistré : " + " · ".join(errors))
+                return
+            reset_all()
+            for w in warnings:
+                st.warning(w)
+            st.success(
+                f"{ref.label} enregistré ({len(edited)} lignes). La commande sera recalculée."
+            )
 
 
 def _exclusions_editor() -> None:
@@ -181,7 +216,7 @@ def _referential_tab(ref: Referential) -> None:
     elif ref.kind == "categories":
         _categories_editor()
     else:
-        _preview(ref)
+        _table_editor(ref)
     u1, u2 = st.columns([3, 1], vertical_alignment="bottom")
     up = u1.file_uploader("Importer (remplace le fichier actuel)", type=["csv", "xlsx"],
                           key=f"imp_{ref.key}_{ss.nonce}")  # fmt: skip

@@ -26,6 +26,7 @@ from app.ingestion.fixtures_loader import (
     load_conversions,
     load_multiples,
     read_csv_as_text,
+    read_csv_records,
 )
 
 PORTFOLIO_COLUMNS = ["boutique", "sku", "filter_out"]
@@ -49,15 +50,13 @@ def load_schedule(path: Path) -> tuple[list[ScheduleSlot], list[str]]:
 
     Lignes sans jour de commande ignorées ; jours illisibles signalés.
     """
-    import pandas as pd  # seulement pour lire le CSV (absent de la version web)
-
-    df = pd.read_csv(path, dtype=str, keep_default_na=False)
-    missing = {"boutique", "order_day", "delivery_day"} - set(df.columns)
+    columns, records = read_csv_records(path)
+    missing = {"boutique", "order_day", "delivery_day"} - set(columns)
     if missing:
         raise SchemaError(f"{path.name} : colonnes manquantes {sorted(missing)}")
     slots: list[ScheduleSlot] = []
     issues: list[str] = []
-    for i, r in enumerate(df.to_dict("records"), start=2):
+    for i, r in enumerate(records, start=2):
         b, o, d = r["boutique"].strip(), r["order_day"].strip(), r["delivery_day"].strip()
         if not (b and o):
             continue
@@ -74,13 +73,11 @@ def load_schedule(path: Path) -> tuple[list[ScheduleSlot], list[str]]:
 
 def load_boutique_names(path: Path) -> dict[str, str]:
     """Nom de chaque boutique (colonne boutique_name du Schedule, si présente)."""
-    import pandas as pd  # seulement pour lire le CSV (absent de la version web)
-
-    df = pd.read_csv(path, dtype=str, keep_default_na=False)
-    if "boutique_name" not in df.columns:
+    columns, records = read_csv_records(path)
+    if "boutique_name" not in columns:
         return {}
     names: dict[str, str] = {}
-    for b, n in zip(df["boutique"], df["boutique_name"], strict=True):
+    for b, n in ((r["boutique"], r["boutique_name"]) for r in records):
         if b.strip() and n.strip() and b.strip() not in names:
             names[b.strip()] = n.strip()
     return names
@@ -109,12 +106,11 @@ def load_masters_dir(directory: Path) -> Masters:
     if missing:
         raise SchemaError(f"Fichiers maîtres manquants dans {directory} : {missing}")
     products, anomalies = load_multiples(files["multiples"])
-    dc_df = read_csv_as_text(files["dc_mapping"], DC_MAPPING_COLUMNS)
+    dc_rows = read_csv_as_text(files["dc_mapping"], DC_MAPPING_COLUMNS)
     portfolio: dict[str, dict[str, str]] = {}
     for path in sorted(directory.glob("master_boutique_portfolio*.csv")):
-        df = read_csv_as_text(path, PORTFOLIO_COLUMNS)
-        for b, sku, flag in zip(df["boutique"], df["sku"], df["filter_out"], strict=True):
-            portfolio.setdefault(b, {})[sku] = flag
+        for r in read_csv_as_text(path, PORTFOLIO_COLUMNS):
+            portfolio.setdefault(r["boutique"], {})[r["sku"]] = r["filter_out"]
     schedule: list[ScheduleSlot] = []
     schedule_issues: list[str] = []
     names: dict[str, str] = {}
@@ -128,7 +124,7 @@ def load_masters_dir(directory: Path) -> Masters:
         products=products,
         product_list_anomalies=anomalies,
         conversions=load_conversions(files["conversions"]),
-        dc_mapping=dict(zip(dc_df["boutique"], dc_df["dc"], strict=True)),
+        dc_mapping={r["boutique"]: r["dc"] for r in dc_rows},
         portfolio=portfolio,
         sources={k: p.name for k, p in files.items()},
     )

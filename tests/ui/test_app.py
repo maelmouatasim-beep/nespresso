@@ -324,3 +324,18 @@ def test_quantity_change_waits_for_its_category(app: AppTest) -> None:
     assert app.session_state["pending_edits"] == {}
     row = grid(app).set_index("SKU").loc["7005.70"]
     assert (row["Statut"], row["Catégorie modif."]) == ("● Modifié", "Promo")
+
+
+def test_every_referential_is_editable_and_saved(app: AppTest) -> None:
+    goto(app, REFS)
+    keys = {b.key for b in app.button}
+    for ref in ("multiples", "conversions", "portfolio", "dc_mapping", "schedule",
+                "allocations", "launches", "targets", "rules"):  # fmt: skip
+        assert f"save_tbl_{ref}_0" in keys, ref
+    app.selectbox(key="author").set_value("Sami").run()
+    app.button(key="save_tbl_dc_mapping_0").click().run()
+    assert not app.exception and not app.error
+    from app.ui.workspace import demo_workspace
+
+    meta = demo_workspace().meta()["dc_mapping"]
+    assert meta["updated_by"] == "Sami" and meta["source_file"] == "modifié dans l'outil"

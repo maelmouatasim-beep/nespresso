@@ -29,6 +29,7 @@ from app.ingestion.depot import Extraction, detect_extraction_date
 from app.ingestion.exclusions import exclusions_csv, read_exclusions
 from app.ingestion.masters import Masters, load_masters_dir
 from app.ingestion.powerbi import read_movements, read_stock_situation
+from app.ingestion.referential_edit import check_table
 from app.ingestion.tables import ValidationReport
 from app.services.planning import BusinessInputs
 from app.storage.db import file_hash
@@ -193,6 +194,37 @@ class Workspace:
         target.write_bytes(data)
         self._touch(key, author, Path(filename).name)
         return target
+
+    def save_table(
+        self, key: str, csv_text: str, author: str, filename: str | None = None
+    ) -> tuple[list[str], list[str]]:
+        """Enregistre un référentiel modifié dans la grille de l'outil.
+
+        La table est d'abord relue comme à l'import ; une erreur bloque l'écriture.
+        `filename` : fichier existant à remplacer (portfolio : un fichier par boutique).
+        Retourne (erreurs, avertissements).
+        """
+        ref = REF_BY_KEY[key]
+        errors, warnings = check_table(key, csv_text)
+        if errors:
+            return errors, warnings
+        self.masters_dir.mkdir(parents=True, exist_ok=True)
+        if ref.kind == "business":
+            for old in self.ref_files(ref):
+                old.unlink()
+            target = self.masters_dir / f"{ref.filename}.csv"
+        elif ref.kind == "portfolio":
+            name = Path(filename).name if filename else "master_boutique_portfolio.csv"
+            if not name.startswith("master_boutique_portfolio") or not name.endswith(".csv"):
+                raise ValueError(f"Nom de fichier portfolio inattendu : {name}")
+            target = self.masters_dir / name
+        elif ref.kind == "master":
+            target = self.masters_dir / ref.filename
+        else:
+            raise ValueError(f"{ref.label} : enregistré par son propre éditeur")
+        target.write_text(csv_text, encoding="utf-8")
+        self._touch(key, author, "modifié dans l'outil")
+        return [], warnings
 
     def save_exclusions(self, exclusions: list[Exclusion], author: str) -> None:
         self.masters_dir.mkdir(parents=True, exist_ok=True)

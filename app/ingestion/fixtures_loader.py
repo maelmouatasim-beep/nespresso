@@ -7,20 +7,19 @@ une valeur illisible lève une erreur au lieu d'être remplacée par 0.
 
 from __future__ import annotations
 
+import csv
+import io
 import json
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from app.domain.models import Product, SkuConversion, StockMovement, StockSnapshotLine
 from app.engines.conversion import build_conversion_index
 from app.engines.forecast import ForecastInputs
 from app.engines.portfolio import PortfolioIndex
 from app.engines.sales import aggregate_sales, fallback_history
-
-if TYPE_CHECKING:  # pandas n'est chargé que pour lire des CSV (absent de la version web)
-    import pandas as pd
 
 
 class SchemaError(ValueError):
@@ -54,16 +53,24 @@ class FixtureData:
     sources: dict[str, str]
 
 
-def read_csv_as_text(path: Path, expected_columns: list[str]) -> pd.DataFrame:
-    """Lit un CSV entièrement en texte et vérifie les colonnes (ordre compris)."""
-    import pandas as pd
+def read_csv_records(path: Path) -> tuple[list[str], list[dict[str, str]]]:
+    """Lit un CSV entièrement en texte (module csv, sans pandas : marche aussi dans la
+    version web). Les lignes vides sont ignorées ; une cellule absente vaut « »."""
+    text = path.read_bytes().decode("utf-8-sig")
+    rows = [r for r in csv.reader(io.StringIO(text)) if any(c != "" for c in r)]
+    if not rows:
+        return [], []
+    columns = rows[0]
+    records = [{c: (r[i] if i < len(r) else "") for i, c in enumerate(columns)} for r in rows[1:]]
+    return columns, records
 
-    df = pd.read_csv(path, dtype=str, keep_default_na=False)
-    if list(df.columns) != expected_columns:
-        raise SchemaError(
-            f"{path.name} : colonnes {list(df.columns)} au lieu de {expected_columns}"
-        )
-    return df.map(lambda v: v.strip())
+
+def read_csv_as_text(path: Path, expected_columns: list[str]) -> list[dict[str, str]]:
+    """Lit un CSV entièrement en texte et vérifie les colonnes (ordre compris)."""
+    columns, records = read_csv_records(path)
+    if columns != expected_columns:
+        raise SchemaError(f"{path.name} : colonnes {columns} au lieu de {expected_columns}")
+    return [{k: v.strip() for k, v in r.items()} for r in records]
 
 
 def _opt(value: str) -> str | None:
@@ -89,7 +96,7 @@ def _int_multiple(value: str, path: Path) -> int | None:
 
 
 def load_stock_situation(path: Path) -> list[StockSnapshotLine]:
-    df = read_csv_as_text(path, STOCK_SITUATION_COLUMNS)
+    rows = read_csv_as_text(path, STOCK_SITUATION_COLUMNS)
     return [
         StockSnapshotLine(
             location=r["Stock"],
@@ -102,12 +109,12 @@ def load_stock_situation(path: Path) -> list[StockSnapshotLine]:
             reserved=_num(r["Reserved"], "Reserved", path),
             waiting=_num(r["Waiting"], "Waiting", path),
         )
-        for r in df.to_dict("records")
+        for r in rows
     ]
 
 
 def load_movements(path: Path) -> list[StockMovement]:
-    df = read_csv_as_text(path, MOVEMENT_COLUMNS)
+    rows = read_csv_as_text(path, MOVEMENT_COLUMNS)
     return [
         StockMovement(
             movement_id=r["movement_id"],
@@ -119,7 +126,7 @@ def load_movements(path: Path) -> list[StockMovement]:
             quantity=_num(r["quantity"], "quantity", path),
             movement_description=_opt(r["movement_description"]),
         )
-        for r in df.to_dict("records")
+        for r in rows
     ]
 
 
@@ -130,14 +137,9 @@ def load_multiples(path: Path) -> tuple[dict[str, Product], list[str]]:
     une ligne propre du même SKU a donc toujours priorité sur une ligne avec espaces.
     Retourne aussi la liste des SKU en double ou mal formés, pour qu'ils restent visibles.
     """
-    import pandas as pd
-
-    df = pd.read_csv(path, dtype=str, keep_default_na=False)
-    if list(df.columns) != MULTIPLE_COLUMNS:
-        raise SchemaError(
-            f"{path.name} : colonnes {list(df.columns)} au lieu de {MULTIPLE_COLUMNS}"
-        )
-    records = df.to_dict("records")
+    columns, records = read_csv_records(path)
+    if columns != MULTIPLE_COLUMNS:
+        raise SchemaError(f"{path.name} : colonnes {columns} au lieu de {MULTIPLE_COLUMNS}")
     clean = [r for r in records if r["sku"] == r["sku"].strip()]
     padded = [r for r in records if r["sku"] != r["sku"].strip()]
     products: dict[str, Product] = {}
@@ -164,7 +166,7 @@ def load_multiples(path: Path) -> tuple[dict[str, Product], list[str]]:
 
 
 def load_conversions(path: Path) -> list[SkuConversion]:
-    df = read_csv_as_text(path, CONVERSION_COLUMNS)
+    rows = read_csv_as_text(path, CONVERSION_COLUMNS)
     return [
         SkuConversion(
             old_sku=r["old_sku"],
@@ -172,7 +174,7 @@ def load_conversions(path: Path) -> list[SkuConversion]:
             effective_date=date.fromisoformat(r["effective_date"]),
             comment=_opt(r["comment"]),
         )
-        for r in df.to_dict("records")
+        for r in rows
     ]
 
 
@@ -198,8 +200,8 @@ def load_fixture_dir(directory: Path) -> FixtureData:
         products=products,
         product_list_anomalies=duplicates,
         conversions=load_conversions(files["conversions"]),
-        dc_mapping=dict(zip(dc_df["boutique"], dc_df["dc"], strict=True)),
-        portfolio=dict(zip(pf_df["sku"], pf_df["filter_out"], strict=True)),
+        dc_mapping={r["boutique"]: r["dc"] for r in dc_df},
+        portfolio={r["sku"]: r["filter_out"] for r in pf_df},
         sources={name: path.name for name, path in files.items()},
     )
 
