@@ -115,6 +115,7 @@ table.order tbody tr:hover td { background: var(--surface-2); }
 table.order td.q.modq { background: var(--mod-bg); }
 table.order td.q.modq input { color: var(--mod); font-weight: 700; background: var(--mod-bg); }
 table.order td.conf { text-align: center; } table.order td.conf input { width: 16px; height: 16px; cursor: pointer; }
+table.order td.expq { background: #E8F0FA; }  /* D-052 : Expected inclut la commande en cours */
 table.order td.dccap { background: var(--review-bg); color: #94600F; font-weight: 600; }  /* D-051 : plafonné au stock DC */
 .st.W { background: var(--review-bg); color: var(--review); white-space: normal; line-height: 1.15; }
 table.order td.cov-low { color: var(--blocked); font-weight: 600; }
@@ -859,10 +860,10 @@ function matches(x) {
 // (décalages dans le CSS : 0 / 50 / 154 px).
 const COLS = [
   ["Conf.", 50, 0, x => isConf(x.m.sku) ? "1" : "0", "Confirmé"], ["Statut", 104, 0, x => statusKey(x), "Statut"], ["SKU", 84, 0, x => x.m.sku, "SKU"], ["Description", 108, 0, x => x.m.desc, "Description"],
-  ["Exp.", 58, 1, x => x.m.exp, "Expected : stock attendu du jour (dispo + en route)"], ["Avail.", 58, 1, x => x.m.avail, "Available : stock physiquement en boutique"], ["Ventes", 58, 1, x => x.m.sales, "Ventes sur l'historique"],
+  ["Avail.", 58, 1, x => x.m.avail, "Available : stock physiquement en boutique"], ["Exp.", 64, 1, x => x.m.exp + x.qty, "Expected = dispo + en route + Qty finale ; Qty finale 0 = Expected de la Stock Situation ; fond bleu = inclut la commande en cours (D-052)"], ["Ventes", 58, 1, x => x.m.sales, "Ventes sur l'historique"],
   ["Prop.", 58, 1, (x, b) => b[x.m.sku], "Qty proposée par le calcul"], ["Finale", 64, 1, x => x.qty, "Qty finale (modifiable)"],
-  // D-044 / D-046 : Expected + commande et Couverture suivent la Qty finale.
-  ["Exp.+cmd", 76, 1, x => x.m.exp + x.qty, "Expected + commande : Expected du jour + Qty finale"], ["Couv.", 50, 1, x => postCover(x.m, x.qty), "Couverture (jours) sur Expected + Qty finale ; rouge sous la cible, vert au-dessus"],
+  // D-046 / D-052 : Expected affiché et Couverture suivent la Qty finale.
+  ["Couv.", 50, 1, x => postCover(x.m, x.qty), "Couverture (jours) sur Expected + Qty finale ; rouge sous la cible, vert au-dessus"],
   ["Mult.", 44, 1, x => x.multiple, "Multiple"], ["DC", 70, 1, x => x.m.dc, "Stock DC"], ["Raisons", 118, 0, x => shortReasons(x), "Source, événements et raisons en texte court ; détail dans le « Pourquoi »"]];
 // Colonne Raisons (D-047) : source, événements (« Promo Festive AOS », « Demande B19 »…), puis
 // chaque raison coupée au premier « : », « ( », « , » ou « → ». Le détail reste dans le « Pourquoi ».
@@ -883,6 +884,13 @@ function shortReasons(x) {
   const tags = [...(x.source === "event" || x.source === "override" ? [] : [SRC[x.source]]), ...eventShortTags(x)];
   for (const r of x.reasons) { if (r.startsWith("Source : ") || titles.some(t => r.includes(t))) continue; const t = shortReason(r); if (t && !tags.includes(t)) tags.push(t); }
   return tags.join(" | ");
+}
+// D-052 : info-bulle de la cellule Expected : « dispo 3 720 + en route 4 080 + commande 3 600 ».
+function expectedTitle(x) {
+  const m = x.m;
+  if (m.avail === null || m.avail === undefined) return "Expected " + fmt(m.exp) + " + commande " + fmt(x.qty);
+  const inc = m.exp - m.avail;
+  return "dispo " + fmt(m.avail) + (inc >= 0 ? " + en route " + fmt(inc) : " − en attente de sortie " + fmt(-inc)) + " + commande " + fmt(x.qty);
 }
 function incomingTitle(m) { const inc = m.avail === null || m.avail === undefined ? null : m.exp - m.avail; return inc === null ? "" : inc >= 0 ? "+ " + fmt(inc) + " en route" : "− " + fmt(-inc) + " en attente de sortie"; }
 // Couleur discrète de la couverture : rouge sous la cible saisie, vert au-dessus (D-046).
@@ -947,8 +955,8 @@ function orderTable(rows, baseQty, keep) {
     // Liste à confirmer : raison en quelques mots (sinon le titre de l'événement).
     const reasons = x.reasons.length || !keep ? shortReasons(x) : [...new Set(x.ev.map(e => e.title))].join(", ");
     tr.append(...pick([el("td", "conf", cb), el("td", "", stCell), el("td", { class: "mono", title: sku }, sku), el("td", { title: m.desc }, m.desc || "—"),
-      el("td", { class: "n", title: "Expected " + fmt(m.exp) }, fmt(m.exp)), el("td", { class: "n", title: incomingTitle(m) }, fmt(m.avail)), el("td", "n", fmt(m.sales)), el("td", "n", fmt(baseQty[sku])),
-      el("td", "n q" + (mod ? " modq" : ""), qi), el("td", { class: "n", title: "Expected du jour " + fmt(m.exp) + " + Qty finale " + fmt(x.qty) }, fmt(m.exp + x.qty)), coverCell(x), el("td", "n", fmt(x.multiple)),
+      el("td", { class: "n", title: "Available : stock physiquement en boutique" }, fmt(m.avail)), el("td", { class: "n" + (x.qty > 0 ? " expq" : ""), title: expectedTitle(x) }, fmt(m.exp + x.qty)), el("td", "n", fmt(m.sales)), el("td", "n", fmt(baseQty[sku])),
+      el("td", "n q" + (mod ? " modq" : ""), qi), coverCell(x), el("td", "n", fmt(x.multiple)),
       el("td", { class: "n" + (x.cap ? " dccap" : ""), title: x.cap ? "Qty proposée plafonnée au stock DC (mode Safe, multiple inférieur)" : "" }, m.dc === null ? "—" : fmt(m.dc)), el("td", { title: x.reasons.join("\n") || reasons, class: "small" }, reasons || "")]));
     body.append(tr);
   }
@@ -1120,8 +1128,7 @@ function renderWhy() {
     el("div", "", isConf(m.sku) ? el("span", "st O", "Confirmé") : el("span", "st " + x.s, STATUS[x.s]), isMod(x) ? el("span", "modmark", "● modifié") : null, " ", el("span", "muted small", categoryOf(m) + " · source : " + SRC[x.source] + " · multiple " + fmt(x.multiple) + " (" + (MSRC[x.msrc] || x.msrc) + ")")),
     el("h3", "", "Pourquoi cette quantité ?"),
     el("ol", "steps", steps(x).map(([a, v]) => el("li", "", a, v !== undefined ? el("b", "", v) : null)), el("li", "tot", "Quantité finale : " + fmt(x.qty))),
-    el("p", "small", "Expected après commande : ", el("b", "", fmt(m.exp + x.qty)), " (Expected du jour " + fmt(m.exp) + " + Qty finale " + fmt(x.qty) + ")"),
-    m.avail === null || m.avail === undefined ? null : el("p", "small", "Available (en boutique) : ", el("b", "", fmt(m.avail)), " · " + incomingTitle(m)),
+    el("p", "small", "Expected affiché : ", el("b", "", fmt(m.exp + x.qty)), " = " + expectedTitle(x) + " (Expected de la Stock Situation : " + fmt(m.exp) + ", celui du calcul)"),
     el("p", "small", "Couverture : actuelle " + fmt1(postCover(m, 0)) + " j → après commande ", el("b", "", fmt1(postCover(m, x.qty)) + " j"), " · cible " + fmt1(x.cover) + " j"),
     el("p", "small", "Stock DC " + V().dc + " : ", el("b", "", m.dc === null ? "absent" : fmt(m.dc)), " · stock projeté le jour de la livraison (" + days + " j) : ", el("b", "", fmt(proj)),
       x.qty > 0 && m.dc !== null && m.dc < x.qty ? el("span", "", " · ", el("span", "st R", "DC insuffisant")) : null),

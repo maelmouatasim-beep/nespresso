@@ -436,21 +436,31 @@ def order_frame(
                 "Statut": status_cell(x, b),
                 "SKU": x.sku,
                 "Description": x.description or "",
-                "Expected": num(inp["expected_total"]),
                 "Available": num(inp.get("available_total")),
+                # D-052 : Expected affiché = dispo + en route + Qty finale (affichage seulement,
+                # le moteur part toujours de l'Expected de la Stock Situation).
+                "Expected": num(inp["expected_total"] + x.qty),
                 "Ventes": num(sales),
                 "Qty proposée": b.qty,
                 "Qty finale": x.qty,
-                # D-044 / D-046 : stock attendu une fois la commande livrée (Expected du jour
-                # + Qty finale) et couverture calculée dessus ; les deux suivent chaque saisie.
-                "Expected + commande": num(inp["expected_total"] + x.qty),
-                "Couverture": num(_round1(cover_after(x))),
+                "Couverture": num(_round1(cover_after(x))),  # suit chaque saisie (D-046)
                 "Multiple": num(e["multiple"]),
                 "Stock DC": num(inp["dc_available"]),
                 "Raisons": short_reasons(x, b),
             }
         )
     return pd.DataFrame(rows, columns=ORDER_COLUMNS)
+
+
+def expected_detail(line: RecommendationLine) -> str:
+    """« dispo 3 720 + en route 4 080 + commande 3 600 » (D-052)."""
+    inp = line.explanation["inputs"]
+    incoming = incoming_of(line)
+    if incoming is None:
+        return f"Expected {fmt_int(inp['expected_total'])} + commande {fmt_int(line.qty)}"
+    route = (f"+ en route {fmt_int(incoming)}" if incoming >= 0
+             else f"− en attente de sortie {fmt_int(-incoming)}")  # fmt: skip
+    return f"dispo {fmt_int(inp.get('available_total'))} {route} + commande {fmt_int(line.qty)}"
 
 
 def incoming_of(line: RecommendationLine) -> float | None:
@@ -477,8 +487,8 @@ def cover_target(line: RecommendationLine) -> float | None:
 
 
 ORDER_COLUMNS = [
-    "Confirmé", "Détail", "Statut", "SKU", "Description", "Expected", "Available", "Ventes",
-    "Qty proposée", "Qty finale", "Expected + commande", "Couverture", "Multiple", "Stock DC",
+    "Confirmé", "Détail", "Statut", "SKU", "Description", "Available", "Expected", "Ventes",
+    "Qty proposée", "Qty finale", "Couverture", "Multiple", "Stock DC",
     "Raisons",
 ]  # fmt: skip
 
@@ -499,14 +509,15 @@ ORDER_COLUMN_CONFIG = {
     "Statut": st.column_config.TextColumn(width=118, pinned=True),
     "SKU": st.column_config.TextColumn(width=86, pinned=True),
     "Description": st.column_config.TextColumn(width=150),
-    "Expected": st.column_config.NumberColumn(
-        "Exp.", width=62, help="Expected : stock attendu du jour (dispo + en route)", **_INT
-    ),
     "Available": st.column_config.NumberColumn(
-        "Avail.",
-        width=62,
-        help="Available : stock physiquement en boutique. L'écart avec Expected = en route, "
-        "pas encore reçu (détail dans le « Pourquoi »)",
+        "Avail.", width=62, help="Available : stock physiquement en boutique", **_INT
+    ),
+    "Expected": st.column_config.NumberColumn(
+        "Exp.",
+        width=66,
+        help="Expected = dispo + en route + Qty finale. Qty finale 0 = Expected de la Stock "
+        "Situation ; dès qu'une quantité est saisie, Expected monte en direct (fond bleu) et la "
+        "Couverture suit. Détail « dispo + en route + commande » dans le « Pourquoi ».",
         **_INT,
     ),  # fmt: skip
     "Ventes": st.column_config.NumberColumn("Ventes", width=62, **_INT),
@@ -515,9 +526,6 @@ ORDER_COLUMN_CONFIG = {
     ),
     "Qty finale": st.column_config.NumberColumn(
         "Finale", width=72, min_value=0, step=1, help="Qty finale, modifiable", **_INT
-    ),
-    "Expected + commande": st.column_config.NumberColumn(
-        "Exp.+cmd", width=76, help="Expected + commande : Expected du jour + Qty finale", **_INT
     ),
     "Couverture": st.column_config.NumberColumn(
         "Couv.",
@@ -574,6 +582,13 @@ def style_order_frame(df: pd.DataFrame, targets: dict[str, float | None] | None 
         zebra = zebra.apply(
             lambda col: [CAPPED_STYLE if sku in capped else "" for sku in df["SKU"]],
             subset=["Stock DC"],
+        )
+    if "Expected" in df.columns:  # D-052 : Expected inclut la commande en cours → fond bleu léger
+        zebra = zebra.apply(
+            lambda col: [
+                f"background-color: {MODIFIED_BG}" if q > 0 else "" for q in df["Qty finale"]
+            ],
+            subset=["Expected"],
         )
     # Marqueur « modifié » : fond bleu très léger sur la Qty finale qui diffère de la proposée.
     return zebra.apply(

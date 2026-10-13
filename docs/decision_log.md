@@ -378,3 +378,9 @@ Format : contexte → décision → conséquence.
 - **Parité Excel ne plafonne jamais** (Excel ne le fait pas) : 416/416 inchangé, vérifié ; l'override au-dessus du DC n'y change pas le statut non plus.
 - Un SKU absent de l'export DC (stock inconnu) n'est pas plafonné : REVIEW « Stock DC insuffisant : SKU absent du stock DC » dans les deux modes (rien de silencieux, Q-033).
 - Retiré : `dc_warn` / `dc_forced`, le statut « confirmer quand même ? », le lot qui excluait les lignes DC à 0, les traces `confirm_dc0` / `export_dc0` (les validations déjà enregistrées restent lisibles dans l'Historique). Outil installé et démo web ; tests `tests/unit/test_dc_cap.py` et test Streamlit ; CLAUDE.md mis à jour.
+
+## D-052 — Colonne Expected = dispo + en route + Qty finale ; plus de « Expected + commande » (2026-10-13)
+
+- Correction du planner : la colonne « Expected + commande » disparaît. La colonne **Expected** affiche Available + Incoming + Qty finale : Qty finale 0 → l'Expected de la Stock Situation ; dès qu'une quantité est saisie, Expected monte en direct et la Couverture suit. Quand la Qty finale > 0, la cellule prend un léger fond bleu pour dire qu'elle inclut la commande en cours. Info-bulle de la cellule (démo web) et ligne du « Pourquoi » (outil installé, Streamlit n'a pas d'info-bulle par cellule) : « dispo 3 720 + en route 4 080 + commande 3 600 ».
+- **Affichage seulement** : le moteur part toujours de l'Expected de la Stock Situation (`inputs.expected_total`), parité 416/416 intacte, vérifiée.
+- Colonnes finales : Confirmé · (Détail) · Statut · SKU · Description · Available · Expected · Ventes · Qty proposée · Qty finale · Couverture · Multiple · Stock DC · Raisons (Available passe avant Expected). Outil installé et démo web.

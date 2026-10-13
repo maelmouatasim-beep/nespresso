@@ -174,10 +174,9 @@ def test_single_grid_default_order_and_filters(app: AppTest) -> None:
     assert flagged[:first_ok].all() and not flagged[first_ok:].any()  # REVIEW/BLOCKED en haut
     ok = df[first_ok:]["Qty proposée"].tolist()
     assert ok == sorted(ok, reverse=True)  # puis Qty proposée décroissante
-    assert list(df.columns) == ["Confirmé", "Détail", "Statut", "SKU", "Description", "Expected",
-                                "Available", "Ventes", "Qty proposée", "Qty finale",
-                                "Expected + commande", "Couverture", "Multiple", "Stock DC",
-                                "Raisons"]  # D-046  # fmt: skip
+    assert list(df.columns) == ["Confirmé", "Détail", "Statut", "SKU", "Description", "Available",
+                                "Expected", "Ventes", "Qty proposée", "Qty finale", "Couverture",
+                                "Multiple", "Stock DC", "Raisons"]  # D-052  # fmt: skip
 
     next(b for b in app.button_group if b.key == "f_cat").set_value("Cafés").run()
     types = {x.sku: x.product_type for x in app.session_state["base"].lines}
@@ -480,7 +479,8 @@ def test_create_a_target_stock_event(app: AppTest) -> None:
 
 
 def test_expected_and_cover_follow_the_final_quantity(app: AppTest) -> None:
-    """D-044 / D-046 : « Expected + commande » et « Couverture » suivent chaque saisie."""
+    """D-052 : « Expected » affiché = dispo + en route + Qty finale et « Couverture » suivent
+    chaque saisie ; le moteur part toujours de l'Expected de la Stock Situation."""
     app.selectbox(key="author").set_value("Camille").run()
     compute_b80(app)
     status_tab(app, "Toutes")
@@ -489,21 +489,26 @@ def test_expected_and_cover_follow_the_final_quantity(app: AppTest) -> None:
     today, sales = inp["expected_total"], inp["sales_total"]
     days = line.explanation["parameters"]["sales_history_days"]
     row = grid(app).set_index("SKU").loc["7005.70"]
-    assert row["Expected"] == today
+    assert row["Expected"] == today + 3120  # Qty proposée 3120 déjà comprise
     assert row["Available"] == inp["available_total"]
+    assert "Expected + commande" not in row.index
     # D-047 : Raisons en texte court = source, événement, raisons coupées ; sans doublon
     assert row["Raisons"].split(" | ")[0] == "Prévision"
-    assert row["Expected + commande"] == today + 3120
     assert row["Couverture"] == round((today + 3120) / sales * days, 1)
     app.session_state["why_sku"] = "7005.70"
     app.run()
     app.number_input(key="dlg_qty_7005.70").set_value(3600).run()
     app.button(key="dlg_save").click().run()
     row = grid(app).set_index("SKU").loc["7005.70"]
-    assert row["Expected"] == today  # l'Expected du jour ne bouge pas
-    assert row["Expected + commande"] == today + 3600
+    assert row["Expected"] == today + 3600  # monte en direct avec la saisie
     assert row["Couverture"] == round((today + 3600) / sales * days, 1)
-    assert any("Expected après commande" in m.value for m in app.markdown)
+    assert inp["expected_total"] == today  # le moteur part toujours de la Stock Situation
+    from app.ui.common import fmt_int
+
+    why = next(m.value for m in app.markdown if "Expected affiché" in m.value)
+    assert (
+        f"dispo {fmt_int(inp['available_total'])}" in why and f"+ commande {fmt_int(3600)}" in why
+    )
     assert any("Couverture : actuelle" in m.value for m in app.markdown)
 
 

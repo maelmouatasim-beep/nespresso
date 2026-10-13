@@ -30,11 +30,11 @@ from app.ui.common import (
     day_data,
     default_order,
     event_cell,
+    expected_detail,
     explain_steps,
     fmt_1,
     fmt_date,
     fmt_int,
-    incoming_of,
     is_capped,
     is_confirmed,
     is_inactive_line,
@@ -341,13 +341,9 @@ def _why_panel(res, sku: str, mapping: dict[str, str]) -> None:  # noqa: ANN001
                f"{SOURCE_LABEL[line.source.value]} · multiple {fmt_int(e['multiple'])}")  # fmt: skip
     st.markdown("\n".join(f"{i}. {step}" for i, step in enumerate(explain_steps(line), start=1)))
     dc = inp["dc_available"]
-    st.markdown(f"Expected après commande : **{fmt_int(inp['expected_total'] + line.qty)}** "
-                f"(Expected du jour {fmt_int(inp['expected_total'])} + Qty finale {fmt_int(line.qty)})")  # fmt: skip
-    incoming = incoming_of(line)
-    if incoming is not None:
-        st.markdown(f"Available (en boutique) : **{fmt_int(inp.get('available_total'))}** · "
-                    + (f"+ {fmt_int(incoming)} en route" if incoming >= 0
-                       else f"− {fmt_int(-incoming)} en attente de sortie"))  # fmt: skip
+    st.markdown(f"Expected affiché : **{fmt_int(inp['expected_total'] + line.qty)}** = "
+                f"{expected_detail(line)} (Expected de la Stock Situation : "
+                f"{fmt_int(inp['expected_total'])}, celui du calcul)")  # fmt: skip
     target = cover_target(line)
     st.markdown(f"Couverture : actuelle {fmt_1(cover_after(line, 0))} j → après commande "
                 f"**{fmt_1(cover_after(line))} j**"
