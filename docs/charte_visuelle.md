@@ -43,6 +43,6 @@ dans la page web), même si l'ordinateur est réglé en sombre.
   chiffres en tabulaire pour que les colonnes s'alignent.
 - Tuiles arrondies (10 px) : grande valeur, petit libellé. Espaces généreux en haut, tableau dense.
 - Survol doré discret, icônes fines (trait fin, même famille partout), logo texte
-  « Supply Planning Copilot » en haut à gauche. Pas de dégradé, pas d'image décorative.
+  « Boutique Supply Planner » en haut à gauche. Pas de dégradé, pas d'image décorative.
 - Limite de Streamlit : le tableau de l'outil installé est dessiné par le navigateur (canvas) ;
   son survol garde la couleur de Streamlit. Lignes alternées et pastilles de statut, elles, sont appliquées.

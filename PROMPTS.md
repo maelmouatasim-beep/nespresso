@@ -1,4 +1,4 @@
-# Prompts Claude Code — Supply Planning Copilot
+# Prompts Claude Code — Boutique Supply Planner
 
 Mode d'emploi :
 
@@ -23,7 +23,7 @@ Mode d'emploi :
 ## PROMPT 1 — Fondations + moteur Forecast + parité Excel
 
 ```
-Tu construis le "Supply Planning Copilot", un outil interne de planification des commandes boutiques Nespresso Canada.
+Tu construis le "Boutique Supply Planner", un outil interne de planification des commandes boutiques Nespresso Canada.
 
 Lis d'abord ENTIÈREMENT :
 - CLAUDE.md (règles absolues, logique Excel vérifiée, vocabulaire)

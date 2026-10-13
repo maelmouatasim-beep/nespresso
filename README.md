@@ -1,4 +1,4 @@
-# Supply Planning Copilot
+# Boutique Supply Planner
 
 Outil interne de planification des commandes boutiques (Nespresso Canada).
 Règles du projet : voir [CLAUDE.md](CLAUDE.md).

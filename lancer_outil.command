@@ -1,5 +1,5 @@
 #!/bin/bash
-# Lance le Supply Planning Copilot (Mac / Linux). Double-clique sur ce fichier.
+# Lance Boutique Supply Planner (Mac / Linux). Double-clique sur ce fichier.
 cd "$(dirname "$0")" || exit 1
 PY="$(command -v python3.12 || command -v python3)"
 if [ -z "$PY" ]; then

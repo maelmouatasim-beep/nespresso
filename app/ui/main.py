@@ -1,4 +1,4 @@
-"""Supply Planning Copilot — poste de travail du planner.
+"""Boutique Supply Planner — poste de travail du planner.
 
 Lancer :  streamlit run app/ui/main.py
 
@@ -41,7 +41,7 @@ from app.ui.common import (  # noqa: E402
 from app.ui.screens import depot, events, export, history, orders, referentials  # noqa: E402
 
 st.set_page_config(
-    page_title="Supply Planning Copilot", page_icon=":material/local_cafe:", layout="wide"
+    page_title="Boutique Supply Planner", page_icon=":material/local_cafe:", layout="wide"
 )
 # Charte visuelle (docs/charte_visuelle.md) : thème clair uniquement, couleurs dans
 # .streamlit/config.toml ; ici seulement ce que le thème ne règle pas.
@@ -101,7 +101,7 @@ def _add_planner() -> None:
 
 
 with st.sidebar:
-    st.markdown('<div class="spc-logo">Supply Planning <b>Copilot</b>'
+    st.markdown('<div class="spc-logo">Boutique Supply <b>Planner</b>'
                 "<span>Boutique Planning · Nespresso Canada</span></div>",
                 unsafe_allow_html=True)  # fmt: skip
     names = planners()

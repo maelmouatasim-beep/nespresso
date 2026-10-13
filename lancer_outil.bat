@@ -1,5 +1,6 @@
 @echo off
-REM Lance le Supply Planning Copilot (Windows). Double-clique sur ce fichier.
+REM Lance Boutique Supply Planner (Windows). Double-clique sur ce fichier.
+title Boutique Supply Planner
 cd /d "%~dp0"
 set PY=python
 where py >nul 2>nul && set PY=py -3.12

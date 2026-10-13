@@ -1,4 +1,4 @@
-# CLAUDE.md — Supply Planning Copilot
+# CLAUDE.md — Boutique Supply Planner
 
 ## Contexte
 
