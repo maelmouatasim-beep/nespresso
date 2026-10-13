@@ -304,6 +304,8 @@ def build() -> Path:  # noqa: PLR0915 - un seul script linéaire, plus simple à
         "personal_only": sorted(t.value for t in PERSONAL_ONLY),
         "others_editable": PERSONAL_EDITABLE_BY_OTHERS,
         "demo_delivery": DEMO_DELIVERY.isoformat(),
+        # Données de départ (D-055) : ajoutées aussi aux événements déjà gardés dans le navigateur.
+        "starter_sources": sorted({e.source_file for e in starter_events()}),
         "text": text.items,
         "lines": meta,
         "variants": variants,

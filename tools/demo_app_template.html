@@ -436,6 +436,17 @@ function evLegacy(e) {
   if (on < e.start) return { ...e, status: "cancelled" };
   return { ...e, status: "active", stopped_on: on, stopped_by: e.stopped_by || "", end: e.end && e.end < on ? e.end : on, end_before_stop: e.end || null };
 }
+// Données de départ (D-055) : un navigateur qui a déjà ses propres événements les reçoit
+// quand même, une seule fois (reconnues par leur fichier source ; jamais recréées si annulées).
+(function seedStarter() {
+  if (!EDIT.events) return;
+  const have = new Set(EDIT.events.map(e => e.source_file).filter(Boolean));
+  const missing = DATA.events.filter(e => (DATA.starter_sources || []).includes(e.source_file) && !have.has(e.source_file));
+  if (!missing.length) return;
+  let id = Math.max(0, ...EDIT.events.map(e => e.id || 0));
+  EDIT.events = [...EDIT.events, ...missing.map(e => ({ ...e, id: ++id }))];
+  store.set("spc2_events", EDIT.events);
+})();
 function evAll() { return (EDIT.events || DATA.events).map(evLegacy); }
 // « Aujourd'hui » = la date du jour réelle pour le statut ; la commande garde la date de livraison.
 const evToday = () => todayISO();
