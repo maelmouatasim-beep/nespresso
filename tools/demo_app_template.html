@@ -306,7 +306,9 @@ const fmt1 = x => x === null || x === undefined || Number.isNaN(x) ? "—" : nf1
 const pad = n => String(n).padStart(2, "0");
 const iso = d => d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate());
 const parseIso = s => { const [y, m, d] = s.split("-").map(Number); return new Date(y, m - 1, d); };
-const fdate = s => { if (!s) return "—"; const d = parseIso(s); return pad(d.getDate()) + "/" + pad(d.getMonth() + 1) + "/" + d.getFullYear(); };
+// Dates affichées « 22 oct. 2026 » (D-054), comme l'outil installé.
+const FR_MONTHS = ["janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août", "sept.", "oct.", "nov.", "déc."];
+const fdate = s => { if (!s) return "—"; const d = parseIso(String(s).slice(0, 10)); return d.getDate() + " " + FR_MONTHS[d.getMonth()] + " " + d.getFullYear(); };
 const frday = s => { const d = parseIso(s); return FR_DAYS[d.getDay()] + " " + pad(d.getDate()) + "/" + pad(d.getMonth() + 1); };
 const btqLabel = b => names()[b] ? b + " — " + names()[b] : b;
 const $ = id => document.getElementById(id);
@@ -342,7 +344,7 @@ const st = {
   showInactive: false,  // D-049 : « Afficher les SKU inactifs (N) »
   refTab: 0, source: "demo", busy: "", depotErr: [],
   // Événements : reprises (session seulement), demandes terminées, validations avant export.
-  taken: new Set(), evDone: store.get("spc2_ev_done", {}), confirmed: new Set(),
+  taken: new Set(), confirmed: new Set(),
   validations: store.get("spc2_validations", []), toClose: [], evTab: "team", evStatus: "Actifs", evQ: "", evTypes: new Set(), evPlanner: null, evSel: null, evEdit: null, tbl: null,
 };
 
@@ -425,16 +427,47 @@ function palKey(f) { const u = (f || "").toUpperCase(); if (u.includes("VERTUO")
 
 // ---------- Événements SKU ----------
 function addDays(isoStr, n) { const d = parseIso(isoStr); d.setDate(d.getDate() + n); return iso(d); }
-// Une demande terminée dans ce navigateur garde son statut (comme dans la base de l'outil installé).
-function evAll() { return (EDIT.events || DATA.events).map(e => st.evDone[e.id] ? { ...e, status: "done", updated_at: st.evDone[e.id].at } : e); }
+// D-054 : plus de statut « Terminé » manuel. L'ancienne liste « spc2_ev_done » (fin rangée par
+// numéro d'événement) est effacée : elle recollait une fin à un autre événement du même numéro.
+try { localStorage.removeItem("spc2_ev_done"); } catch (e) { /* stockage bloqué */ }
+function evLegacy(e) {
+  if (e.status !== "done") return e;
+  const on = (e.updated_at || e.end || e.start).slice(0, 10);
+  if (on < e.start) return { ...e, status: "cancelled" };
+  return { ...e, status: "active", stopped_on: on, stopped_by: e.stopped_by || "", end: e.end && e.end < on ? e.end : on, end_before_stop: e.end || null };
+}
+function evAll() { return (EDIT.events || DATA.events).map(evLegacy); }
+// « Aujourd'hui » = la date du jour réelle pour le statut ; la commande garde la date de livraison.
+const evToday = () => todayISO();
 const evById = id => evAll().find(e => e.id === id);
 const activeFrom = e => addDays(e.start, -e.lead_days);
 const inWindow = (e, day) => activeFrom(e) <= day && (!e.end || day <= e.end);
+// Statut selon les dates (D-054) : À venir avant début − anticipation, Actif jusqu'à la fin
+// (ou sans fin), Terminé après la fin ou arrêté à la main. Brouillon et Annulé : manuels.
 function evStatus(e, day) {
-  if (e.status !== "active") return { draft: "Brouillon", done: "Terminé", cancelled: "Annulé" }[e.status];
-  if (e.end && day > e.end) return "Terminé";
-  if (day >= e.start) return e.effect === "block" ? "Bloqué" : "Actif";
-  return "À venir";
+  if (e.status === "draft") return "Brouillon";
+  if (e.status === "cancelled") return "Annulé";
+  if (e.end && (day > e.end || (e.stopped_on && day >= e.end))) return "Terminé";
+  if (day < activeFrom(e)) return "À venir";
+  return e.effect === "block" ? "Bloqué" : "Actif";
+}
+function evCanStop(e, day) {
+  if (e.status !== "active") return "Brouillon ou annulé : rien à terminer";
+  if (evStatus(e, day) === "Terminé") return "Déjà terminé";
+  if (day < e.start) return "Pas encore commencé : utilise « Annuler l'événement »";
+  return null;
+}
+// « Terminer » : fin = aujourd'hui, tracé ; « Réactiver » : remet la fin prévue (ou sans fin).
+function stopEvent(e, on, note) {
+  if (!st.author) { st.evMsg = "Choisis ton prénom (Planner, barre de gauche)."; return render(); }
+  const day = evToday(), now = new Date().toISOString().slice(0, 19);
+  if (on && evCanStop(e, day)) { st.evMsg = evCanStop(e, day); return render(); }
+  const upd = on ? { end: day, stopped_by: st.author, stopped_on: day, end_before_stop: e.end || null }
+    : { end: e.end_before_stop || null, stopped_by: "", stopped_on: null, end_before_stop: null };
+  const all = evAll().map(x => x.id === e.id ? { ...x, ...upd, updated_at: now } : x);
+  const what = on ? "terminé manuellement par " + st.author + " le " + fdate(day) + (note ? " (" + note + ")" : "") : "réactivé (fin de l'arrêt effacée)";
+  logValidation(note ? "close_request" : "event_saved", e.boutiques[0] || "", e.skus.map(x => x.sku), what + " : « " + e.title + " »");
+  saveEvents(all, on ? "Événement terminé" : "Événement réactivé"); render();
 }
 const evGroup = l => ({ "Actif": "Actifs", "Bloqué": "Actifs", "À venir": "À venir", "Terminé": "Terminés", "Annulé": "Terminés", "Brouillon": "Brouillons" }[l]);
 function appliesToMe(e) { return e.scope === "team" || (!!st.author && e.planner.toLowerCase() === st.author.toLowerCase()) || st.taken.has(e.id); }
@@ -1201,8 +1234,7 @@ function closeRequestsPrompt() {
   return st.toClose.map(evById).filter(e => e && e.status === "active").map(e => el("div", "msg info", { style: "display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between" },
     el("span", "", "Demande boutique « " + e.title + " » (" + e.skus.map(x => x.sku).join(", ") + ") exportée : la terminer ?"),
     el("span", "row", el("button", { class: "btn primary", id: "close_req_" + e.id, onclick: () => {
-      st.evDone[e.id] = { by: st.author || "Planner non renseigné", at: new Date().toISOString() }; store.set("spc2_ev_done", st.evDone);
-      logValidation("close_request", e.boutiques[0] || "", e.skus.map(x => x.sku), "commande exportée");
+      stopEvent(e, true, "commande exportée");
       st.toClose = st.toClose.filter(i => i !== e.id); st.overrides = {}; st.seen = new Set(); st.confirmed = new Set(); render(); } }, "Terminer"),
       el("button", { class: "btn", onclick: () => { st.toClose = st.toClose.filter(i => i !== e.id); render(); } }, "Garder active"))));
 }
@@ -1243,7 +1275,7 @@ function zipStore(files) {
 // Démo : 7 événements fictifs au départ (dont une allocation, un lancement et un stock cible). Créer, modifier, dupliquer, terminer ou annuler :
 // l'événement est vérifié par le moteur Python (mêmes règles que l'outil installé), gardé
 // dans ce navigateur, et la commande B80 est recalculée avec lui.
-const STATUS_TXT = { draft: "Brouillon", active: "Actif", done: "Terminé", cancelled: "Annulé" };
+const STATUS_TXT = { draft: "Brouillon", active: "Selon les dates", cancelled: "Annulé" };
 function canEdit(e) { return e.scope === "team" || DATA.others_editable || (!!st.author && e.planner.toLowerCase() === st.author.toLowerCase()); }
 function newEvent(request) {
   const day = RUN();
@@ -1259,6 +1291,8 @@ async function submitEvent(draft, box) {
   if (!st.author) return box.replaceChildren(el("div", "msg err", "Choisis ton prénom (Planner, barre de gauche)."));
   const now = new Date().toISOString().slice(0, 19), all = evAll().map(e => ({ ...e }));
   const ev = { ...draft, title: draft.title.trim(), updated_at: now };
+  const before = evById(ev.id);  // un arrêt manuel ne reste tracé que si la fin n'a pas changé
+  if (ev.stopped_on && (!before || before.end !== ev.end)) Object.assign(ev, { stopped_by: "", stopped_on: null, end_before_stop: null });
   if (ev.id === undefined || ev.id === null) { ev.id = Math.max(0, ...all.map(e => e.id || 0)) + 1; ev.created_by = st.author; ev.created_at = now; }
   if (ev.scope === "personal" && !ev.planner) ev.planner = st.author;
   box.replaceChildren(el("div", "msg info busy", "Vérification par le moteur (la première fois : chargement ≈ 18 Mo)…"));
@@ -1275,7 +1309,6 @@ async function submitEvent(draft, box) {
 function setEventStatus(e, status) {
   if (!st.author) { st.evMsg = "Choisis ton prénom (Planner, barre de gauche)."; return render(); }
   const all = evAll().map(x => x.id === e.id ? { ...x, status, updated_at: new Date().toISOString().slice(0, 19) } : x);
-  if (st.evDone[e.id]) { delete st.evDone[e.id]; store.set("spc2_ev_done", st.evDone); }
   logValidation("event_saved", e.boutiques[0] || "", e.skus.map(x => x.sku), STATUS_TXT[status].toLowerCase() + " : « " + e.title + " »");
   saveEvents(all, "Événement " + STATUS_TXT[status].toLowerCase()); render();
 }
@@ -1364,7 +1397,7 @@ function eventForm(d) {
     qtyBox,
     d.type === "store_request" ? f("Qui a demandé", text(d.requested_by, v => { d.requested_by = v; }, { placeholder: "Prénom ou rôle, pas d'email" })) : null,
     f("Description", text(d.description, v => { d.description = v; })),
-    f("Statut", select(d.status, [["active", "Actif"], ["draft", "Brouillon"]], v => { d.status = v; })),
+    f("Statut", select(d.status === "done" ? "active" : d.status, [["active", "Selon les dates"], ["draft", "Brouillon"], ["cancelled", "Annulé"]], v => { d.status = v; })),
     el("div", "row", { style: "margin-top:10px" },
       el("button", { class: "btn primary", id: "ev_f_save", onclick: () => { if (!withQty) d.quantities = []; if (!conv) d.skus = d.skus.map(x => ({ sku: x.sku, multiple: x.multiple ?? null })); submitEvent(d, box); } }, "Enregistrer"),
       el("button", { class: "btn", onclick: () => { st.evEdit = null; render(); } }, "Fermer")),
@@ -1409,23 +1442,21 @@ function evPanel(e, day) {
     out.push(st.taken.has(e.id) ? el("div", "", el("div", "msg ok", "Repris : appliqué à tes commandes."), el("button", { class: "btn", onclick: () => takeOver(e, false) }, "Ne plus appliquer"))
       : el("button", { class: "btn primary", id: "ev_take", style: "width:100%", onclick: () => takeOver(e, true) }, "Reprendre"));
   } else if (e.type === "store_request" && e.status === "active") {
-    out.push(el("button", { class: "btn", id: "ev_done", style: "width:100%", onclick: () => {
-      st.evDone[e.id] = { by: st.author || "Planner non renseigné", at: new Date().toISOString() }; store.set("spc2_ev_done", st.evDone);
-      logValidation("close_request", e.boutiques[0] || "", e.skus.map(x => x.sku), "terminée depuis Événements SKU"); st.overrides = {}; render(); } }, "Terminer la demande"));
+    out.push(el("button", { class: "btn", id: "ev_done", style: "width:100%", disabled: !!evCanStop(e, evToday()), onclick: () => { st.overrides = {}; stopEvent(e, true, "demande terminée"); } }, "Terminer la demande"));
   }
   if (mine) out.push(el("div", "two", { style: "margin-top:8px" },
     el("button", { class: "btn primary", id: "ev_edit", onclick: () => { st.evEdit = JSON.parse(JSON.stringify(e)); render(); } }, "Modifier"),
-    el("button", { class: "btn", id: "ev_dup", onclick: () => { const c = JSON.parse(JSON.stringify(e)); delete c.id; c.title = e.title + " (copie)"; c.status = "active"; c.planner = c.scope === "personal" ? (st.author || c.planner) : c.planner; st.evEdit = c; render(); } }, "Dupliquer"),
-    el("button", { class: "btn", id: "ev_end", disabled: e.status === "done", onclick: () => setEventStatus(e, "done") }, "Terminer"),
+    el("button", { class: "btn", id: "ev_dup", onclick: () => { const c = JSON.parse(JSON.stringify(e)); delete c.id; c.title = e.title + " (copie)"; c.status = "active"; c.stopped_by = ""; c.stopped_on = null; c.end_before_stop = null; c.planner = c.scope === "personal" ? (st.author || c.planner) : c.planner; st.evEdit = c; render(); } }, "Dupliquer"),
+    e.stopped_on ? el("button", { class: "btn", id: "ev_reactivate", title: "Efface la fin posée par « Terminer » (remet la fin prévue, ou sans fin)", onclick: () => stopEvent(e, false) }, "Réactiver")
+      : el("button", { class: "btn", id: "ev_end", disabled: !!evCanStop(e, evToday()), title: evCanStop(e, evToday()) || "Fin = aujourd'hui, noté dans l'historique", onclick: () => stopEvent(e, true) }, "Terminer"),
     el("button", { class: "btn", id: "ev_cancel", disabled: e.status === "cancelled", onclick: () => setEventStatus(e, "cancelled") }, "Annuler l'événement")));
-  if (st.evDone[e.id]) out.push(el("p", "small muted", "Terminé par " + st.evDone[e.id].by + " le " + st.evDone[e.id].at.slice(0, 16).replace("T", " ") + ".",
-    el("button", { class: "btn link", style: "margin-left:6px", onclick: () => { delete st.evDone[e.id]; store.set("spc2_ev_done", st.evDone); render(); } }, "Réactiver (démo)")));
-  if (hist.length) out.push(el("h3", "", "Historique"), el("ul", "list small", hist.map(v => el("li", "", v.at.slice(0, 16).replace("T", " ") + " · " + v.who + " · " + (v.kind === "takeover" ? "repris" : v.kind === "event_saved" ? v.note : "terminé")))));
+  if (e.stopped_on) out.push(el("p", "small muted", "Terminé manuellement par " + (e.stopped_by || "—") + " le " + fdate(e.stopped_on) + "."));
+  if (hist.length) out.push(el("h3", "", "Historique"), el("ul", "list small", hist.map(v => el("li", "", v.at.slice(0, 16).replace("T", " ") + " · " + v.who + " · " + (v.kind === "takeover" ? "repris" : v.note || "terminé")))));
   if (st.evMsg) { out.push(el("div", "msg err", st.evMsg)); st.evMsg = null; }
   return el("div", "card evpanel", out);
 }
 function renderEvents() {
-  const day = RUN(), all = evAll(), me = st.author;
+  const day = evToday(), all = evAll(), me = st.author;
   const applied = all.filter(appliesToMe);
   const active = applied.filter(e => ["Actif", "Bloqué"].includes(evStatus(e, day))).length;
   const week = addDays(day, 7), soon = applied.filter(e => evStatus(e, day) === "À venir" && activeFrom(e) <= week).length;

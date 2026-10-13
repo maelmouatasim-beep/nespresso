@@ -13,7 +13,7 @@ import streamlit as st
 from app.domain.events import SkuEvent
 from app.engines.events import store_requests_done
 from app.storage import events as store
-from app.ui.common import author, db_conn, ss
+from app.ui.common import author, db_conn, ss, today
 
 
 def trace(boutique: str, delivery: date, kind: str, skus: list[str], note: str = "") -> None:
@@ -31,11 +31,9 @@ def requests_after_export(events: list[SkuEvent]) -> None:
 def _close_request(event_id: int, close: bool) -> None:
     ss.requests_to_close = [i for i in ss.requests_to_close if i != event_id]
     if close:
-        from app.domain.events import EventStatus
-
         with db_conn() as conn:
-            store.set_status(conn, event_id, EventStatus.DONE,
-                             author() or "Planner non renseigné", "commande exportée")  # fmt: skip
+            store.stop_event(conn, event_id, author() or "Planner non renseigné", today(),
+                             "commande exportée")  # fmt: skip
 
 
 def close_requests_prompt() -> None:

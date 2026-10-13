@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 import streamlit as st
@@ -18,12 +19,13 @@ from app.domain.events import (
     ALL,
     ALLOWED_EFFECTS,
     EFFECT_LABELS,
+    FORM_STATUS_LABELS,
+    FORM_STATUSES,
     NO_END,
     PERSONAL_EDITABLE_BY_OTHERS,
     PERSONAL_ONLY,
     QTY_EFFECTS,
     SCOPE_LABELS,
-    STATUS_LABELS,
     TYPE_LABELS,
     EventEffect,
     EventQty,
@@ -34,7 +36,14 @@ from app.domain.events import (
     SkuEvent,
     default_lead_days,
 )
-from app.engines.events import ACTIVE, ENDED, applies_to_planner, days_left, time_state
+from app.engines.events import (
+    ACTIVE_LABEL,
+    ENDED_LABEL,
+    applies_to_planner,
+    can_stop,
+    date_status,
+    days_left,
+)
 from app.ingestion.business_events import events_from_business
 from app.ingestion.events import (
     build_catalog,
@@ -58,6 +67,7 @@ from app.ui.common import (
     planners,
     run_date,
     ss,
+    today,
     workspace,
 )
 
@@ -81,14 +91,11 @@ SOON_DAYS = 3
 
 
 def display_status(e: SkuEvent, day: date) -> str:
-    if e.status is not EventStatus.ACTIVE:
-        return STATUS_LABELS[e.status]
-    state = time_state(e, day)
-    if state == ENDED:
-        return "Terminé"
-    if state == ACTIVE:
-        return "Bloqué" if e.effect is EventEffect.BLOCK else "Actif"
-    return "À venir"
+    """Statut calculé à partir des dates (D-054), `day` = date du jour réelle."""
+    label = date_status(e, day)
+    if label == ACTIVE_LABEL and e.effect is EventEffect.BLOCK:
+        return "Bloqué"
+    return label
 
 
 def _status_group(label: str) -> str:
@@ -98,7 +105,7 @@ def _status_group(label: str) -> str:
 
 def _ends_soon(e: SkuEvent, day: date) -> bool:
     left = days_left(e, day)
-    return left is not None and 0 <= left <= SOON_DAYS and display_status(e, day) != "Terminé"
+    return left is not None and 0 <= left <= SOON_DAYS and display_status(e, day) != ENDED_LABEL
 
 
 def _targets_text(e: SkuEvent) -> str:
@@ -155,7 +162,7 @@ def _frame(events: list[SkuEvent], day: date) -> pd.DataFrame:
             "Titre": e.title,
             "SKU": f"{len(skus)} : {', '.join(skus[:3])}" + (" …" if len(skus) > 3 else ""),
             "Boutiques": _targets_text(e),
-            "Début": e.start,
+            "Début": fmt_date(e.start),
             "Fin": fmt_date(e.end) if e.end else ("prochaine commande" if e.until_next_order
                                                   else NO_END),  # fmt: skip
             "Jours restants": float("nan") if left is None else float(max(left, 0)),
@@ -166,9 +173,7 @@ def _frame(events: list[SkuEvent], day: date) -> pd.DataFrame:
             "Modifié le": e.updated_at,
             "Tous les SKU": ", ".join(skus),
         })  # fmt: skip
-    df = pd.DataFrame(rows, columns=COLUMNS)
-    df["Début"] = pd.to_datetime(df["Début"])
-    return df
+    return pd.DataFrame(rows, columns=COLUMNS)
 
 
 COLUMN_CONFIG = {
@@ -182,7 +187,7 @@ COLUMN_CONFIG = {
     "SKU": st.column_config.TextColumn(width=190, help="Nombre de SKU et les 3 premiers ; "
                                        "la liste complète est dans « Tous les SKU »"),
     "Boutiques": st.column_config.TextColumn(width=110),
-    "Début": st.column_config.DateColumn(format="DD/MM/YYYY", width=95),
+    "Début": st.column_config.TextColumn(width=95),
     "Fin": st.column_config.TextColumn(width=105, help="« sans fin » : effectif à partir du "
                                        "début, jusqu'à ce qu'il soit terminé"),
     "Jours restants": st.column_config.NumberColumn("Restant (j)", width=85, format="%d"),
@@ -591,10 +596,12 @@ def _form(proto: SkuEvent | None, scope_default: EventScope, me: str) -> SkuEven
         planner = st.selectbox("Planner responsable", names_list, key=_k("planner"),
                                index=names_list.index(planner_now) if planner_now else None,
                                placeholder="Choisir")  # fmt: skip
-        statuses = list(EventStatus)
-        status = st.selectbox("Statut", statuses, key=_k("status"),
-                              index=statuses.index(proto.status if proto else EventStatus.ACTIVE),
-                              format_func=lambda x: STATUS_LABELS[x])  # fmt: skip
+        statuses = list(FORM_STATUSES)
+        now_status = proto.status if proto and proto.status in statuses else EventStatus.ACTIVE
+        status = st.selectbox("Statut", statuses, key=_k("status"), index=statuses.index(now_status),
+                              format_func=lambda x: FORM_STATUS_LABELS[x],
+                              help="À venir, actif ou terminé suit les dates. Brouillon et "
+                                   "Annulé seulement à la main ; « Terminer » arrête aujourd'hui.")  # fmt: skip
     if errors:
         for err in errors:
             st.error(err)
@@ -611,6 +618,7 @@ def _form(proto: SkuEvent | None, scope_default: EventScope, me: str) -> SkuEven
             status=status, requested_by=requested_by.strip(), requested_on=requested_on,
             until_next_order=until_next, created_by=proto.created_by if proto else "",
             created_at=proto.created_at if proto else None,
+            **_kept_stop(proto, end),
         )  # fmt: skip
     except ValidationError as exc:
         for err in exc.errors():
@@ -641,10 +649,35 @@ def _set_status(event: SkuEvent, status: EventStatus) -> None:
     st.rerun()
 
 
+def _kept_stop(proto: SkuEvent | None, end: date | None) -> dict[str, Any]:
+    """Un arrêt manuel reste tracé tant que la fin saisie est celle de l'arrêt."""
+    if proto is None or proto.id is None or proto.stopped_on is None or end != proto.end:
+        return {}
+    return {"stopped_by": proto.stopped_by, "stopped_on": proto.stopped_on,
+            "end_before_stop": proto.end_before_stop}  # fmt: skip
+
+
+def _stop(event: SkuEvent, on: bool) -> None:
+    """« Terminer » (fin = aujourd'hui) ou « Réactiver » (efface cette fin), tracés."""
+    me = author()
+    if not me:
+        st.error("Choisis ton prénom (Planner, barre de gauche).")
+        return
+    with db_conn() as conn:
+        if on:
+            store.stop_event(conn, event.id or 0, me, today())
+        else:
+            store.reactivate_event(conn, event.id or 0, me)
+    ss.base = None  # la commande doit être recalculée
+    _open(event.id)
+    st.rerun()
+
+
 def _duplicate(event: SkuEvent) -> None:
     copy = event.model_copy(update={"id": None, "title": f"{event.title} (copie)",
                                     "status": EventStatus.ACTIVE, "created_by": "",
-                                    "created_at": None, "updated_at": None})  # fmt: skip
+                                    "created_at": None, "updated_at": None, "stopped_by": "",
+                                    "stopped_on": None, "end_before_stop": None})  # fmt: skip
     _open("new", copy)
 
 
@@ -775,9 +808,18 @@ def _panel(events: dict[int, SkuEvent], tab: str, me: str) -> None:
         st.rerun()
     if proto is not None and proto.id is not None:
         c3, c4 = st.columns(2)
-        if c3.button("Terminer", key=_k("done"), width="stretch",
-                     disabled=proto.status is EventStatus.DONE):  # fmt: skip
-            _set_status(proto, EventStatus.DONE)
+        if proto.stopped_on is not None:
+            st.caption(f"Terminé manuellement par **{proto.stopped_by or '—'}** le "
+                       f"**{fmt_date(proto.stopped_on)}**.")  # fmt: skip
+            if c3.button("Réactiver", key=_k("reactivate"), width="stretch",
+                         help="Efface la fin posée par « Terminer » (remet la fin prévue, ou "
+                              "sans fin)"):  # fmt: skip
+                _stop(proto, False)
+        else:
+            why = can_stop(proto, today())
+            if c3.button("Terminer", key=_k("done"), width="stretch", disabled=why is not None,
+                         help=why or "Fin = aujourd'hui, noté dans l'historique"):  # fmt: skip
+                _stop(proto, True)
         if c4.button("Annuler l'événement", key=_k("cancel"), width="stretch",
                      disabled=proto.status is EventStatus.CANCELLED):  # fmt: skip
             _set_status(proto, EventStatus.CANCELLED)
@@ -874,7 +916,7 @@ def _legacy_block(me: str) -> None:
 
 def render() -> None:
     me = author()
-    day = run_date()
+    day = today()
     events = all_events()
     by_id = {e.id: e for e in events if e.id is not None}
     team = [e for e in events if e.scope is EventScope.TEAM]
@@ -893,7 +935,7 @@ def render() -> None:
 
     def tab_label(t: str) -> str:
         group = team if t == TEAM_TAB else mine
-        n = sum(1 for e in group if display_status(e, day) not in ("Terminé", "Annulé"))
+        n = sum(1 for e in group if display_status(e, day) not in (ENDED_LABEL, "Annulé"))
         return f"{t} ({n})"
 
     tab = st.segmented_control("Onglet", (TEAM_TAB, MINE_TAB), default=TEAM_TAB, key="ev_tab",

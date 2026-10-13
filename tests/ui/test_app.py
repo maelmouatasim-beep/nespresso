@@ -12,10 +12,21 @@ APP = str(Path(__file__).resolve().parents[2] / "app" / "ui" / "main.py")
 PAGES = ("1. Dépôt du jour", "2. Commandes", "3. Export", "4. Événements SKU",
          "5. Référentiels", "6. Historique")  # fmt: skip
 ORDERS, EXPORT, EVENTS, REFS = PAGES[1], PAGES[2], PAGES[3], PAGES[4]
+TODAY = date(2026, 10, 12)  # « aujourd'hui » figé : le statut des événements en dépend (D-054)
+
+
+def freeze_today(monkeypatch, day: date = TODAY) -> None:  # noqa: ANN001
+    import app.ui.common
+    import app.ui.gate
+    import app.ui.screens.events
+
+    for module in (app.ui.common, app.ui.gate, app.ui.screens.events):
+        monkeypatch.setattr(module, "today", lambda: day)
 
 
 @pytest.fixture
 def app(tmp_path, monkeypatch) -> AppTest:
+    freeze_today(monkeypatch)
     monkeypatch.setenv("COPILOT_DATA_DIR", str(tmp_path / "data"))
     monkeypatch.setenv("COPILOT_DB", str(tmp_path / "test.db"))
     at = AppTest.from_file(APP, default_timeout=90)
@@ -243,7 +254,7 @@ def test_events_page_two_tabs_and_demo_events(app: AppTest) -> None:
     next(b for b in app.button_group if b.key == "evs_status_Équipe").set_value("Tous").run()
     team = ev_grid(app)
     assert set(team["Titre"]) == {"Festive AOS Oct 14-21", "Lancement Advent", "Arrêt 7928.70"}
-    assert set(team["Statut"]) == {"● À venir", "● Bloqué"}
+    assert set(team["Statut"]) == {"● Actif", "● Bloqué"}
     tab.set_value("Mes événements").run()
     mine = ev_grid(app)
     assert list(mine["Titre"]) == ["Demande B80"] and mine["Portée"][0] == "○ Personnel · Camille"
@@ -346,13 +357,17 @@ def test_store_request_ends_after_export_with_confirmation(app: AppTest) -> None
     app.session_state["requests_to_close"] = [4]  # ce que fait le clic sur « Télécharger »
     app.run()
     app.button(key="close_req_4").click().run()
-    from app.domain.events import EventStatus
+    from app.engines.events import date_status
     from app.storage import db
     from app.storage import events as store
 
     conn = db.connect()
-    assert store.get_event(conn, 4).status is EventStatus.DONE
-    assert store.event_history(conn, 4)[0]["action"] == "terminé (commande exportée)"
+    event = store.get_event(conn, 4)
+    assert event.end == TODAY and event.stopped_by == "Camille"
+    assert date_status(event, TODAY) == "Terminé"
+    assert store.event_history(conn, 4)[0]["action"] == (
+        "terminé manuellement par Camille le 12 oct. 2026 (commande exportée)"
+    )
 
 
 def test_quantity_change_counts_immediately_with_deduced_context(app: AppTest) -> None:
@@ -602,3 +617,28 @@ def test_event_end_date_is_optional(app: AppTest) -> None:
     next(b for b in app.button_group if b.key == "evs_status_Équipe").set_value("Tous").run()
     grid = ev_grid(app)
     assert grid.loc[grid["Titre"] == "Promo sans fin", "Fin"].iloc[0] == "sans fin"
+
+
+def test_event_status_follows_dates_and_manual_stop(app: AppTest) -> None:
+    """D-054 : statut daté ; « Terminer » met la fin à aujourd'hui, « Réactiver » l'efface."""
+    app.selectbox(key="author").set_value("Sami").run()
+    goto(app, EVENTS)
+    app.session_state["ev_edit"] = 3  # « Arrêt 7928.70 », sans fin
+    app.run()
+    assert by_suffix(app.selectbox, "_status").options == ["Selon les dates", "Brouillon", "Annulé"]
+    by_suffix(app.button, "_done").click().run()
+    assert not app.exception, app.exception
+    next(b for b in app.button_group if b.key == "evs_status_Équipe").set_value("Tous").run()
+    grid = ev_grid(app)
+    row = grid[grid["Titre"] == "Arrêt 7928.70"].iloc[0]
+    assert row["Statut"] == "● Terminé" and row["Fin"] == "12 oct. 2026"
+    from app.storage import db
+    from app.storage import events as store
+
+    assert store.event_history(db.connect(), 3)[0]["action"] == (
+        "terminé manuellement par Sami le 12 oct. 2026"
+    )
+    by_suffix(app.button, "_reactivate").click().run()
+    grid = ev_grid(app)
+    row = grid[grid["Titre"] == "Arrêt 7928.70"].iloc[0]
+    assert row["Statut"] == "● Bloqué" and row["Fin"] == "sans fin"

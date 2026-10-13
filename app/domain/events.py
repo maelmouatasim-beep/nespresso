@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, timedelta
 from enum import StrEnum
+from typing import Any
 
 from pydantic import Field, model_validator
 
@@ -50,6 +51,10 @@ class EventEffect(StrEnum):
 
 
 class EventStatus(StrEnum):
+    """Seuls Brouillon et Annulé sont manuels (D-054). ACTIVE = « selon les dates » : à
+    venir, actif ou terminé se calculent (`date_status`). DONE ne sert plus qu'à relire les
+    anciens événements, convertis à la lecture en arrêt manuel daté."""
+
     DRAFT = "draft"
     ACTIVE = "active"
     DONE = "done"
@@ -82,6 +87,13 @@ STATUS_LABELS = {
     EventStatus.DRAFT: "Brouillon",
     EventStatus.ACTIVE: "Actif",
     EventStatus.DONE: "Terminé",
+    EventStatus.CANCELLED: "Annulé",
+}
+# Choix du formulaire (D-054) : le statut daté n'est jamais choisi à la main.
+FORM_STATUSES = (EventStatus.ACTIVE, EventStatus.DRAFT, EventStatus.CANCELLED)
+FORM_STATUS_LABELS = {
+    EventStatus.ACTIVE: "Selon les dates",
+    EventStatus.DRAFT: "Brouillon",
     EventStatus.CANCELLED: "Annulé",
 }
 
@@ -120,6 +132,19 @@ OPEN_END_TYPES = frozenset(EventType)
 NO_END = "sans fin"
 # Types à confirmer explicitement avant l'export (« à inclure »).
 INCLUDE_TYPES = frozenset({EventType.LAUNCH, EventType.URGENT, EventType.STORE_REQUEST})
+
+
+def _as_day(value: Any) -> date | None:
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    if isinstance(value, str) and value:
+        try:
+            return date.fromisoformat(value[:10])
+        except ValueError:
+            return None
+    return None
 
 
 def default_lead_days(event_type: EventType) -> int:
@@ -204,6 +229,26 @@ class SkuEvent(_Frozen):
     created_by: str = ""
     created_at: datetime | None = None
     updated_at: datetime | None = None
+    # Arrêt manuel (D-054) : « Terminer » met la fin à aujourd'hui ; « Réactiver » remet
+    # la fin prévue avant l'arrêt (vide = sans fin).
+    stopped_by: str = ""
+    stopped_on: date | None = None
+    end_before_stop: date | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _legacy_done(cls, data: Any) -> Any:
+        """Ancien statut « Terminé » (manuel) → arrêt manuel daté du jour de la modification."""
+        if not isinstance(data, dict) or str(data.get("status", "")) != EventStatus.DONE.value:
+            return data
+        start, end = _as_day(data.get("start")), _as_day(data.get("end"))
+        on = _as_day(data.get("updated_at")) or end or start
+        if start is None or on is None:
+            return data
+        if on < start:
+            return {**data, "status": EventStatus.CANCELLED.value}
+        return {**data, "status": EventStatus.ACTIVE.value, "stopped_on": on,
+                "end": min(end, on) if end else on, "end_before_stop": end}  # fmt: skip
 
     @model_validator(mode="after")
     def _check(self) -> SkuEvent:

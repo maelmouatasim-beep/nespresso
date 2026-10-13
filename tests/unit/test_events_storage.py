@@ -58,17 +58,50 @@ def test_event_history_keeps_who_changed_what(conn) -> None:  # noqa: ANN001
     saved = store.save_event(conn, e, "Camille")
     assert saved.id == 1 and saved.created_by == "Camille" and saved.created_at
     store.save_event(conn, saved.model_copy(update={"title": "Festive AOS v2"}), "Sami")
-    store.set_status(conn, 1, EventStatus.DONE, "Sami")
+    store.set_status(conn, 1, EventStatus.CANCELLED, "Sami")
     store.log_takeover(conn, 1, "Léa")
     hist = store.event_history(conn, 1)
-    assert [h["action"] for h in hist] == ["repris", "terminé", "modifié", "créé"]
+    assert [h["action"] for h in hist] == ["repris", "annulé", "modifié", "créé"]
     assert hist[2]["author"] == "Sami" and hist[2]["changes"]["title"] == [
         "Festive AOS Oct 14-21", "Festive AOS v2"]  # fmt: skip
     again = store.get_event(conn, 1)
-    assert again is not None and again.status is EventStatus.DONE
+    assert again is not None and again.status is EventStatus.CANCELLED
     assert again.created_by == "Camille" and again.skus[0].sku == "7072.70"
     with pytest.raises(ValueError, match="Choisis ton nom"):
         store.save_event(conn, e, " ")
+
+
+def test_manual_stop_then_reactivate_is_traced(conn) -> None:  # noqa: ANN001
+    """D-054 : « Terminer » met la fin à aujourd'hui (historique), « Réactiver » l'efface."""
+    from app.engines.events import date_status
+
+    fg = SkuEvent(scope=EventScope.TEAM, type=EventType.PROMOTION, title="Free Gift (FG)",
+                  skus=(EventSku(sku="7005.70"),), start=date(2026, 10, 6),
+                  end=date(2026, 10, 22), effect=EventEffect.FLAG)  # fmt: skip
+    store.save_event(conn, fg, "Camille")
+    today = date(2026, 10, 12)
+    stopped = store.stop_event(conn, 1, "Sami", today)
+    assert stopped.end == today and stopped.stopped_by == "Sami"
+    assert stopped.end_before_stop == date(2026, 10, 22)
+    assert date_status(stopped, today) == "Terminé"
+    action = store.event_history(conn, 1)[0]["action"]
+    assert action == "terminé manuellement par Sami le 12 oct. 2026"
+    back = store.reactivate_event(conn, 1, "Sami")
+    assert back.end == date(2026, 10, 22) and back.stopped_on is None
+    assert date_status(back, today) == "Actif"
+    assert store.event_history(conn, 1)[0]["action"] == "réactivé (fin de l'arrêt effacée)"
+
+
+def test_old_done_status_becomes_a_dated_manual_stop() -> None:
+    """Un ancien événement « Terminé » (statut manuel) est relu comme un arrêt daté."""
+    base = {"scope": "team", "type": "promotion", "title": "Ancien", "effect": "flag",
+            "skus": [{"sku": "7005.70"}], "start": "2026-10-01", "status": "done"}  # fmt: skip
+    e = SkuEvent.model_validate({**base, "updated_at": "2026-10-09T10:00:00"})
+    assert e.status is EventStatus.ACTIVE and e.end == date(2026, 10, 9)
+    assert e.stopped_on == date(2026, 10, 9) and e.end_before_stop is None
+    early = SkuEvent.model_validate({**base, "start": "2026-11-01",
+                                     "updated_at": "2026-10-09T10:00:00"})  # fmt: skip
+    assert early.status is EventStatus.CANCELLED  # arrêté avant même de commencer
 
 
 def test_validations_are_traced(conn) -> None:  # noqa: ANN001
@@ -88,6 +121,34 @@ def test_template_exists_and_roundtrips_with_fictional_examples() -> None:
     advent = res.events[1]
     assert advent.skus[0].multiple == 6 and advent.dcs == ("CY1",) and advent.lead_days == 7
     assert res.events[3].until_next_order and res.events[3].scope is EventScope.PERSONAL
+
+
+def test_import_dates_are_day_month_year() -> None:
+    """D-054 : jour/mois/année (ou « 22 oct. 2026 ») ; mois d'abord, année à 2 chiffres et
+    statut « Terminé » refusés avec leur raison."""
+    fg = example_events()[-1]
+    wb = load_workbook(io.BytesIO(events_workbook([fg])))
+    ws = wb["Événements"]
+    head = [c.value for c in ws[1]]
+    assert ws.cell(2, head.index("Fin") + 1).value == "22/10/2026"
+    cases = {"22/10/2026": date(2026, 10, 22), "22 oct. 2026": date(2026, 10, 22),
+             "2026-10-22": date(2026, 10, 22), "10/22/2026": "jour/mois/année",
+             "22/10/26": "année sur 4 chiffres"}  # fmt: skip
+    for text, expected in cases.items():
+        ws.cell(2, head.index("Fin") + 1).value = text
+        buf = io.BytesIO()
+        wb.save(buf)
+        res = read_events_workbook(buf.getvalue(), "e.xlsx", "Camille")
+        if isinstance(expected, date):
+            assert res.events[0].end == expected, text
+        else:
+            assert expected in res.problems[0], (text, res.problems)
+    ws.cell(2, head.index("Fin") + 1).value = "22/10/2026"
+    ws.cell(2, head.index("Statut") + 1).value = "Terminé"
+    buf = io.BytesIO()
+    wb.save(buf)
+    res = read_events_workbook(buf.getvalue(), "e.xlsx", "Camille")
+    assert "mets une date de fin" in res.problems[0]
 
 
 def test_import_reports_incomplete_rows_instead_of_ignoring_them() -> None:

@@ -32,8 +32,12 @@ from app.engines.events import (
     LEAD,
     REASON_CONFLICT,
     UPCOMING,
+    can_stop,
+    date_status,
     export_check,
+    reactivate_event,
     select_for_order,
+    stop_event,
     store_requests_done,
     time_state,
 )
@@ -95,6 +99,50 @@ def test_active_upcoming_ended_with_lead_days() -> None:
     assert select_for_order([e], delivery=date(2026, 10, 15), **sel) == []
     assert select_for_order([e.model_copy(update={"status": EventStatus.DRAFT})],
                             delivery=DELIVERY, **sel) == []  # fmt: skip
+
+
+# --- Statut affiché selon les dates (D-054) ---------------------------------------------
+
+FREE_GIFT = dict(title="Free Gift (FG)", start=date(2026, 10, 6), end=date(2026, 10, 22))
+
+
+def test_status_upcoming_before_start_minus_lead() -> None:
+    e = ev(start=date(2026, 10, 20), end=date(2026, 10, 30), lead_days=5)  # actif dès le 15
+    assert date_status(e, date(2026, 10, 14)) == "À venir"
+    assert date_status(e, date(2026, 10, 15)) == "Actif"
+
+
+def test_status_active_until_end_or_without_end() -> None:
+    fg = ev(**FREE_GIFT)
+    assert date_status(fg, date(2026, 10, 12)) == "Actif"  # le bug : fin le 22, on est le 12
+    assert date_status(fg, date(2026, 10, 22)) == "Actif"  # le jour de fin compte
+    assert date_status(ev(start=date(2026, 9, 1), end=None), date(2027, 1, 1)) == "Actif"
+
+
+def test_status_ended_after_end_and_manual_statuses_win() -> None:
+    fg = ev(**FREE_GIFT)
+    assert date_status(fg, date(2026, 10, 23)) == "Terminé"
+    for status, label in ((EventStatus.DRAFT, "Brouillon"), (EventStatus.CANCELLED, "Annulé")):
+        assert date_status(fg.model_copy(update={"status": status}), date(2026, 10, 12)) == label
+
+
+def test_manual_stop_sets_end_today_and_reactivate_clears_it() -> None:
+    today = date(2026, 10, 12)
+    conv = (EventSku(sku="7005.70", new_sku="7006.70"),)
+    open_ended = ev(type=EventType.CONVERSION, effect=EventEffect.REPLACE, end=None, skus=conv,
+                    start=date(2026, 10, 1))  # fmt: skip
+    stopped = stop_event(open_ended, today, "Sami")
+    assert stopped.end == today and stopped.stopped_on == today and stopped.stopped_by == "Sami"
+    assert date_status(stopped, today) == "Terminé"  # tout de suite, pas seulement demain
+    sel = dict(boutique="B80", dc="CY1", planner="Camille")
+    assert select_for_order([stopped], delivery=date(2026, 10, 15), **sel) == []  # livraison
+    back = reactivate_event(stopped)
+    assert back.end is None and back.stopped_on is None and date_status(back, today) == "Actif"
+    fg = stop_event(ev(**FREE_GIFT), today, "Sami")
+    assert reactivate_event(fg).end == date(2026, 10, 22)  # la fin prévue revient
+    assert can_stop(ev(start=date(2026, 10, 20), end=None), today) is not None  # pas commencé
+    with pytest.raises(ValueError, match="Déjà terminé"):
+        stop_event(fg, today, "Sami")
 
 
 def test_launch_defaults_to_7_lead_days_and_end_is_optional_for_every_type() -> None:

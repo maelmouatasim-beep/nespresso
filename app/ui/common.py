@@ -11,6 +11,7 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
+from app.domain.dates import fr_date
 from app.domain.events import SkuEvent
 from app.domain.models import (
     ForecastMode,
@@ -118,6 +119,11 @@ def workspace() -> Workspace:
 
 def is_demo() -> bool:
     return ss.ws_kind == "Démo B80"
+
+
+def today() -> date:
+    """Date du jour réelle (statut des événements, arrêt manuel), même en démo (D-054)."""
+    return date.today()
 
 
 def run_date() -> date:
@@ -347,7 +353,8 @@ def fr_day(d: date) -> str:
 
 
 def fmt_date(d: date | datetime | None) -> str:
-    return "—" if d is None else d.strftime("%d/%m/%Y")
+    """« 22 oct. 2026 » (D-054)."""
+    return fr_date(d)
 
 
 def num(x: float | None) -> float:

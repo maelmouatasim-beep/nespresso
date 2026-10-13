@@ -32,6 +32,7 @@ from app.domain.events import (
     BUSINESS_EFFECTS,
     INCLUDE_TYPES,
     SCOPE_LABELS,
+    STATUS_LABELS,
     EventEffect,
     EventScope,
     EventSku,
@@ -76,6 +77,56 @@ def time_state(event: SkuEvent, day: date) -> str:
     if day >= event.active_from:
         return LEAD
     return UPCOMING
+
+
+# Statut affiché (D-054) : calculé à partir des dates et de la date du jour réelle.
+UPCOMING_LABEL, ACTIVE_LABEL, ENDED_LABEL = "À venir", "Actif", "Terminé"
+
+
+def date_status(event: SkuEvent, today: date) -> str:
+    """Brouillon / Annulé (manuels), sinon À venir / Actif / Terminé selon les dates.
+
+    À venir : aujourd'hui < début − anticipation. Actif : début − anticipation ≤ aujourd'hui
+    ≤ fin, ou fin vide. Terminé : aujourd'hui > fin, ou arrêté à la main (fin = jour de
+    l'arrêt, déjà passé ou aujourd'hui).
+    """
+    if event.status in (EventStatus.DRAFT, EventStatus.CANCELLED):
+        return STATUS_LABELS[event.status]
+    if event.end is not None and today > event.end:
+        return ENDED_LABEL
+    if event.stopped_on is not None and event.end is not None and today >= event.end:
+        return ENDED_LABEL
+    if today < event.active_from:
+        return UPCOMING_LABEL
+    return ACTIVE_LABEL
+
+
+def can_stop(event: SkuEvent, today: date) -> str | None:
+    """None si « Terminer » est possible, sinon la raison."""
+    if event.status is not EventStatus.ACTIVE:
+        return "Brouillon ou annulé : rien à terminer"
+    if date_status(event, today) == ENDED_LABEL:
+        return "Déjà terminé"
+    if today < event.start:
+        return "Pas encore commencé : utilise « Annuler l'événement »"
+    return None
+
+
+def stop_event(event: SkuEvent, today: date, planner: str) -> SkuEvent:
+    """« Terminer » : fin = aujourd'hui, arrêt tracé ; le statut suit ensuite les dates."""
+    why = can_stop(event, today)
+    if why:
+        raise ValueError(why)
+    return event.model_copy(update={"end": today, "stopped_by": planner, "stopped_on": today,
+                                    "end_before_stop": event.end})  # fmt: skip
+
+
+def reactivate_event(event: SkuEvent) -> SkuEvent:
+    """« Réactiver » : efface la fin posée par l'arrêt (remet la fin prévue, ou sans fin)."""
+    if event.stopped_on is None:
+        raise ValueError("Cet événement n'a pas été terminé à la main")
+    return event.model_copy(update={"end": event.end_before_stop, "stopped_by": "",
+                                    "stopped_on": None, "end_before_stop": None})  # fmt: skip
 
 
 def days_left(event: SkuEvent, day: date) -> int | None:

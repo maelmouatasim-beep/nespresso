@@ -13,7 +13,10 @@ from collections.abc import Iterable
 from datetime import date, datetime
 from typing import Any
 
+from app.domain.dates import fr_date
 from app.domain.events import EventStatus, SkuEvent
+from app.engines.events import reactivate_event as reactivate_engine
+from app.engines.events import stop_event as stop_event_engine
 
 # Champs qui ne comptent pas comme une modification dans l'historique.
 _META = {"id", "created_by", "created_at", "updated_at"}
@@ -167,6 +170,27 @@ def set_status(
         raise ValueError(f"Événement {event_id} introuvable")
     action = STATUS_ACTIONS[status] + (f" ({note})" if note else "")
     return save_event(conn, event.model_copy(update={"status": status}), author, action)
+
+
+def stop_event(
+    conn: sqlite3.Connection, event_id: int, author: str, today: date, note: str = ""
+) -> SkuEvent:
+    """« Terminer » (D-054) : fin = aujourd'hui, tracé dans l'historique."""
+    event = get_event(conn, event_id)
+    if event is None:
+        raise ValueError(f"Événement {event_id} introuvable")
+    action = f"terminé manuellement par {author} le {fr_date(today)}"
+    if note:
+        action += f" ({note})"
+    return save_event(conn, stop_event_engine(event, today, author), author, action)
+
+
+def reactivate_event(conn: sqlite3.Connection, event_id: int, author: str) -> SkuEvent:
+    """« Réactiver » (D-054) : efface la fin posée par l'arrêt manuel, tracé."""
+    event = get_event(conn, event_id)
+    if event is None:
+        raise ValueError(f"Événement {event_id} introuvable")
+    return save_event(conn, reactivate_engine(event), author, "réactivé (fin de l'arrêt effacée)")
 
 
 def log_takeover(conn: sqlite3.Connection, event_id: int, author: str) -> None:

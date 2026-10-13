@@ -11,16 +11,17 @@ import io
 import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date
 from typing import Any
 
 from pydantic import ValidationError
 
+from app.domain.dates import MONTHS as MONTHS_FR
 from app.domain.events import (
     ALL,
     EFFECT_LABELS,
+    FORM_STATUS_LABELS,
     SCOPE_LABELS,
-    STATUS_LABELS,
     TYPE_LABELS,
     EventEffect,
     EventQty,
@@ -98,13 +99,14 @@ README = [
     ("Portée", " / ".join(SCOPE_LABELS.values())),
     ("Type", " / ".join(TYPE_LABELS.values())),
     ("Effet", " / ".join(EFFECT_LABELS.values())),
-    ("Statut", " / ".join(STATUS_LABELS.values()) + " (vide = Actif)"),
+    ("Statut", "Selon les dates (vide) / Brouillon / Annulé. À venir, actif ou terminé se "
+               "calcule à partir des dates ; pour terminer, mets une date de fin."),
     ("SKU", "Liste séparée par virgule, point-virgule ou espace. Colonne au format TEXTE "
             "(sinon 7005.70 devient 7005.7)."),
     ("Boutiques", "Vide ou « Toutes » = toutes ; sinon codes séparés (B80, B19)."),
     ("DC", "Facultatif : MT1, TO1, CY1, VA1 (toutes les boutiques du DC)."),
-    ("Dates", "AAAA-MM-JJ ou JJ/MM/AAAA. Début obligatoire ; Fin facultative (vide = sans fin, "
-              "ex. une conversion effective à partir d'une date)."),
+    ("Dates", "Jour/mois/année : 22/10/2026 (ou une cellule date Excel). Début obligatoire ; Fin "
+              "facultative (vide = sans fin, ex. une conversion effective à partir d'une date)."),
     ("Qty", "« Qty (toutes boutiques) » ou, plus précis, l'onglet « Quantités » "
             "(Boutique vide ou * = toutes ; SKU vide = tous)."),
     ("Allocation", "Type Promotion, effet « Allocation officielle (vagues) » : Qty = total, "
@@ -129,7 +131,7 @@ _LABEL_TO = {
     "scope": {v.lower(): k for k, v in SCOPE_LABELS.items()},
     "type": {v.lower(): k for k, v in TYPE_LABELS.items()},
     "effect": {v.lower(): k for k, v in EFFECT_LABELS.items()},
-    "status": {v.lower(): k for k, v in STATUS_LABELS.items()},
+    "status": {v.lower(): k for k, v in FORM_STATUS_LABELS.items()} | {"actif": EventStatus.ACTIVE},
 }
 
 
@@ -139,7 +141,8 @@ def _codes(text: str) -> tuple[str, ...]:
 
 
 def _fmt_day(d: date | None) -> str:
-    return d.isoformat() if d else ""
+    """Jour / mois / année dans le classeur (D-054), relu tel quel à l'import."""
+    return d.strftime("%d/%m/%Y") if d else ""
 
 
 def example_events(business: bool = True) -> list[SkuEvent]:
@@ -195,6 +198,12 @@ def example_events(business: bool = True) -> list[SkuEvent]:
                  quantities=(EventQty(boutique="B80", sku="142172", qty=30, min_qty=20,
                                       max_qty=60),),
                  planner="Camille"),
+        # D-054 : actif du 6 au 22 oct. 2026 (le statut suit les dates, jamais « Terminé » avant).
+        SkuEvent(scope=EventScope.TEAM, type=EventType.PROMOTION, title="Free Gift (FG)",
+                 description="Pochette offerte à l'achat (exemple fictif)",
+                 skus=(EventSku(sku="100924"),), start=date(2026, 10, 6),
+                 end=date(2026, 10, 22), effect=EventEffect.FLAG, owner="Marketing (exemple)",
+                 planner="Camille"),
     ]  # fmt: skip
 
 
@@ -246,7 +255,8 @@ def events_workbook(events: Iterable[SkuEvent]) -> bytes:
             ", ".join(e.sku_codes()), ", ".join(e.boutiques) or ("" if e.dcs else "Toutes"),
             ", ".join(e.dcs), _fmt_day(e.start), _fmt_day(e.end), e.lead_days,
             EFFECT_LABELS[e.effect], single[0].qty if single else None, e.source_file, e.owner,
-            e.planner, STATUS_LABELS[e.status], e.requested_by, _fmt_day(e.requested_on),
+            e.planner, FORM_STATUS_LABELS.get(e.status, ""), e.requested_by,
+            _fmt_day(e.requested_on),
             NEXT_ORDER if e.until_next_order else "",
         ])  # fmt: skip
         for q in e.quantities:
@@ -304,15 +314,39 @@ def _records(raw: RawTable, columns: list[str]) -> list[tuple[int, dict[str, str
     raise ValueError(f"En-têtes introuvables (attendu : {', '.join(columns[:4])}…)")
 
 
+_FR_MONTHS = {m.rstrip("."): i for i, m in enumerate(MONTHS_FR, start=1)} | {
+    "janvier": 1, "fevr": 2, "février": 2, "fev": 2, "fév": 2, "avril": 4, "juillet": 7,
+    "aout": 8, "septembre": 9, "sep": 9, "octobre": 10, "novembre": 11, "décembre": 12,
+    "decembre": 12, "dec": 12,
+}  # fmt: skip
+
+
 def _day(text: str) -> date | None:
+    """Date du classeur : cellule date Excel, JJ/MM/AAAA (jour d'abord, jamais mois d'abord),
+    AAAA-MM-JJ ou « 22 oct. 2026 ». Année sur 2 chiffres refusée (ambiguë)."""
+    text = text.strip()
     if not text:
         return None
-    for fmt in ("%Y-%m-%d", "%d/%m/%Y"):
-        try:
-            return datetime.strptime(text.split("T")[0].split(" ")[0], fmt).date()
-        except ValueError:
-            continue
-    raise ValueError(f"date illisible « {text} » (AAAA-MM-JJ ou JJ/MM/AAAA)")
+    iso = re.fullmatch(r"(\d{4})-(\d{1,2})-(\d{1,2})(?:[T ].*)?", text)
+    dmy = re.fullmatch(r"(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})", text)
+    named = re.fullmatch(r"(\d{1,2})[\s-]+([^\W\d_]+)\.?[\s-]+(\d{2,4})", text)
+    try:
+        if iso:
+            return date(int(iso[1]), int(iso[2]), int(iso[3]))
+        if dmy or named:
+            m = dmy or named
+            assert m is not None
+            if len(m[3]) != 4:
+                raise ValueError(f"date « {text} » : année sur 4 chiffres (ex. 22/10/2026)")
+            month = int(m[2]) if dmy else _FR_MONTHS.get(m[2].lower())
+            if month is None:
+                raise ValueError(f"date « {text} » : mois inconnu")
+            return date(int(m[3]), month, int(m[1]))
+    except ValueError as exc:
+        if "date «" in str(exc):
+            raise
+        raise ValueError(f"date impossible « {text} » (jour/mois/année, ex. 22/10/2026)") from exc
+    raise ValueError(f"date illisible « {text} » (jour/mois/année, ex. 22/10/2026)")
 
 
 def _label(kind: str, text: str, default: Any = None) -> Any:
@@ -321,6 +355,9 @@ def _label(kind: str, text: str, default: Any = None) -> Any:
             raise ValueError(f"{_FIELD_NAMES[kind]} manquant")
         return default
     value = _LABEL_TO[kind].get(text.strip().lower())
+    if kind == "status" and text.strip().lower() == "terminé":
+        raise ValueError("« Terminé » n'est plus un statut à saisir : mets une date de fin "
+                         "(le statut suit les dates)")  # fmt: skip
     if value is None:
         raise ValueError(f"valeur inconnue « {text} »")
     return value
