@@ -193,6 +193,19 @@ def reactivate_event(conn: sqlite3.Connection, event_id: int, author: str) -> Sk
     return save_event(conn, reactivate_engine(event), author, "réactivé (fin de l'arrêt effacée)")
 
 
+def seed_events(conn: sqlite3.Connection, events: Iterable[SkuEvent], author: str) -> int:
+    """Ajoute les événements de départ absents (reconnus par leur fichier source), une seule
+    fois : un événement terminé ou annulé n'est pas recréé. Retourne le nombre ajouté."""
+    known = {e.source_file for e in list_events(conn) if e.source_file}
+    added = 0
+    for e in events:
+        if e.source_file and e.source_file not in known:
+            save_event(conn, e, author, "créé (données de départ)")
+            known.add(e.source_file)
+            added += 1
+    return added
+
+
 def log_takeover(conn: sqlite3.Connection, event_id: int, author: str) -> None:
     """« Reprendre » : un collègue applique l'événement personnel à sa session (tracé)."""
     with conn:

@@ -47,7 +47,7 @@ from app.ingestion.boutique_table import (  # noqa: E402
     build_boutique_rows,
 )
 from app.ingestion.depot import freshness  # noqa: E402
-from app.ingestion.events import DEMO_PLANNERS, example_events  # noqa: E402
+from app.ingestion.events import DEMO_PLANNERS, example_events, starter_events  # noqa: E402
 from app.ingestion.fixtures_loader import read_csv_records  # noqa: E402
 from app.ingestion.masters import all_boutiques, build_inputs_for_boutique  # noqa: E402
 from app.ingestion.product_table import ProductSources, build_product_rows  # noqa: E402
@@ -83,7 +83,7 @@ DEMO_EVENTS = tuple(
     e.model_copy(
         update={"id": i, "created_by": "Démo", "created_at": _CREATED, "updated_at": _CREATED}
     )
-    for i, e in enumerate(example_events(), 1)
+    for i, e in enumerate([*example_events(), *starter_events()], 1)
 )
 # « team » : événements d'équipe seulement ; « all » : + la demande boutique personnelle
 # (appliquée quand le planner est Camille, ou après « Reprendre »).

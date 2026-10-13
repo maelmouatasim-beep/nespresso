@@ -35,6 +35,7 @@ from app.ui.common import (  # noqa: E402
     reset_all,
     run_date,
     seed_demo_events,
+    seed_starter_events,
     ss,
     workspace,
 )
@@ -92,6 +93,7 @@ st.markdown(
 init_state()
 if is_demo():
     seed_demo_events()
+seed_starter_events()
 
 
 def _add_planner() -> None:

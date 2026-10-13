@@ -210,6 +210,33 @@ def example_events(business: bool = True) -> list[SkuEvent]:
 DEMO_PLANNERS = ("Camille", "Léa", "Sami")  # prénoms fictifs
 
 
+# Données de départ (outil installé ET démo) : listes réelles données par le planner, pas des
+# exemples. Ajoutées une seule fois par base (reconnues par leur fichier source), ensuite
+# modifiables, terminables ou annulables comme tout événement.
+STOP_LIST_SOURCE = "Liste planner du 13-oct-2026 : SKU à ne plus envoyer"
+STOP_LIST_SKUS = (
+    "146927", "146925", "160862", "128557",  # Festive Mugs, Tote Bags, Chocolates ; Recycling Bins
+    "130705", "3558", "123940", "157529",  # Barista Shaker, Wooden Tray, Cappuccino Kit, Towels
+    "3782", "143923", "165332", "134502",  # Recipe Glasses, Recipe Kit, Ice Cube, Espresso Set
+    "134506", "7921.70", "7069.70", "7990.70", "7923.70",  # Mug Set ; cafés arrêtés
+)  # fmt: skip
+
+
+def starter_events() -> list[SkuEvent]:
+    """Arrêt d'envoi, toutes les boutiques, sans fin. Début le 5 oct. 2026 (jour des données de
+    démonstration) pour que la démo le montre ; sans effet sur les vraies commandes, toutes
+    livrées après la date de la liste (13 oct. 2026)."""
+    return [
+        SkuEvent(scope=EventScope.TEAM, type=EventType.STOP, title="SKU à ne plus envoyer",
+                 description="Ne plus réapprovisionner (liste du planner, 13 oct. 2026). "
+                             "165332 Ice Cube tray Mandarin : sauf pour le BUNDLE. 7921.70 "
+                             "ORI-MO Tanzania : arrêté depuis le 13 juil.",
+                 skus=tuple(EventSku(sku=s) for s in STOP_LIST_SKUS), start=date(2026, 10, 5),
+                 end=None, effect=EventEffect.BLOCK, source_file=STOP_LIST_SOURCE,
+                 owner="Boutique Planning"),
+    ]  # fmt: skip
+
+
 def _qty_extra(q: EventQty) -> list[Any]:
     """Min, Max, Déjà envoyé, Vagues (%), Vague en cours ("" = non saisi)."""
     return [

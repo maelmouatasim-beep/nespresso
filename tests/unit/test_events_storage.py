@@ -171,3 +171,29 @@ def test_import_reports_incomplete_rows_instead_of_ignoring_them() -> None:
     assert len(res.problems) == 2
     assert "aucun SKU" in res.problems[0] and "Type bizarre" in res.problems[1]
     del Workbook
+
+
+def test_stop_list_is_seeded_once_as_a_team_stop_without_end(conn) -> None:  # noqa: ANN001
+    """Liste du planner du 13-oct-2026 : 17 SKU à ne plus envoyer, un seul Arrêt d'envoi."""
+    from app.ingestion.events import STOP_LIST_SKUS, starter_events
+
+    (e,) = starter_events()
+    assert e.type is EventType.STOP and e.effect is EventEffect.BLOCK
+    assert e.scope is EventScope.TEAM and e.all_boutiques and e.end is None
+    assert len(STOP_LIST_SKUS) == 17 and e.sku_codes() == list(STOP_LIST_SKUS)
+    assert all(isinstance(s, str) for s in e.sku_codes()) and "7921.70" in e.sku_codes()
+    assert "BUNDLE" in e.description
+    assert store.seed_events(conn, starter_events(), "Données de départ") == 1
+    store.set_status(conn, 1, EventStatus.CANCELLED, "Sami")
+    assert store.seed_events(conn, starter_events(), "Données de départ") == 0  # pas recréé
+    assert len(store.list_events(conn)) == 1
+
+
+def test_stop_list_skus_are_in_the_referential_except_165332() -> None:
+    """Rapprochement avec la Multiple list des fixtures (7921.7 → 7921.70)."""
+    from app.ingestion.events import STOP_LIST_SKUS
+
+    fixtures = Path(__file__).resolve().parents[1] / "fixtures" / "b80_2026-10-05"
+    lines = (fixtures / "master_multiples.csv").read_text(encoding="utf-8").splitlines()
+    known = {line.split(",")[0] for line in lines[1:]}
+    assert [s for s in STOP_LIST_SKUS if s not in known] == ["165332"]

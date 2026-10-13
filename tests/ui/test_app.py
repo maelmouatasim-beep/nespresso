@@ -85,9 +85,13 @@ def test_parity_mode_reproduces_excel_selection(app: AppTest) -> None:
     compute_b80(app, mode="Parité Excel")
     res = app.session_state["base"]
     # 451 lignes Excel + 2007.70 (question ouverte) + ADV-2026-CA, lancement fictif de la
-    # démo absent de la Stock Situation (un événement n'oublie jamais un SKU).
-    assert len(res.lines) == 453
-    assert "ADV-2026-CA" in {x.sku for x in res.lines}
+    # démo absent de la Stock Situation (un événement n'oublie jamais un SKU) + 130705, 157529
+    # et 165332, hors sélection Excel mais cités par « SKU à ne plus envoyer » (BLOCKED, 0).
+    assert len(res.lines) == 456
+    skus = {x.sku: x for x in res.lines}
+    assert "ADV-2026-CA" in skus
+    assert all(skus[s].qty == 0 and skus[s].status.value == "BLOCKED"
+               for s in ("130705", "157529", "165332"))  # fmt: skip
 
 
 def test_export_needs_planner_name(app: AppTest) -> None:
@@ -242,6 +246,14 @@ def by_suffix(elements, suffix: str):  # noqa: ANN001, ANN201
     return next(e for e in elements if e.key and e.key.endswith(suffix))
 
 
+def ev_id(title: str) -> int:
+    """N° d'un événement de la démo (les données de départ peuvent passer avant)."""
+    from app.storage import db
+    from app.storage import events as store
+
+    return next(e.id for e in store.list_events(db.connect()) if e.title == title)
+
+
 def ev_grid(at: AppTest):
     return next(d for d in at.dataframe if d.key and d.key.startswith("ev_grid_")).value
 
@@ -253,7 +265,8 @@ def test_events_page_two_tabs_and_demo_events(app: AppTest) -> None:
     tab.set_value("Équipe").run()
     next(b for b in app.button_group if b.key == "evs_status_Équipe").set_value("Tous").run()
     team = ev_grid(app)
-    assert set(team["Titre"]) == {"Festive AOS Oct 14-21", "Lancement Advent", "Arrêt 7928.70"}
+    assert set(team["Titre"]) == {"Festive AOS Oct 14-21", "Lancement Advent", "Arrêt 7928.70",
+                                  "SKU à ne plus envoyer"}  # données de départ  # fmt: skip
     assert set(team["Statut"]) == {"● Actif", "● Bloqué"}
     tab.set_value("Mes événements").run()
     mine = ev_grid(app)
@@ -290,11 +303,11 @@ def test_personal_event_applies_only_to_its_planner_until_taken_over(app: AppTes
     # Lecture seule pour Sami, puis « Reprendre »
     goto(app, EVENTS)
     next(b for b in app.button_group if b.key == "ev_tab").set_value("Mes événements").run()
-    app.session_state["ev_edit"] = 4
+    app.session_state["ev_edit"] = ev_id("Demande B80")
     app.run()
     assert any("lecture seule" in c.value for c in app.caption)
     by_suffix(app.button, "_take").click().run()
-    assert app.session_state["taken_over"] == {4}
+    assert app.session_state["taken_over"] == {ev_id("Demande B80")}
     compute_b80(app)
     lines = {x.sku: x for x in app.session_state["base"].lines}
     assert lines["7042.70"].qty == 1440  # 1200 + 240 demandés par la boutique
@@ -354,18 +367,19 @@ def test_export_waits_for_the_verify_tab_to_be_empty(app: AppTest) -> None:
 def test_store_request_ends_after_export_with_confirmation(app: AppTest) -> None:
     app.selectbox(key="author").set_value("Camille").run()
     compute_b80(app)
-    app.session_state["requests_to_close"] = [4]  # ce que fait le clic sur « Télécharger »
+    req = ev_id("Demande B80")
+    app.session_state["requests_to_close"] = [req]  # ce que fait le clic sur « Télécharger »
     app.run()
-    app.button(key="close_req_4").click().run()
+    app.button(key=f"close_req_{req}").click().run()
     from app.engines.events import date_status
     from app.storage import db
     from app.storage import events as store
 
     conn = db.connect()
-    event = store.get_event(conn, 4)
+    event = store.get_event(conn, req)
     assert event.end == TODAY and event.stopped_by == "Camille"
     assert date_status(event, TODAY) == "Terminé"
-    assert store.event_history(conn, 4)[0]["action"] == (
+    assert store.event_history(conn, req)[0]["action"] == (
         "terminé manuellement par Camille le 12 oct. 2026 (commande exportée)"
     )
 
@@ -623,7 +637,8 @@ def test_event_status_follows_dates_and_manual_stop(app: AppTest) -> None:
     """D-054 : statut daté ; « Terminer » met la fin à aujourd'hui, « Réactiver » l'efface."""
     app.selectbox(key="author").set_value("Sami").run()
     goto(app, EVENTS)
-    app.session_state["ev_edit"] = 3  # « Arrêt 7928.70 », sans fin
+    stop = ev_id("Arrêt 7928.70")  # sans fin
+    app.session_state["ev_edit"] = stop
     app.run()
     assert by_suffix(app.selectbox, "_status").options == ["Selon les dates", "Brouillon", "Annulé"]
     by_suffix(app.button, "_done").click().run()
@@ -635,7 +650,7 @@ def test_event_status_follows_dates_and_manual_stop(app: AppTest) -> None:
     from app.storage import db
     from app.storage import events as store
 
-    assert store.event_history(db.connect(), 3)[0]["action"] == (
+    assert store.event_history(db.connect(), stop)[0]["action"] == (
         "terminé manuellement par Sami le 12 oct. 2026"
     )
     by_suffix(app.button, "_reactivate").click().run()

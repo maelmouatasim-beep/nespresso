@@ -244,15 +244,24 @@ def planners() -> list[str]:
 def seed_demo_events() -> None:
     """Démo : 3 planners et 4 événements FICTIFS sur B80, créés une seule fois (sans les
     exemples d'allocation, de lancement et de stock cible, montrés dans la démo web)."""
-    from app.ingestion.events import DEMO_PLANNERS, example_events
+    from app.ingestion.events import DEMO_PLANNERS, STOP_LIST_SOURCE, example_events
 
     with db_conn() as conn:
-        if event_store.list_planners(conn) or event_store.list_events(conn):
+        others = [e for e in event_store.list_events(conn) if e.source_file != STOP_LIST_SOURCE]
+        if event_store.list_planners(conn) or others:
             return
         for name in DEMO_PLANNERS:
             event_store.add_planner(conn, name)
         for e in example_events(business=False):
             event_store.save_event(conn, e, "Démo")
+
+
+def seed_starter_events() -> None:
+    """Données de départ (outil installé et démo) : la liste « SKU à ne plus envoyer »."""
+    from app.ingestion.events import starter_events
+
+    with db_conn() as conn:
+        event_store.seed_events(conn, starter_events(), "Données de départ")
 
 
 def add_planner_and_select(name: str) -> str | None:
