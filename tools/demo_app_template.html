@@ -115,7 +115,7 @@ table.order tbody tr:hover td { background: var(--surface-2); }
 table.order td.q.modq { background: var(--mod-bg); }
 table.order td.q.modq input { color: var(--mod); font-weight: 700; background: var(--mod-bg); }
 table.order td.conf { text-align: center; } table.order td.conf input { width: 16px; height: 16px; cursor: pointer; }
-table.order tr.dcwarn td { background: var(--review-bg); }
+table.order td.dccap { background: var(--review-bg); color: #94600F; font-weight: 600; }  /* D-051 : plafonné au stock DC */
 .st.W { background: var(--review-bg); color: var(--review); white-space: normal; line-height: 1.15; }
 table.order td.cov-low { color: var(--blocked); font-weight: 600; }
 table.order td.cov-ok { color: var(--ok); }
@@ -286,8 +286,9 @@ const CATEGORY_FILTERS = ["Tous", ...DATA.category_names];
 // « Modifiées seulement » (case) = Qty finale différente de la Qty proposée, quel que soit le statut.
 const VERIFY = "À vérifier";
 const STATUS_FILTERS = [VERIFY, "OK", "Confirmées", "Toutes"];
-const MODES = { "Standard": "standard", "Parité Excel": "excel_parity" };
-const MODE_LABEL = { standard: "Standard", excel_parity: "Parité Excel" };
+// D-051 : le mode par défaut s'appelle « Safe » (plafond au stock DC) ; « Parité Excel » ne plafonne jamais.
+const MODES = { "Safe": "standard", "Parité Excel": "excel_parity" };
+const MODE_LABEL = { standard: "Safe", excel_parity: "Parité Excel" };
 // Deux sources : la démo (calculée d'avance) et « Mes fichiers » (moteur Python dans le navigateur).
 const todayISO = () => { const d = new Date(); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); };
 const DEMO = { live: false, run_date: M.run_date, boutiques: DATA.boutiques, quality: DATA.quality, dq: DATA.dq, period: M.period };
@@ -336,7 +337,7 @@ const st = {
   page: (p => PAGES.includes(p) ? p : PAGES[0])(store.get("spc2_page", PAGES[0])), author: store.get("spc_author", ""),
   // Commandes : une entrée par boutique ajoutée (onglet) ; la boutique affichée a son état dans st.* (ORDER_KEYS).
   tabs: null, active: null, order: null,
-  overrides: {}, roundNotes: [], seen: new Set(), dcWarn: new Set(), dcForced: new Set(), f: { cat: "Tous", status: VERIFY, qty: false, mod: false, ev: null }, sort: null, q: "", why: null, rowOrder: null, savedId: null, xmsg: null,
+  overrides: {}, roundNotes: [], seen: new Set(), f: { cat: "Tous", status: VERIFY, qty: false, mod: false, cap: false, ev: null }, sort: null, q: "", why: null, rowOrder: null, savedId: null, xmsg: null,
   showInactive: false,  // D-049 : « Afficher les SKU inactifs (N) »
   refTab: 0, source: "demo", busy: "", depotErr: [],
   // Événements : reprises (session seulement), demandes terminées, validations avant export.
@@ -380,7 +381,7 @@ function baseLine(j) {
   const [qty, raw, s, rids, multiple, msrc, source, fq, fbs, bzs, flags, evs] = t;
   const ev = (evs || []).map(([id, scope, ti, type, effect]) => ({ id, scope, title: T[ti], type, effect }));
   return { j, m, qty, raw, s, reasons: rids.map(i => T[i]), multiple, msrc: T[msrc], source, fq, fb: fbs < 0 ? null : T[fbs], biz: bzs < 0 ? null : T[bzs],
-           conv: !!(flags & 1), dcr: !!(flags & 2), cover: M.covers[ci], coffeeCover: m.coffee && o.coffee !== "", ev };
+           conv: !!(flags & 1), dcr: !!(flags & 2), cap: !!(flags & 4), cover: M.covers[ci], coffeeCover: m.coffee && o.coffee !== "", ev };
 }
 function finalLine(j) {
   const b = baseLine(j), ov = st.overrides[b.m.sku];
@@ -388,9 +389,18 @@ function finalLine(j) {
   // Le contexte déduit reste hors des raisons (affichées dans la table) : « Pourquoi » et Historique seulement (D-038).
   const reasons = [...b.reasons, "Modifié par " + ov.author + " : " + ov.before + " → " + ov.final + (ov.reason ? " (" + ov.reason + ")" : "")];
   if (ov.final !== ov.after) reasons.push("⚠ Saisie " + ov.after + " arrondie au multiple de " + (b.multiple || 1) + " : " + ov.final);
-  // D-039 : le statut ne change jamais quand la qty est modifiée ; seul « Confirmé » le change.
   if (b.s === "B" && ov.after > 0) reasons.push("Quantité saisie sur une ligne bloquée : à vérifier");
-  return { ...b, qty: ov.final, bq: b.qty, reasons, source: "override", fq: b.fq ?? b.qty, ov };
+  // D-039 : le statut ne change pas quand la qty est modifiée… sauf (D-051, mode Safe) une saisie
+  // au-dessus du stock DC : acceptée, mais la ligne passe en REVIEW « Dépasse le stock DC ».
+  let s = b.s; const over = overDc(b, ov.final);
+  if (over) { reasons.push(over); if (s === "O") s = "R"; }
+  return { ...b, qty: ov.final, bq: b.qty, s, reasons, source: "override", fq: b.fq ?? b.qty, ov };
+}
+function overDc(b, qty) {
+  if (st.order.mode !== "standard" || qty <= 0) return null;
+  const dc = b.m.dc;
+  if (dc === null || dc === undefined) return "Dépasse le stock DC : SKU absent du stock DC";
+  return dc < qty ? "Dépasse le stock DC (DC " + fmt(dc) + " < " + fmt(qty) + ")" : null;
 }
 // Même règle que le moteur d'overrides : la saisie est arrondie au multiple supérieur.
 function roundToMultiple(q, multiple) { const m = multiple > 0 ? multiple : 1; return Math.ceil(q / m) * m; }
@@ -398,10 +408,6 @@ function allLines() { if (!st.order) return []; const n = V().sel.length; const 
 // D-049 : ancien SKU (tout à zéro, sans vente ni stock DC) masqué, sauf événement actif ou quantité saisie.
 function isInactive(x) { return !!x.m.inactive && !x.ev.length && x.qty <= 0; }
 function lines() { const all = allLines(); return st.showInactive ? all : all.filter(x => !isInactive(x)); }
-// D-048 : Qty finale > 0 et stock DC à 0, absent ou insuffisant.
-function dcShort(x) { return x.qty > 0 && (x.m.dc === null || x.m.dc === undefined || x.m.dc < x.qty); }
-function dcShortText(x) { return !x.m.dc ? "Stock DC : 0" : "Stock DC : " + fmt(x.m.dc) + " < " + fmt(x.qty); }
-const DC_NOTE = "Confirmé malgré DC à 0";
 function postCover(m, qty) { return m.sales > 0 ? (m.exp + qty) / m.sales * V().hd : null; }
 function summarize(ls) {
   const pal = { VL: 0, OL: 0, MACHINES: 0, OTHERS: 0 }, by = { O: 0, R: 0, B: 0 }; let units = 0, ordered = 0; const noPal = [];
@@ -688,8 +694,8 @@ function tableOf(head, rows, numCols = []) {
 // ---------- 2. Commandes ----------
 // Une boutique = une commande simple, plusieurs = une journée. Rien n'est présélectionné (plus de
 // Schedule). La boutique affichée garde son état dans st.* ; les autres onglets dans st.tabs.states.
-const ORDER_KEYS = ["order", "overrides", "seen", "confirmed", "dcWarn", "dcForced", "savedId", "why", "f", "sort", "q", "rowOrder", "roundNotes", "xmsg"];
-function emptyState() { return { order: null, overrides: {}, seen: new Set(), confirmed: new Set(), dcWarn: new Set(), dcForced: new Set(), savedId: null, why: null, f: { cat: "Tous", status: VERIFY, qty: false, mod: false, ev: null }, sort: null, q: "", rowOrder: null, roundNotes: [], xmsg: null }; }
+const ORDER_KEYS = ["order", "overrides", "seen", "confirmed", "savedId", "why", "f", "sort", "q", "rowOrder", "roundNotes", "xmsg"];
+function emptyState() { return { order: null, overrides: {}, seen: new Set(), confirmed: new Set(), savedId: null, why: null, f: { cat: "Tous", status: VERIFY, qty: false, mod: false, cap: false, ev: null }, sort: null, q: "", rowOrder: null, roundNotes: [], xmsg: null }; }
 function tabs() { if (!st.tabs || st.tabs.source !== st.source) { st.tabs = { source: st.source, list: [], params: {}, states: {}, computed: {}, errors: {} }; st.active = null; Object.assign(st, emptyState()); } return st.tabs; }
 function parkActive() { const t = tabs(); if (st.active && t.list.includes(st.active)) t.states[st.active] = Object.fromEntries(ORDER_KEYS.map(k => [k, st[k]])); }
 function activate(b) { if (b === st.active) return; parkActive(); Object.assign(st, tabs().states[b] || emptyState()); st.active = b; render(); }
@@ -826,32 +832,24 @@ function statusMatch(x, f) {
   if (isConf(x.m.sku)) return false;
   return f === VERIFY ? needsCheck(x) : !needsCheck(x);
 }
-// D-048 : une ligne DC à 0 (ou insuffisant) avec Qty finale > 0 n'est pas confirmée au premier
-// clic : elle passe en attente (orange, « confirmer quand même ? ») ; le second clic confirme,
-// tracé « Confirmé malgré DC à 0 ». Un lot (bulk : « Tout confirmer »…) les exclut toujours et les liste à part.
-function setConfirmed(skus, on, bulk) {
-  const ev = [], blocks = [], forced = [], held = [];
+function setConfirmed(skus, on) {
+  const ev = [], blocks = [];
   for (const sku of skus) {
-    const j = indexOfSku(sku), b = baseLine(j), x = finalLine(j), short = dcShort(x);
-    if (on && short && (bulk || !st.dcWarn.has(sku))) { st.dcWarn.add(sku); held.push(sku); continue; }
-    if (on) { st.seen.add(sku); st.dcWarn.delete(sku); if (short) { st.dcForced.add(sku); forced.push(sku); } }
-    else { st.seen.delete(sku); st.dcWarn.delete(sku); st.dcForced.delete(sku); }
+    const j = indexOfSku(sku), b = baseLine(j);
+    on ? st.seen.add(sku) : st.seen.delete(sku);
     if (b.s === "B" && b.ev.length) { if (st.confirmed.has(sku) !== on) blocks.push(sku); on ? st.confirmed.add(sku) : st.confirmed.delete(sku); }
     else if (b.ev.length) ev.push(sku);
   }
   if (ev.length) logValidation("seen", st.order.boutique, ev, on ? "" : "retiré");
   if (blocks.length) logValidation("confirm_block", st.order.boutique, blocks, on ? "" : "retiré");
-  if (forced.length) logValidation("confirm_dc0", st.order.boutique, forced, DC_NOTE);
-  if (held.length) st.roundNotes.push(held.length + " ligne(s) avec stock DC à 0 ou insuffisant, exclue(s) du lot : " + held.join(", ") + ". Coche « Confirmé » une seconde fois sur chacune pour confirmer quand même.");
-  return held;
 }
-function traceDc0(ls) { const skus = ls.filter(x => st.dcForced.has(x.m.sku) && dcShort(x)).map(x => x.m.sku); if (skus.length) logValidation("export_dc0", st.order.boutique, skus, DC_NOTE); }
 function matches(x) {
   const f = st.f;
   if (f.cat !== "Tous" && categoryOf(x.m) !== f.cat) return false;
   if (!statusMatch(x, f.status)) return false;
   if (f.qty && x.qty <= 0) return false;
   if (f.mod && !isMod(x)) return false;
+  if (f.cap && !x.cap) return false;  // « Plafonnés DC » (D-051)
   if (f.ev !== null && (!x.ev.length || (f.ev !== "all" && !x.ev.some(e => e.id === f.ev)))) return false;
   return !st.q || x.m.sku.toLowerCase().includes(st.q) || x.m.desc.toLowerCase().includes(st.q);
 }
@@ -938,13 +936,11 @@ function orderTable(rows, baseQty, keep) {
   const body = el("tbody");
   for (const x of rows) {
     const m = x.m, sku = m.sku;
-    const tr = el("tr", (st.why === sku ? "sel" : "") + (st.dcWarn.has(sku) && dcShort(x) ? " dcwarn" : ""));
+    const tr = el("tr", st.why === sku ? "sel" : "");
     tr.onclick = e => { if (e.target.closest("input,select")) return; openWhy(sku); };
     const shownQty = x.qty, conf = isConf(sku), mod = isMod(x);
-    const warn = st.dcWarn.has(sku) && dcShort(x);
-    const stCell = warn ? el("span", { class: "st W", title: "Second clic sur « Confirmé » pour confirmer quand même (tracé)" }, dcShortText(x) + " — confirmer quand même ?")
-      : el("span", "", conf ? el("span", "st O", "Confirmé") : el("span", "st " + x.s, STATUS[x.s]), mod ? el("span", { class: "modmark", title: "Qty finale modifiée" }, "●") : null);
-    const cb = el("input", { type: "checkbox", checked: conf, "aria-label": "Confirmé " + sku, title: warn ? "Stock DC à 0 ou insuffisant : cocher à nouveau pour confirmer quand même" : "Cocher = ligne vérifiée (Confirmé). Décocher pour la remettre à traiter." });
+    const stCell = el("span", "", conf ? el("span", "st O", "Confirmé") : el("span", "st " + x.s, STATUS[x.s]), mod ? el("span", { class: "modmark", title: "Qty finale modifiée" }, "●") : null);
+    const cb = el("input", { type: "checkbox", checked: conf, "aria-label": "Confirmé " + sku, title: "Cocher = ligne vérifiée (Confirmé). Décocher pour la remettre à traiter." });
     cb.onchange = () => { setConfirmed([sku], cb.checked); render(); };
     const qi = el("input", { type: "number", min: 0, step: x.multiple || 1, value: shownQty, "aria-label": "Qty finale " + sku });
     qi.onchange = () => { const v = Math.round(Number(qi.value)); if (!Number.isFinite(v) || v < 0) { qi.value = shownQty; return; } if (v !== shownQty) { applyOverride(sku, v); render(); } };
@@ -953,7 +949,7 @@ function orderTable(rows, baseQty, keep) {
     tr.append(...pick([el("td", "conf", cb), el("td", "", stCell), el("td", { class: "mono", title: sku }, sku), el("td", { title: m.desc }, m.desc || "—"),
       el("td", { class: "n", title: "Expected " + fmt(m.exp) }, fmt(m.exp)), el("td", { class: "n", title: incomingTitle(m) }, fmt(m.avail)), el("td", "n", fmt(m.sales)), el("td", "n", fmt(baseQty[sku])),
       el("td", "n q" + (mod ? " modq" : ""), qi), el("td", { class: "n", title: "Expected du jour " + fmt(m.exp) + " + Qty finale " + fmt(x.qty) }, fmt(m.exp + x.qty)), coverCell(x), el("td", "n", fmt(x.multiple)),
-      el("td", "n", m.dc === null ? "—" : fmt(m.dc)), el("td", { title: x.reasons.join("\n") || reasons, class: "small" }, reasons || "")]));
+      el("td", { class: "n" + (x.cap ? " dccap" : ""), title: x.cap ? "Qty proposée plafonnée au stock DC (mode Safe, multiple inférieur)" : "" }, m.dc === null ? "—" : fmt(m.dc)), el("td", { title: x.reasons.join("\n") || reasons, class: "small" }, reasons || "")]));
     body.append(tr);
   }
   t.append(body);
@@ -984,14 +980,15 @@ function orderBody() {
     segmented("", CATEGORY_FILTERS, st.f.cat, byCat, c => { st.f.cat = c; render(); }),
     el("label", "chk", el("input", { type: "checkbox", id: "f_qty", checked: st.f.qty, onchange: e => { st.f.qty = e.target.checked; render(); } }), "Qty > 0 seulement"),
     el("label", { class: "chk", title: "Qty finale différente de la Qty proposée, quel que soit le statut" }, el("input", { type: "checkbox", id: "f_mod", checked: st.f.mod, onchange: e => { st.f.mod = e.target.checked; render(); } }), "Modifiées seulement"),
+    el("label", { class: "chk", title: "Qty proposée plafonnée au stock DC disponible (mode Safe, D-051)" }, el("input", { type: "checkbox", id: "f_cap", checked: st.f.cap, onchange: e => { st.f.cap = e.target.checked; render(); } }), "Plafonnés DC (" + ls.filter(x => x.cap).length + ")"),
     el("div", "grow", search)));
   if (st.roundNotes.length) { st.roundNotes.forEach(n => out.push(el("div", "small", { style: "color:#94600F;margin:4px 0" }, "⚠ " + n))); st.roundNotes = []; }
   const shown = stableRows(ls.filter(matches), baseQty), todo = shown.filter(x => !isConf(x.m.sku)).map(x => x.m.sku);
-  // Un bouton de lot par onglet (D-039, D-050) ; les lignes DC à 0 sont toujours exclues du lot (D-048).
+  // Un bouton de lot par onglet (D-039, D-050).
   if (st.f.status === "OK") out.push(el("div", "row", { style: "margin:6px 0" },
-    el("button", { class: "btn", id: "accept_ok", onclick: () => { setConfirmed(ls.filter(x => x.s === "O" && !x.ev.length).map(x => x.m.sku), true, true); render(); } }, ic("checks"), "Accepter toutes les lignes OK")));
+    el("button", { class: "btn", id: "accept_ok", onclick: () => { setConfirmed(ls.filter(x => x.s === "O" && !x.ev.length).map(x => x.m.sku), true); render(); } }, ic("checks"), "Accepter toutes les lignes OK")));
   else if (st.f.status !== "Confirmées") out.push(el("div", "row", { style: "margin:6px 0" },
-    el("button", { class: "btn", id: "confirm_shown", disabled: !todo.length, onclick: () => { setConfirmed(todo, true, true); render(); } }, ic("check"), "Confirmer les lignes affichées (" + todo.length + ")")));
+    el("button", { class: "btn", id: "confirm_shown", disabled: !todo.length, onclick: () => { setConfirmed(todo, true); render(); } }, ic("check"), "Confirmer les lignes affichées (" + todo.length + ")")));
   out.push(shown.length ? orderTable(shown, baseQty) : el("div", "msg info", st.f.status === VERIFY && !pend.length ? "Rien à vérifier : toutes les lignes REVIEW, BLOCKED et flaguées sont confirmées." : "Aucune ligne pour ces filtres."));
   out.push(el("div", "row", { style: "justify-content:space-between;margin-top:8px" },
     el("span", "small muted", shown.length + " ligne(s) affichée(s) sur " + ls.length + " · lignes confirmées : " + ls.filter(x => isConf(x.m.sku)).length + " / " + ls.length + " · clic sur un en-tête pour trier, sur une ligne pour le détail · ",
@@ -1017,7 +1014,7 @@ function ltBlock(states) {
   out.push(el("div", "row",
     el("button", { class: "btn primary", id: "dl_lt", disabled: !st.author || pending.length > 0, onclick: async () => {
       const text = ltText(ls); if (!text) return box.replaceChildren(el("div", "msg info", "Aucune ligne à commander : pas de fichier LT."));
-      if (await offer(name, text, box, "Fichier « " + name + " » téléchargé (" + s.ordered + " lignes).")) { traceDc0(ls); saveRun(ls, name); st.toClose = [...new Set([...st.toClose, ...requests])]; st.xmsg = box.firstChild; render(); }
+      if (await offer(name, text, box, "Fichier « " + name + " » téléchargé (" + s.ordered + " lignes).")) { saveRun(ls, name); st.toClose = [...new Set([...st.toClose, ...requests])]; st.xmsg = box.firstChild; render(); }
     } }, "Télécharger le LT de " + b0),
     el("button", { class: "btn", id: "dl_zip", disabled: !st.author || waiting.length > 0, onclick: () => zipAll(states, box) }, "Télécharger tous les LT (zip, " + list.length + " boutique(s))")));
   if (waiting.length) out.push(el("p", "small muted", "Le zip attend que chaque boutique soit prête. Encore bloquée(s) : " + waiting.map(b => b + " : " + states[b].reason).join(" · ")));
@@ -1030,7 +1027,7 @@ async function zipAll(states, box) {
   for (const b of tabs().list) withState(b, () => {
     const ls = lines(), text = ltText(ls), name = ltName(b, now);
     states[b].base.forEach(x => x.ev.forEach(e => { if (e.type === "store_request" && !st.toClose.includes(e.id)) st.toClose.push(e.id); }));
-    if (text) { files.push([name, text]); traceDc0(ls); saveRun(ls, name); }
+    if (text) { files.push([name, text]); saveRun(ls, name); }
   });
   if (!files.length) return box.replaceChildren(el("div", "msg info", "Aucune ligne à commander."));
   await offer("LT " + now.getFullYear() + "-" + pad(now.getMonth() + 1) + "-" + pad(now.getDate()) + " " + pad(now.getHours()) + "_" + pad(now.getMinutes()) + ".zip", zipStore(files), box, files.length + " fichier(s) LT dans le zip.");
@@ -1095,6 +1092,7 @@ function steps(x) {
   } else out.push(["Pas de calcul : la ligne est bloquée (voir les raisons)"]);
   if (x.fb) out.push([x.fb]);
   if (x.biz) out.push([x.biz]);
+  if (x.cap) { const r = x.reasons.find(t => t.startsWith("Plafonné au stock DC")); if (r) out.push([r.replace(" (", " : ").replace(/\)$/, "") + " (multiple inférieur, mode Safe)"]); }
   if (x.ov) {
     out.push(["Modifié par " + x.ov.author + " le " + x.ov.ts.slice(0, 16).replace("T", " ") + " : " + fmt(x.ov.before) + " → " + fmt(x.ov.final) + (x.ov.reason ? " (" + x.ov.reason + ")" : "")]);
     if (x.ov.final !== x.ov.after) out.push(["Saisie " + fmt(x.ov.after) + " arrondie au multiple : ", fmt(x.ov.final)]);

@@ -133,6 +133,7 @@ def line_tuple(line: RecommendationLine, text: Strings) -> list[Any]:
     conv = bool(e["inputs"]["sales_from_old_skus"]) or "old_sku_blocked" in rules \
         or any("onversion" in x for x in line.reasons)  # fmt: skip
     flags = (1 if conv else 0) | (2 if ("dc_return" in rules or "dc_out_of_stock" in rules) else 0)
+    flags |= 4 if e.get("dc_cap") else 0  # D-051 : Qty proposée plafonnée au stock DC
     events = [[t["id"], t["scope"][0], text.id(t["title"]), t["type"], t["effect"]]
               for t in event_tags(line)]  # fmt: skip
     return [

@@ -36,8 +36,11 @@ PAGES = (
 )
 DEPOT, ORDER, EXPORT, EVENTS, REFS, HISTORY = PAGES
 
-MODES = {"Standard": ForecastMode.STANDARD, "Parité Excel": ForecastMode.EXCEL_PARITY}
-MODE_LABEL = {v.value: k for k, v in MODES.items()} | {"safe": "Standard"}
+# D-051 : le mode par défaut s'appelle « Safe » (plafond au stock DC) ; « Standard » reste
+# accepté pour les anciens paramètres et runs.
+MODES = {"Safe": ForecastMode.STANDARD, "Parité Excel": ForecastMode.EXCEL_PARITY}
+MODE_LABEL = {v.value: k for k, v in MODES.items()} | {"safe": "Safe"}
+DEFAULT_MODE = "Safe"
 # Statuts : pastille + texte. Couleurs de la charte (docs/charte_visuelle.md), contraste ≥ 4,5:1.
 # D-039 : le statut vient du calcul et ne change jamais quand la qty est modifiée ; seul un clic
 # « Confirmé » le fait passer à « Confirmé ». « modifié » est un marqueur, pas un statut.
@@ -49,7 +52,6 @@ CONFIRMED_MD = ":green[● Confirmé]"
 MODIFIED_MD = ":blue[· modifié]"
 MODIFIED_BG = "#E8F0FA"  # fond bleu très léger de la cellule Qty finale modifiée
 STATUS_COLORS = {  # texte, fond
-    "confirmer quand même": ("#94600F", "#FFF4DF"),  # D-048 : double confirmation DC à 0
     "Confirmé": ("#2A7449", "#E6F2EA"),
     "OK": ("#2A7449", "#E6F2EA"),
     "REVIEW": ("#94600F", "#FFF4DF"),
@@ -96,8 +98,6 @@ def init_state() -> None:
         "author": None,
         "taken_over": set(),  # événements personnels d'un collègue repris pour ma session
         "confirmed_blocks": set(),  # SKU bloqués par un événement, blocage confirmé
-        "dc_warn": set(),  # D-048 : premier clic « Confirmé » sur une ligne DC à 0, en attente
-        "dc_forced": set(),  # D-048 : lignes confirmées malgré DC à 0 (tracées à l'export)
         "show_inactive": False,  # D-049 : « Afficher les SKU inactifs »
         "include_ok": False,  # lancements / demandes à inclure confirmés
         "requests_to_close": [],  # demandes boutique à terminer après l'export
@@ -128,7 +128,6 @@ def run_date() -> date:
 def reset_order() -> None:
     ss.base, ss.overrides, ss.seen = None, {}, set()
     ss.confirmed_blocks, ss.include_ok = set(), False
-    ss.dc_warn, ss.dc_forced = set(), set()
     ss.saved_run_id, ss.why_sku = None, None
     ss.nonce += 1
 
@@ -141,8 +140,6 @@ ORDER_KEYS = (
     "overrides",
     "seen",
     "confirmed_blocks",
-    "dc_warn",
-    "dc_forced",
     "include_ok",
     "saved_run_id",
     "why_sku",
@@ -362,28 +359,21 @@ def is_confirmed(sku: str) -> bool:
     return sku in ss.seen or sku in ss.get("confirmed_blocks", set())
 
 
-def shown_status(sku: str, base_status: Status) -> str:
-    """« Confirmé » si le planner l'a coché, sinon le statut du calcul (D-039)."""
-    return "Confirmé" if is_confirmed(sku) else base_status.value
+def shown_status(sku: str, status: Status) -> str:
+    """« Confirmé » si le planner l'a coché, sinon le statut de la ligne (D-039). Le statut est
+    celui de la ligne finale : une saisie au-dessus du stock DC la passe en REVIEW (D-051)."""
+    return "Confirmé" if is_confirmed(sku) else status.value
 
 
 def status_cell(line: RecommendationLine, base: RecommendationLine) -> str:
-    """Statut de la ligne + marqueur « modifié » ; une modification ne change pas le statut."""
-    if line.sku in ss.get("dc_warn", set()) and dc_short(line):
-        return f"⚠ {dc_short_text(line)} — confirmer quand même ?"  # D-048
-    label = CONFIRMED if is_confirmed(line.sku) else STATUS_ICON[base.status.value]
+    """Statut de la ligne + marqueur « modifié »."""
+    label = CONFIRMED if is_confirmed(line.sku) else STATUS_ICON[line.status.value]
     return label + (MODIFIED_MARK if line.qty != base.qty else "")
 
 
-def dc_short(line: RecommendationLine) -> bool:
-    """Qty finale > 0 et stock DC à 0, absent ou insuffisant pour la couvrir (D-048)."""
-    dc = line.explanation["inputs"]["dc_available"]
-    return line.qty > 0 and (dc is None or dc < line.qty)
-
-
-def dc_short_text(line: RecommendationLine) -> str:
-    dc = line.explanation["inputs"]["dc_available"]
-    return "Stock DC : 0" if not dc else f"Stock DC : {fmt_int(dc)} < {fmt_int(line.qty)}"
+def is_capped(line: RecommendationLine) -> bool:
+    """Qty proposée plafonnée au stock DC (mode Safe, D-051)."""
+    return bool(line.explanation.get("dc_cap"))
 
 
 def is_inactive_line(line: RecommendationLine) -> bool:
@@ -560,7 +550,11 @@ def _cover_style(cover: float | None, target: float | None) -> str:
     return f"color: {COVER_LOW}; font-weight: 600" if cover < target else f"color: {COVER_OK}"
 
 
-def style_order_frame(df: pd.DataFrame, targets: dict[str, float | None] | None = None):  # noqa: ANN201 - pandas Styler
+CAPPED_STYLE = "background-color: #FFF4DF; color: #94600F; font-weight: 600"
+
+
+def style_order_frame(df: pd.DataFrame, targets: dict[str, float | None] | None = None,
+                      capped: set[str] | None = None):  # noqa: ANN201 - pandas Styler  # fmt: skip
     """Lignes alternées très légères + pastilles de statut colorées."""
     zebra = df.style.apply(
         lambda row: [f"background-color: {ZEBRA}" if row.name % 2 else ""] * len(row), axis=1
@@ -575,6 +569,11 @@ def style_order_frame(df: pd.DataFrame, targets: dict[str, float | None] | None 
                 for cover, sku in zip(col, df["SKU"], strict=True)
             ],
             subset=["Couverture"],
+        )
+    if "Stock DC" in df.columns and capped:  # D-051 : cellule orange quand la qty est plafonnée
+        zebra = zebra.apply(
+            lambda col: [CAPPED_STYLE if sku in capped else "" for sku in df["SKU"]],
+            subset=["Stock DC"],
         )
     # Marqueur « modifié » : fond bleu très léger sur la Qty finale qui diffère de la proposée.
     return zebra.apply(
@@ -599,7 +598,7 @@ def default_order(
 
     def key(x: RecommendationLine) -> tuple[bool, int, str]:
         b = base.get(x.sku, x)
-        return (b.status is Status.OK, -b.qty, x.sku)
+        return (x.status is Status.OK, -b.qty, x.sku)
 
     return sorted(lines, key=key)
 

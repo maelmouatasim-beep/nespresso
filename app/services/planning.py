@@ -1,7 +1,7 @@
 """Orchestration d'un run de planification. Aucune I/O : tout arrive déjà chargé.
 
 Étapes : sélection des lignes → prévision → arbitrage métier → événements SKU →
-overrides → palettes → règles boutique → résumé.
+plafond DC (mode Safe) → overrides → palettes → règles boutique → résumé.
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ from app.domain.models import (
     RecommendationLine,
     TargetStock,
 )
-from app.engines import business, events, forecast, selection
+from app.engines import business, dc_cap, events, forecast, selection
 from app.engines.anomalies import RunSummary, summarize
 from app.engines.forecast import ForecastInputs, compute_recommendations
 from app.engines.overrides import apply_overrides
@@ -34,6 +34,7 @@ RULE_VERSIONS = {
     "selection": selection.RULE_VERSION,
     "business": business.RULE_VERSION,
     "events": events.RULE_VERSION,
+    "dc_cap": dc_cap.RULE_VERSION,
 }
 
 
@@ -151,6 +152,8 @@ def run_planning(
     lines = events.apply_events(
         lines, active, boutique=b, delivery=params.delivery_date, problems=problems
     )
+    # D-051 : mode Safe → plafond au stock DC (prévision et quantités imposées) ; parité : rien.
+    lines = dc_cap.cap_to_dc(lines, mode)
     base = PlanningResult(
         params=params,
         mode=mode,

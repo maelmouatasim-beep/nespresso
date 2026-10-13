@@ -325,11 +325,14 @@ def compute_line(
     if expected_total < 0:
         flags.raise_to(Status.REVIEW, f"{REASON_NEGATIVE_EXPECTED} ({float(expected_total):g})")
 
-    # --- Stock DC (signalé, jamais plafonné) ---
+    # --- Stock DC ---
+    # Parité Excel : signalé (REVIEW), jamais plafonné, comme Excel. Mode Safe : la ligne est
+    # plafonnée au stock DC plus loin (`app/engines/dc_cap.py`, D-051) et garde son statut ;
+    # un SKU absent de l'export DC reste en REVIEW dans les deux modes (stock inconnu).
     if qty > 0:
         if dc_available is None:
             flags.raise_to(Status.REVIEW, f"{REASON_DC_INSUFFICIENT} : SKU absent du stock DC")
-        elif dc_available < qty:
+        elif dc_available < qty and mode is ForecastMode.EXCEL_PARITY:
             flags.raise_to(Status.REVIEW, f"{REASON_DC_INSUFFICIENT} ({dc_available:g} < {qty})")
 
     explanation: dict[str, Any] = {

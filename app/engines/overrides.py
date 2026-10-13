@@ -19,6 +19,7 @@ from app.domain.models import (
     RecommendationLine,
     Status,
 )
+from app.engines.dc_cap import over_dc
 from app.engines.forecast import ceiling_to_multiple
 
 
@@ -96,12 +97,21 @@ def apply_overrides(
             reasons.append(f"⚠ Saisie {ov.qty_after} arrondie au multiple de {multiple} : {final}")
         if line.status is Status.BLOCKED and ov.qty_after > 0:
             reasons.append("Quantité saisie sur une ligne bloquée : à vérifier")
+        # D-051 (mode Safe) : une saisie au-dessus du stock DC est acceptée, mais la ligne
+        # passe en REVIEW « Dépasse le stock DC » et doit être confirmée. Seule exception à
+        # « modifier ne change pas le statut » (D-039), demandée par le planner.
+        status, over = line.status, over_dc(line, final)
+        if over:
+            reasons.append(over)
+            if status is Status.OK:
+                status = Status.REVIEW
         explanation = dict(line.explanation)
         explanation["override"] = {**ov.model_dump(mode="json"), "qty_final": final}
         out.append(
             line.model_copy(
                 update={
                     "qty": final,
+                    "status": status,
                     "source": QtySource.OVERRIDE,
                     "forecast_qty": line.qty if line.forecast_qty is None else line.forecast_qty,
                     "reasons": reasons,

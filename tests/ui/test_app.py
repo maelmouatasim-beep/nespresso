@@ -35,7 +35,7 @@ def add_boutique(at: AppTest, boutique: str) -> None:
     assert not at.exception, at.exception
 
 
-def compute_b80(at: AppTest, mode: str = "Standard") -> None:
+def compute_b80(at: AppTest, mode: str = "Safe") -> None:
     if "B80" not in at.session_state["orders"]:
         add_boutique(at, "B80")
     goto(at, ORDERS)
@@ -117,7 +117,7 @@ def test_second_boutique_takes_first_parameters_and_keeps_each_order(app: AppTes
     assert any("Récapitulatif" in e.label for e in app.expander)  # replié par défaut (D-050)
     labels = {b.key: b.label for b in app.button if b.key and b.key.startswith("tab_open_")}
     assert labels[f"tab_open_{other}"] == f"○ {other} · à calculer"
-    assert labels["tab_open_B80"].endswith(" à vérifier") and "REVIEW" not in labels["tab_open_B80"]
+    assert labels["tab_open_B80"] == "● B80 · prête"  # tout l'onglet « À vérifier » confirmé
     # Le zip attend chaque boutique : celle qui n'est pas calculée est citée.
     app.selectbox(key="author").set_value("Camille").run()
     assert download(app, "Télécharger tous les LT").disabled
@@ -327,36 +327,18 @@ def test_export_waits_for_the_verify_tab_to_be_empty(app: AppTest) -> None:
     assert grid(app).set_index("SKU").loc[sku, "Statut"] == "● Confirmé"
     status_tab(app, "À vérifier")
     app.button(key="confirm_shown").click().run()  # « Confirmer les lignes affichées »
-    # D-048 : les lignes Qty finale > 0 avec stock DC à 0 ou insuffisant sont exclues du lot
-    # et restent dans l'onglet, en attente d'une seconde confirmation.
-    from app.ui.common import dc_short
-
-    held = grid(app)
-    by_sku = {x.sku: x for x in app.session_state["base"].lines}
-    assert set(held["SKU"]) == app.session_state["dc_warn"]
-    assert all(dc_short(by_sku[s]) for s in held["SKU"]) and 0 < len(held) < n
-    assert held["Statut"].str.contains("confirmer quand même").all()
-    assert download(app, "Télécharger le LT").disabled
-    app.button(key="confirm_shown").click().run()  # second lot : toujours exclues
-    assert len(grid(app)) == len(held)
-    for sku in held["SKU"]:  # seconde confirmation, une par une (« Confirmer la ligne »)
-        app.session_state["why_sku"] = sku
-        app.run()
-        app.button(key="why_seen").click().run()
+    # D-051 : plus de double confirmation DC à 0 (D-048) : tout l'onglet se confirme d'un coup.
     assert len(grid(app)) == 0
     assert any("Tout est confirmé" in m.value for m in app.markdown)
     assert not [b for b in app.button if b.key == "see_pending"]
-    assert app.session_state["dc_forced"] == set(held["SKU"])
+    assert "dc_warn" not in app.session_state
     assert not download(app, "Télécharger le LT").disabled
     assert not download(app, "Télécharger tous les LT").disabled  # une boutique prête
     from app.storage import db
     from app.storage import events as store
 
     validations = store.list_validations(db.connect(), "B80")
-    assert {v["kind"] for v in validations} == {"confirm_block", "seen", "confirm_dc0"}
-    dc0 = [v for v in validations if v["kind"] == "confirm_dc0"]
-    assert {s for v in dc0 for s in v["skus"]} == set(held["SKU"])  # tracé (D-048)
-    assert all(v["note"] == "Confirmé malgré DC à 0" for v in dc0)
+    assert {v["kind"] for v in validations} == {"confirm_block", "seen"}
 
 
 def test_store_request_ends_after_export_with_confirmation(app: AppTest) -> None:
@@ -544,3 +526,49 @@ def test_several_skus_picked_in_one_promotion(app: AppTest) -> None:
 
     saved = {e.title: e for e in store.list_events(db.connect())}["Promo plusieurs SKU"]
     assert saved.sku_codes() == ["7005.70", "7072.70", "7087.70"]
+
+
+def test_safe_mode_caps_to_dc_and_override_above_dc_needs_confirmation(app: AppTest) -> None:
+    """D-051 : plafond au stock DC (mode Safe, défaut), filtre « Plafonnés DC », saisie
+    au-dessus du DC → REVIEW « Dépasse le stock DC » ; parité Excel jamais plafonnée."""
+    from app.ui.common import is_inactive_line
+
+    app.selectbox(key="author").set_value("Camille").run()
+    assert app.session_state["orders"] == {}
+    compute_b80(app)
+    assert app.session_state["orders"]["B80"]["params"]["mode"] == "Safe"
+    lines = {x.sku: x for x in app.session_state["base"].lines}
+    capped = {
+        s for s, x in lines.items() if x.explanation.get("dc_cap") and not is_inactive_line(x)
+    }
+    assert capped
+    for s in capped:
+        cap = lines[s].explanation["dc_cap"]
+        assert lines[s].qty == cap["qty"] < cap["need"] and lines[s].qty % cap["multiple"] == 0
+        assert lines[s].qty <= cap["dc"] and lines[s].status.value != "BLOCKED"
+        assert not any("Stock DC insuffisant" in r for r in lines[s].reasons)
+    status_tab(app, "Toutes")
+    app.checkbox(key="f_cap").check().run()
+    df = grid(app).set_index("SKU")
+    assert set(df.index) == capped
+    assert df["Raisons"].str.contains("Plafonné au stock DC").all()
+    sku = next(s for s in capped if lines[s].status.value == "OK" and lines[s].qty > 0)
+    dc = lines[sku].explanation["inputs"]["dc_available"]
+    assert df.loc[sku, "Statut"] == "● OK"
+    # Saisie au-dessus du stock DC : acceptée, mais REVIEW, à confirmer avant l'export.
+    app.session_state["why_sku"] = sku
+    app.run()
+    above = int(lines[sku].qty + lines[sku].explanation["multiple"])
+    assert above > dc
+    app.number_input(key=f"dlg_qty_{sku}").set_value(above).run()
+    app.button(key="dlg_save").click().run()
+    row = grid(app).set_index("SKU").loc[sku]
+    assert (row["Statut"], row["Qty finale"]) == ("● REVIEW · modifié", above)
+    assert "Dépasse le stock DC" in row["Raisons"]
+    status_tab(app, "À vérifier")
+    assert sku in set(grid(app)["SKU"])
+    # Parité Excel : rien n'est plafonné, le signal REVIEW « Stock DC insuffisant » reste.
+    compute_b80(app, mode="Parité Excel")
+    par = {x.sku: x for x in app.session_state["base"].lines}
+    assert not any(x.explanation.get("dc_cap") for x in par.values())
+    assert any("Stock DC insuffisant" in r for x in par.values() for r in x.reasons)
