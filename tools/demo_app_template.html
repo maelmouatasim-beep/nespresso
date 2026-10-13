@@ -1248,7 +1248,7 @@ function canEdit(e) { return e.scope === "team" || DATA.others_editable || (!!st
 function newEvent(request) {
   const day = RUN();
   return request ? { scope: "personal", type: "store_request", title: "Demande B80", description: "", skus: [], boutiques: ["B80"], dcs: [], start: day, end: null, lead_days: 0, effect: "add_qty", quantities: [{ boutique: "*", sku: "*", qty: 0 }], planner: st.author, status: "active", requested_by: "", requested_on: day, until_next_order: true }
-    : { scope: st.evTab === "mine" ? "personal" : "team", type: "promotion", title: "", description: "", skus: [], boutiques: [], dcs: [], start: day, end: addDays(day, 7), lead_days: 0, effect: "flag", quantities: [], planner: st.author, status: "active", requested_by: "", requested_on: null, until_next_order: false };
+    : { scope: st.evTab === "mine" ? "personal" : "team", type: "promotion", title: "", description: "", skus: [], boutiques: [], dcs: [], start: day, end: null, lead_days: 0, effect: "flag", quantities: [], planner: st.author, status: "active", requested_by: "", requested_on: null, until_next_order: false };
 }
 function saveEvents(list, why) {
   EDIT.events = list;
@@ -1357,7 +1357,7 @@ function eventForm(d) {
       "Ancien>nouveau, séparés par des virgules (ex. 7882.70>7965.70)") : skuPicker(d),
     el("div", "two", f("Boutiques", text(d.boutiques.join(", "), v => { d.boutiques = splitList(v).map(x => x.toUpperCase()); }), "Vide = toutes"),
       f("DC", text(d.dcs.join(", "), v => { d.dcs = splitList(v).map(x => x.toUpperCase()); }), "MT1, TO1, CY1, VA1")),
-    el("div", "two", f("Début", date(d.start, v => { d.start = v; })), f("Fin", date(d.end, v => { d.end = v; }), "Vide : arrêt, interdiction, allocation ou stock cible jusqu'à nouvel ordre")),
+    el("div", "two", f("Début", date(d.start, v => { d.start = v; })), f("Fin", date(d.end, v => { d.end = v; }), "Facultative : vide = sans fin (effectif à partir du début, ex. une conversion)")),
     d.type === "store_request" ? el("label", "chk", el("input", { type: "checkbox", checked: d.until_next_order, onchange: e => { d.until_next_order = e.target.checked; } }), "Jusqu'à la prochaine commande") : null,
     el("div", "two", f("Effet", select(d.effect, effects.map(x => [x, EFFECT_LABELS[x]]), v => { d.effect = v; d.quantities = []; render(); })),
       f("Anticipation (j)", el("input", { type: "number", min: 0, max: 120, value: d.lead_days, oninput: e => { d.lead_days = +e.target.value || 0; } }))),
@@ -1394,10 +1394,10 @@ function takeOver(e, on) {
 }
 function evPanel(e, day) {
   const mine = canEdit(e);
-  const label = evStatus(e, day), until = e.end ? "au " + fdate(e.end) : (e.until_next_order ? "jusqu'à la prochaine commande" : "jusqu'à nouvel ordre");
+  const label = evStatus(e, day), until = e.end ? "au " + fdate(e.end) : (e.until_next_order ? "jusqu'à la prochaine commande" : "sans fin");
   const kv = [["Statut", el("span", "st " + EV_CLS[label], label)], ["Portée", evScope(e)], ["Type", TYPE_LABELS[e.type]],
     ["SKU", el("span", "mono", e.skus.map(x => x.sku + (x.multiple ? " (multiple " + x.multiple + ")" : "")).join(", "))], ["Boutiques", evTargets(e)],
-    ["Dates", fdate(e.start) + " → " + (e.end ? fdate(e.end) : "—")], ["Actif", "du " + fdate(activeFrom(e)) + " " + until + " (anticipation " + e.lead_days + " j comprise)"],
+    ["Dates", fdate(e.start) + " → " + (e.end ? fdate(e.end) : (e.until_next_order ? "prochaine commande" : "sans fin"))], ["Actif", "du " + fdate(activeFrom(e)) + " " + until + " (anticipation " + e.lead_days + " j comprise)"],
     ["Effet", evEffect(e)], ["Fichier source", e.source_file || "—"], ["Propriétaire", e.owner || "—"], ["Responsable", e.planner || "—"]];
   if (e.type === "store_request") kv.push(["Demandé par", (e.requested_by || "—") + (e.requested_on ? " le " + fdate(e.requested_on) : "")]);
   kv.push(["Créé", (e.created_by || "—") + (e.created_at ? " le " + fdate(e.created_at.slice(0, 10)) : "")]);
@@ -1463,7 +1463,7 @@ function renderEvents() {
     const label = evStatus(e, day), left = evDaysLeft(e, day), skus = e.skus.map(x => x.sku);
     const near = left !== null && left >= 0 && left <= 3 && label !== "Terminé";
     const tr = el("tr", st.evSel === e.id ? "sel" : "", el("td", "", el("span", "st " + EV_CLS[label], label)), el("td", "", evScope(e)), el("td", "", TYPE_LABELS[e.type]), el("td", { title: e.title }, e.title),
-      el("td", { title: skus.join(", ") }, skus.length + " : " + skus.slice(0, 3).join(", ") + (skus.length > 3 ? " …" : "")), el("td", "", evTargets(e)), el("td", "", fdate(e.start)), el("td", "", e.end ? fdate(e.end) : "—"),
+      el("td", { title: skus.join(", ") }, skus.length + " : " + skus.slice(0, 3).join(", ") + (skus.length > 3 ? " …" : "")), el("td", "", evTargets(e)), el("td", "", fdate(e.start)), el("td", "", e.end ? fdate(e.end) : (e.until_next_order ? "prochaine commande" : "sans fin")),
       el("td", "n", left === null ? "—" : String(Math.max(left, 0)), near ? el("span", { class: "st Y", style: "margin-left:6px" }, "Fin proche") : null), el("td", "", evEffect(e)), el("td", "", e.planner || "—"),
       el("td", { title: e.source_file }, e.source_file || "—"), el("td", "", e.updated_at ? fdate(e.updated_at.slice(0, 10)) : "—"));
     tr.onclick = () => { st.evSel = e.id; st.evEdit = null; render(); };

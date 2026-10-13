@@ -384,3 +384,11 @@ Format : contexte → décision → conséquence.
 - Correction du planner : la colonne « Expected + commande » disparaît. La colonne **Expected** affiche Available + Incoming + Qty finale : Qty finale 0 → l'Expected de la Stock Situation ; dès qu'une quantité est saisie, Expected monte en direct et la Couverture suit. Quand la Qty finale > 0, la cellule prend un léger fond bleu pour dire qu'elle inclut la commande en cours. Info-bulle de la cellule (démo web) et ligne du « Pourquoi » (outil installé, Streamlit n'a pas d'info-bulle par cellule) : « dispo 3 720 + en route 4 080 + commande 3 600 ».
 - **Affichage seulement** : le moteur part toujours de l'Expected de la Stock Situation (`inputs.expected_total`), parité 416/416 intacte, vérifiée.
 - Colonnes finales : Confirmé · (Détail) · Statut · SKU · Description · Available · Expected · Ventes · Qty proposée · Qty finale · Couverture · Multiple · Stock DC · Raisons (Available passe avant Expected). Outil installé et démo web.
+
+## D-053 — Date de fin facultative pour tous les événements SKU (2026-10-13)
+
+- Demande du planner : pouvoir mettre une fenêtre de dates ou non. Exemple : une conversion de SKU est effective à partir d'une date, sans fin.
+- La date de **début reste obligatoire**. La date de **fin est facultative pour tous les types** : vide = « sans fin », l'événement s'applique à partir du début (moins l'anticipation) jusqu'à ce que le planner le termine ou l'annule. Une fin avant le début reste refusée.
+- Affichage : « sans fin » dans la colonne Fin de la table, dans le panneau et dans le formulaire (« Fin (vide = sans fin) ») ; « prochaine commande » pour une demande boutique à cette échéance. Pas de « Fin proche » ni de jours restants sans date de fin.
+- Template Excel : colonne Fin vide acceptée pour tous les types (une ligne sans fin n'est plus rejetée à l'import).
+- Aucun changement de moteur ni de base (la fin était déjà facultative pour Arrêt, Interdiction, allocation et stock cible). Parité 416/416 inchangée. Même fonctionnement dans la démo web, où un nouvel événement démarre sans date de fin.

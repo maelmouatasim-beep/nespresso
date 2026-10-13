@@ -18,7 +18,7 @@ from app.domain.events import (
     ALL,
     ALLOWED_EFFECTS,
     EFFECT_LABELS,
-    OPEN_END_TYPES,
+    NO_END,
     PERSONAL_EDITABLE_BY_OTHERS,
     PERSONAL_ONLY,
     QTY_EFFECTS,
@@ -156,7 +156,8 @@ def _frame(events: list[SkuEvent], day: date) -> pd.DataFrame:
             "SKU": f"{len(skus)} : {', '.join(skus[:3])}" + (" …" if len(skus) > 3 else ""),
             "Boutiques": _targets_text(e),
             "Début": e.start,
-            "Fin": e.end,
+            "Fin": fmt_date(e.end) if e.end else ("prochaine commande" if e.until_next_order
+                                                  else NO_END),  # fmt: skip
             "Jours restants": float("nan") if left is None else float(max(left, 0)),
             "Alerte": "Fin proche" if _ends_soon(e, day) else "",
             "Effet": _effect_text(e),
@@ -166,8 +167,7 @@ def _frame(events: list[SkuEvent], day: date) -> pd.DataFrame:
             "Tous les SKU": ", ".join(skus),
         })  # fmt: skip
     df = pd.DataFrame(rows, columns=COLUMNS)
-    for col in ("Début", "Fin"):
-        df[col] = pd.to_datetime(df[col])
+    df["Début"] = pd.to_datetime(df["Début"])
     return df
 
 
@@ -183,8 +183,8 @@ COLUMN_CONFIG = {
                                        "la liste complète est dans « Tous les SKU »"),
     "Boutiques": st.column_config.TextColumn(width=110),
     "Début": st.column_config.DateColumn(format="DD/MM/YYYY", width=95),
-    "Fin": st.column_config.DateColumn(format="DD/MM/YYYY", width=95,
-                                       help="Vide = jusqu'à nouvel ordre / prochaine commande"),
+    "Fin": st.column_config.TextColumn(width=105, help="« sans fin » : effectif à partir du "
+                                       "début, jusqu'à ce qu'il soit terminé"),
     "Jours restants": st.column_config.NumberColumn("Restant (j)", width=85, format="%d"),
     "Alerte": st.column_config.TextColumn(width=90),
     "Effet": st.column_config.TextColumn(width=170),
@@ -545,11 +545,7 @@ def _form(proto: SkuEvent | None, scope_default: EventScope, me: str) -> SkuEven
                                  value=proto.until_next_order if proto else True, key=_k("next"))  # fmt: skip
     end = None
     if not until_next:
-        open_end = etype in OPEN_END_TYPES
-        hint = (" (vide = jusqu'à nouvel ordre)" if open_end
-                else " (vide permis pour une allocation)" if etype is EventType.PROMOTION
-                else " *")  # fmt: skip
-        end = c2.date_input("Fin" + hint,
+        end = c2.date_input("Fin (vide = sans fin)",
                             value=proto.end if proto else None, key=_k(f"end_{etype}"),
                             format="DD/MM/YYYY")  # fmt: skip
     same_type = proto is not None and proto.type is etype
@@ -562,7 +558,7 @@ def _form(proto: SkuEvent | None, scope_default: EventScope, me: str) -> SkuEven
         until = (
             f"au **{fmt_date(end)}**"
             if end
-            else ("jusqu'à la **prochaine commande**" if until_next else "jusqu'à **nouvel ordre**")
+            else ("jusqu'à la **prochaine commande**" if until_next else "**sans fin**")
         )
         st.caption(f"Actif du **{fmt_date(start - timedelta(days=int(lead)))}** {until} "
                    "(anticipation comprise)")  # fmt: skip
@@ -689,11 +685,7 @@ def _read_only(event: SkuEvent) -> None:
         + (
             f"au {fmt_date(event.end)}"
             if event.end
-            else (
-                "jusqu'à la prochaine commande"
-                if event.until_next_order
-                else "jusqu'à nouvel ordre"
-            )
+            else ("jusqu'à la prochaine commande" if event.until_next_order else NO_END)
         ),  # fmt: skip
         f"Effet : {_effect_text(event)}",
     ]

@@ -97,14 +97,19 @@ def test_active_upcoming_ended_with_lead_days() -> None:
                             delivery=DELIVERY, **sel) == []  # fmt: skip
 
 
-def test_launch_defaults_to_7_lead_days_and_open_end_only_for_stop_and_ban() -> None:
+def test_launch_defaults_to_7_lead_days_and_end_is_optional_for_every_type() -> None:
     from app.domain.events import default_lead_days
 
     assert default_lead_days(EventType.LAUNCH) == 7
     assert default_lead_days(EventType.PROMOTION) == 0
-    with pytest.raises(ValidationError, match="date de fin"):
-        ev(end=None)
+    # D-053 : fin vide = sans fin, pour tous les types (début obligatoire).
+    assert ev(end=None).in_window(date(2030, 1, 1))
     assert ev(type=EventType.BAN, effect=EventEffect.BLOCK, end=None).in_window(date(2030, 1, 1))
+    conv = ev(type=EventType.CONVERSION, effect=EventEffect.REPLACE, end=None,
+              skus=(EventSku(sku="7039.70", new_sku="7005.70"),))  # fmt: skip
+    assert conv.end is None and not conv.in_window(date(2026, 10, 1))
+    with pytest.raises(ValidationError, match="avant la date de début"):
+        ev(end=date(2026, 10, 1))
 
 
 def test_flag_is_applied_in_the_lead_window_with_a_note() -> None:

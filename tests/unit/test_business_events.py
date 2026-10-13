@@ -49,11 +49,10 @@ def test_quantity_fields_are_checked() -> None:
            quantities=(EventQty(qty=30, min_qty=40, max_qty=60),))  # fmt: skip
     with pytest.raises(ValidationError, match="au moins une quantité"):
         ev(type=EventType.TARGET_STOCK, effect=EventEffect.TARGET)
-    # Fin vide permise pour une allocation et un stock cible, pas pour un lancement.
+    # Fin vide permise pour tous les types (D-053).
     assert alloc_event().end is None
-    with pytest.raises(ValidationError, match="date de fin"):
-        ev(type=EventType.LAUNCH, effect=EventEffect.INITIAL_QTY, end=None,
-           quantities=(EventQty(qty=10),))  # fmt: skip
+    assert ev(type=EventType.LAUNCH, effect=EventEffect.INITIAL_QTY, end=None,
+              quantities=(EventQty(qty=10),)).end is None  # fmt: skip
 
 
 def test_allocation_event_gives_exactly_the_old_allocation() -> None:

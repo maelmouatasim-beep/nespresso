@@ -103,12 +103,13 @@ README = [
             "(sinon 7005.70 devient 7005.7)."),
     ("Boutiques", "Vide ou « Toutes » = toutes ; sinon codes séparés (B80, B19)."),
     ("DC", "Facultatif : MT1, TO1, CY1, VA1 (toutes les boutiques du DC)."),
-    ("Dates", "AAAA-MM-JJ ou JJ/MM/AAAA. Fin vide permise pour Arrêt et Interdiction."),
+    ("Dates", "AAAA-MM-JJ ou JJ/MM/AAAA. Début obligatoire ; Fin facultative (vide = sans fin, "
+              "ex. une conversion effective à partir d'une date)."),
     ("Qty", "« Qty (toutes boutiques) » ou, plus précis, l'onglet « Quantités » "
             "(Boutique vide ou * = toutes ; SKU vide = tous)."),
     ("Allocation", "Type Promotion, effet « Allocation officielle (vagues) » : Qty = total, "
                    "« Déjà envoyé », « Vagues (%) » (ex. 75/25, vide = une vague) et « Vague en "
-                   "cours » dans l'onglet « Quantités ». Fin vide permise. Remplace "
+                   "cours » dans l'onglet « Quantités ». Remplace "
                    "l'ancien allocations.xlsx."),
     ("Lancement", "Effet « Quantité initiale − Expected » : Qty = quantité initiale, Début = "
                   "date de lancement. Remplace l'ancien launches.xlsx."),

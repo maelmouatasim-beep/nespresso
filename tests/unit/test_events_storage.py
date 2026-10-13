@@ -105,9 +105,8 @@ def test_import_reports_incomplete_rows_instead_of_ignoring_them() -> None:
     buf = io.BytesIO()
     wb.save(buf)
     res = read_events_workbook(buf.getvalue(), "e.xlsx", "Camille")
-    assert [e.title for e in res.events] == ["OK"]
-    assert res.events[0].skus[0].sku == "0005452"
-    assert len(res.problems) == 3
-    assert "ligne 3" in res.problems[0] and "date de fin" in res.problems[0]
-    assert "aucun SKU" in res.problems[1] and "Type bizarre" in res.problems[2]
+    assert [e.title for e in res.events] == ["OK", "Sans fin"]  # fin vide permise (D-053)
+    assert res.events[0].skus[0].sku == "0005452" and res.events[1].end is None
+    assert len(res.problems) == 2
+    assert "aucun SKU" in res.problems[0] and "Type bizarre" in res.problems[1]
     del Workbook

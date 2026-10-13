@@ -577,3 +577,28 @@ def test_safe_mode_caps_to_dc_and_override_above_dc_needs_confirmation(app: AppT
     par = {x.sku: x for x in app.session_state["base"].lines}
     assert not any(x.explanation.get("dc_cap") for x in par.values())
     assert any("Stock DC insuffisant" in r for x in par.values() for r in x.reasons)
+
+
+def test_event_end_date_is_optional(app: AppTest) -> None:
+    """D-053 : une conversion est effective à partir d'une date, sans fin."""
+    app.selectbox(key="author").set_value("Léa").run()
+    goto(app, EVENTS)
+    app.button(key="ev_new").click().run()
+    by_suffix(app.text_input, "_title").input("Conversion sans fin").run()
+    by_suffix(app.selectbox, "_type_team").set_value("conversion").run()
+    assert by_suffix(app.date_input, "_end_conversion").label == "Fin (vide = sans fin)"
+    conv = next(d for d in app.dataframe if d.key and d.key.endswith("_conv"))
+    assert conv is not None
+    by_suffix(app.text_input, "_title").input("Promo sans fin").run()
+    by_suffix(app.selectbox, "_type_team").set_value("promotion").run()
+    by_suffix(app.multiselect, "_skus_pick").set_value(["7005.70"]).run()
+    by_suffix(app.button, "_save").click().run()
+    assert not app.exception, app.exception
+    from app.storage import db
+    from app.storage import events as store
+
+    saved = {e.title: e for e in store.list_events(db.connect())}["Promo sans fin"]
+    assert saved.end is None
+    next(b for b in app.button_group if b.key == "evs_status_Équipe").set_value("Tous").run()
+    grid = ev_grid(app)
+    assert grid.loc[grid["Titre"] == "Promo sans fin", "Fin"].iloc[0] == "sans fin"

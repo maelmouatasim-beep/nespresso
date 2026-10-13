@@ -114,8 +114,10 @@ PERSONAL_ONLY = frozenset({EventType.STORE_REQUEST, EventType.WATCH})
 # Un planner peut-il modifier l'événement Personnel d'un collègue ? (D-029 : non, seulement
 # « Reprendre ».) Voir docs/decision_log.md.
 PERSONAL_EDITABLE_BY_OTHERS = False
-# Fin vide = jusqu'à nouvel ordre (aussi pour une allocation : elle se termine à la main).
-OPEN_END_TYPES = frozenset({EventType.STOP, EventType.BAN, EventType.TARGET_STOCK})
+# Fin vide = sans fin, pour tous les types (D-053) : effectif à partir du début, jusqu'à ce
+# que le planner le termine (ex. une conversion de SKU).
+OPEN_END_TYPES = frozenset(EventType)
+NO_END = "sans fin"
 # Types à confirmer explicitement avant l'export (« à inclure »).
 INCLUDE_TYPES = frozenset({EventType.LAUNCH, EventType.URGENT, EventType.STORE_REQUEST})
 
@@ -217,12 +219,6 @@ class SkuEvent(_Frozen):
             raise ValueError(f"« {TYPE_LABELS[self.type]} » est réservé à la portée Personnel")
         if self.scope is EventScope.PERSONAL and not self.planner.strip():
             raise ValueError("Un événement personnel doit avoir son planner")
-        if self.end is None and not (
-            self.type in OPEN_END_TYPES
-            or self.effect is EventEffect.ALLOCATION
-            or (self.type is EventType.STORE_REQUEST and self.until_next_order)
-        ):
-            raise ValueError("La date de fin est obligatoire pour ce type d'événement")
         if self.end is not None and self.end < self.start:
             raise ValueError("La date de fin est avant la date de début")
         seen: set[str] = set()
